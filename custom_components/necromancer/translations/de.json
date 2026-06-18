@@ -1,0 +1,295 @@
+{
+  "title": "Necromancer",
+  "config": {
+    "abort": {
+      "already_configured": "Necromancer ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "PoE-Ports",
+        "description": "Lege hier die PoE-Ports deiner Switches an. Ein überwachtes Gerät mit der Strategie „Auto-PoE“ findet darüber automatisch seinen Port und startet ihn bei einem Ausfall durch kurzes Stromabschalten neu.\n\nAngelegte Ports:\n{ports}",
+        "menu_options": {
+          "add_port": "Port hinzufügen",
+          "edit_port": "Port ändern",
+          "delete_port": "Port entfernen",
+          "save": "Speichern"
+        }
+      },
+      "add_port": {
+        "title": "PoE-Port",
+        "description": "Ein PoE-Port: wie er geschaltet wird, woran das angeschlossene Gerät erkannt wird, wie sein Online-Status geprüft wird und welche Wartezeiten gelten.",
+        "data": { "label": "Port-Name" },
+        "sections": {
+          "power": {
+            "name": "Schalter",
+            "description": "Schalter, der den Strom (PoE) am Port unterbricht (z. B. eine schaltbare Steckdose oder ein PoE-Schalter).",
+            "data": { "actuator": "switch / input_boolean" }
+          },
+          "identity": {
+            "name": "Erkennung",
+            "description": "Woran Necromancer erkennt, welches Gerät an diesem Port hängt – über eine Entität, die das meldet, oder einen festen Wert (z. B. MAC, IP oder Name).",
+            "data": {
+              "id_entity": "Entität mit dem angeschlossenen Gerät (optional)",
+              "id_attribute": "Attribut dieser Entität (leer = Zustand)",
+              "id_static": "Oder fester Wert (wenn keine Entität)"
+            }
+          },
+          "status": {
+            "name": "Online-Status",
+            "description": "Woran Necromancer sieht, ob der Port online ist – um zu prüfen, ob das Aus- und Einschalten gewirkt hat (z. B. ein Ping- oder Erreichbarkeits-Sensor).",
+            "data": {
+              "status_entity": "Status-Entität (online/offline)",
+              "status_attribute": "Attribut dieser Entität (leer = Zustand)",
+              "status_on": "Wert, wenn online (z. B. on)",
+              "status_off": "Wert, wenn offline (z. B. off)"
+            }
+          },
+          "timing": {
+            "name": "Timing",
+            "description": "Wartezeiten beim Aus- und Einschalten des Ports.",
+            "data": {
+              "off_on_delay": "Wartezeit zwischen Aus und Ein",
+              "off_timeout": "Max. Wartezeit, bis offline",
+              "on_timeout": "Max. Wartezeit, bis online"
+            }
+          }
+        }
+      },
+      "edit_port": {
+        "title": "Welchen Port ändern?",
+        "description": "Wähle den Port, den du ändern möchtest.",
+        "data": { "port": "Port" }
+      },
+      "delete_port": {
+        "title": "Welchen Port entfernen?",
+        "description": "Wähle den Port, den du entfernen möchtest.",
+        "data": { "port": "Port" }
+      }
+    }
+  },
+  "config_subentries": {
+    "device": {
+      "title": "Überwachtes Gerät",
+      "entry_type": "Überwachtes Gerät",
+      "initiate_flow": {
+        "user": "Gerät hinzufügen",
+        "reconfigure": "Gerät neu konfigurieren"
+      },
+      "error": {
+        "no_self_link": "Necromancer-eigene Geräte können nicht verknüpft werden. Wähle ein anderes Gerät."
+      },
+      "abort": {
+        "reconfigure_successful": "Neukonfiguration erfolgreich."
+      },
+      "step": {
+        "user": {
+          "title": "Zustandsquelle",
+          "description": "Woran soll Necromancer erkennen, ob das Gerät in Ordnung ist — am Zustand einer Entität oder über ein Jinja-Template?",
+          "data": { "source_type": "Quellentyp" }
+        },
+        "reconfigure": {
+          "title": "Zustandsquelle",
+          "description": "Woran soll Necromancer erkennen, ob das Gerät in Ordnung ist — am Zustand einer Entität oder über ein Jinja-Template?",
+          "data": { "source_type": "Quellentyp" }
+        },
+        "device": {
+          "title": "Gerät & Zustand",
+          "description": "Gib dem Gerät einen Namen und lege fest, woran sein Zustand erkannt wird und was bei einem Problem passieren soll.",
+          "data": { "name": "Name", "mode": "Modus" },
+          "sections": {
+            "state_check": {
+              "name": "Zustandsprüfung",
+              "description": "Woran Necromancer erkennt, ob das Gerät in Ordnung ist (z. B. ein Ping- oder Erreichbarkeits-Sensor). Lässt du das Attribut leer, zählt der Zustand der Entität; jeder Wert außerhalb von „in Ordnung“/„gestört“ gilt als unbekannt und löst nichts aus.",
+              "data": {
+                "entity_id": "Entität, die den Zustand anzeigt",
+                "attribute": "Attribut (leer = Zustand der Entität)",
+                "on_value": "Wert für „in Ordnung“ (z. B. on, home, online)",
+                "off_value": "Wert für „gestört“ (z. B. off, unavailable)"
+              }
+            },
+            "template_check": {
+              "name": "Zustands-Template",
+              "description": "Ein Jinja-Template, das true (in Ordnung) oder false (gestört) ergibt – z. B. ein Vergleich wie „CPU < 90“ oder is_state(...). Es wird neu geprüft, sobald sich referenzierte Entitäten ändern. Ein leeres/unbekanntes Ergebnis oder ein Render-Fehler gilt als unbekannt (kein Fehlalarm).",
+              "data": { "template": "Template" }
+            },
+            "assigned_device": {
+              "name": "Zugewiesenes Gerät (optional)",
+              "description": "Hängt Necromancers Status-Entitäten an ein vorhandenes Gerät."
+            }
+          }
+        },
+        "strategy": {
+          "title": "Reparatur-Strategie",
+          "description": "Wie soll das Gerät wieder zum Laufen gebracht werden, wenn es ausfällt? „mit Health-Check“ wartet danach, bis das Gerät wieder „in Ordnung“ meldet; die einfachen Varianten nehmen an, dass die Aktion gewirkt hat.",
+          "data": { "strategy": "Strategie" }
+        },
+        "switch": {
+          "title": "Schalter aus- und einschalten",
+          "description": "Schaltet bei einem Ausfall einen Schalter aus und wieder ein. Die Zeiteinstellungen unten legen fest, wie lange vor dem Reagieren gewartet wird, wie lange auf die Erholung des Geräts gewartet wird und wie oft erneut versucht wird.",
+          "data": {
+            "switch_entity": "Schalter, der aus- und eingeschaltet wird (z. B. schaltbare Steckdose)",
+            "off_on_delay": "Wartezeit zwischen Aus und Ein"
+          },
+          "sections": {
+            "behavior": {
+              "name": "Verhalten",
+              "description": "Wann Necromancer reagiert und wie oft es wiederholt — die Standardwerte passen meist.",
+              "data": {
+                "debounce": "Wartezeit vor Reaktion",
+                "boot_window": "Warten, bis das Gerät wieder gesund ist",
+                "cooldown": "Pause nach einem Versuch",
+                "max_attempts": "Max. Versuche"
+              }
+            },
+            "notification": {
+              "name": "Benachrichtigung",
+              "description": "Optionale Aktion bei Problemen und Reparaturen. Verfügbare Jinja-Variablen (in doppelten geschweiften Klammern): message (die fertige, lokalisierte Meldung), name, event.",
+              "data": { "notify_action": "Aktion" }
+            }
+          }
+        },
+        "action": {
+          "title": "Aktion ausführen",
+          "description": "Führt bei einem Ausfall deine Aktion aus. Die Zeiteinstellungen unten legen fest, wie lange vor dem Reagieren gewartet wird, wie lange auf die Erholung des Geräts gewartet wird und wie oft erneut versucht wird.",
+          "data": { "action": "Aktion (z. B. Skript, Dienst, SSH, Webhook)" },
+          "sections": {
+            "behavior": {
+              "name": "Verhalten",
+              "description": "Wann Necromancer reagiert und wie oft es wiederholt — die Standardwerte passen meist.",
+              "data": {
+                "debounce": "Wartezeit vor Reaktion",
+                "boot_window": "Warten, bis das Gerät wieder gesund ist",
+                "cooldown": "Pause nach einem Versuch",
+                "max_attempts": "Max. Versuche"
+              }
+            },
+            "notification": {
+              "name": "Benachrichtigung",
+              "description": "Optionale Aktion bei Problemen und Reparaturen. Verfügbare Jinja-Variablen (in doppelten geschweiften Klammern): message (die fertige, lokalisierte Meldung), name, event.",
+              "data": { "notify_action": "Aktion" }
+            }
+          }
+        },
+        "actions": {
+          "title": "Aktionen Aus/Ein",
+          "description": "Führt bei einem Ausfall die Aus-Aktion, wartet, dann die Ein-Aktion aus. Die Zeiteinstellungen unten legen fest, wie lange vor dem Reagieren gewartet wird, wie lange auf die Erholung des Geräts gewartet wird und wie oft erneut versucht wird.",
+          "data": {
+            "off_action": "Aus-Aktion (Strom kappen / Gerät ausschalten)",
+            "on_action": "Ein-Aktion (Strom wiederherstellen / Gerät einschalten)",
+            "off_on_delay": "Wartezeit zwischen Aus und Ein"
+          },
+          "sections": {
+            "behavior": {
+              "name": "Verhalten",
+              "description": "Wann Necromancer reagiert und wie oft es wiederholt — die Standardwerte passen meist.",
+              "data": {
+                "debounce": "Wartezeit vor Reaktion",
+                "boot_window": "Warten, bis das Gerät wieder gesund ist",
+                "cooldown": "Pause nach einem Versuch",
+                "max_attempts": "Max. Versuche"
+              }
+            },
+            "notification": {
+              "name": "Benachrichtigung",
+              "description": "Optionale Aktion bei Problemen und Reparaturen. Verfügbare Jinja-Variablen (in doppelten geschweiften Klammern): message (die fertige, lokalisierte Meldung), name, event.",
+              "data": { "notify_action": "Aktion" }
+            }
+          }
+        },
+        "poe_port": {
+          "title": "Auto-PoE — passenden Port finden",
+          "description": "Findet anhand der Geräte-Kennung den passenden PoE-Port und schaltet ihn aus und wieder ein. Die Zeiteinstellungen unten legen fest, wie lange vor dem Reagieren gewartet wird, wie lange auf die Erholung des Geräts gewartet wird und wie oft erneut versucht wird. Die Ports verwaltest du über „Konfigurieren“ der Integration.",
+          "data": { "expected_id": "Kennung des Geräts (z. B. MAC, IP oder Name)" },
+          "sections": {
+            "behavior": {
+              "name": "Verhalten",
+              "description": "Wann Necromancer reagiert und wie oft es wiederholt — die Standardwerte passen meist.",
+              "data": {
+                "debounce": "Wartezeit vor Reaktion",
+                "boot_window": "Warten, bis das Gerät wieder gesund ist",
+                "cooldown": "Pause nach einem Versuch",
+                "max_attempts": "Max. Versuche"
+              }
+            },
+            "notification": {
+              "name": "Benachrichtigung",
+              "description": "Optionale Aktion bei Problemen und Reparaturen. Verfügbare Jinja-Variablen (in doppelten geschweiften Klammern): message (die fertige, lokalisierte Meldung), name, event.",
+              "data": { "notify_action": "Aktion" }
+            }
+          }
+        },
+        "notify": {
+          "title": "Benachrichtigung",
+          "description": "Was passieren soll, wenn ein Problem erkannt wird.",
+          "data": { "debounce": "Wartezeit vor Reaktion" },
+          "sections": {
+            "notification": {
+              "name": "Benachrichtigung",
+              "description": "Optionale Aktion bei Problemen und Reparaturen. Verfügbare Jinja-Variablen (in doppelten geschweiften Klammern): message (die fertige, lokalisierte Meldung), name, event.",
+              "data": { "notify_action": "Aktion" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": {
+        "name": "Status",
+        "state": {
+          "ok": "OK",
+          "suspect": "Verdacht",
+          "recovering": "Reparatur läuft",
+          "verify": "Prüfung",
+          "cooldown": "Abkühlphase",
+          "escalated": "Eskaliert"
+        }
+      }
+    },
+    "binary_sensor": {
+      "health": { "name": "Gesundheit" }
+    },
+    "switch": {
+      "auto_restart": { "name": "Auto-Reparatur" }
+    },
+    "button": {
+      "recover": { "name": "Reparieren" }
+    }
+  },
+  "selector": {
+    "source_type": {
+      "options": {
+        "state_based": "Zustand einer Entität",
+        "template_based": "Jinja-Template"
+      }
+    },
+    "mode": {
+      "options": {
+        "recover": "Auto-Reparatur",
+        "notify": "Nur benachrichtigen"
+      }
+    },
+    "strategy": {
+      "options": {
+        "switch": "Schalter aus- und einschalten",
+        "switch_check": "Schalter aus-/einschalten + Health-Check",
+        "action": "Aktion ausführen",
+        "action_check": "Aktion ausführen + Health-Check",
+        "actions": "Aktionen Aus/Ein",
+        "actions_check": "Aktionen Aus/Ein + Health-Check",
+        "poe_port": "Auto-PoE (Port automatisch finden)"
+      }
+    }
+  },
+  "notify": {
+    "recovery_attempt": "{name}: Reparatur {attempt}/{max}",
+    "recovery_success": "{name}: Reparatur erfolgreich.",
+    "recovery_failed": "{name}: Reparatur fehlgeschlagen nach {attempt} Versuchen.",
+    "recovery_blocked": "{name}: Reparatur blockiert — Reparatur-Skript fehlt oder ist nicht aufrufbar.",
+    "no_auto_recovery": "{name}: Problem erkannt, Auto-Reparatur ist deaktiviert.",
+    "problem_detected": "{name}: Problem erkannt (nur Benachrichtigung)."
+  }
+}
