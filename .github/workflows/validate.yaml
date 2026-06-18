@@ -1,4 +1,4 @@
-name: HACS Action
+name: Validate
 
 on:
   push:
@@ -7,10 +7,13 @@ on:
     - cron: "0 0 * * *"
 
 jobs:
-  hacs:
+  validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - name: Download repo
+        uses: actions/checkout@v6
+      - name: Hassfest validation
+        uses: home-assistant/actions/hassfest@master
       - name: HACS validation
         uses: hacs/action@main
         with:
