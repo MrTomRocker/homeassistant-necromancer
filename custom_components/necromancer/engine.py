@@ -42,7 +42,6 @@ from .const import (
 from .drivers import RecoveryDriver
 from .health import Health, HealthSource
 from .notify import async_notify
-from .poe import EVENT_PORT_STATUS, PORT_FAILED, PORT_GOOD, PORT_RECOVERING, PoeFabric
 from .policies import RecoveryPolicy
 
 
@@ -74,8 +73,6 @@ class DeviceEngine:
         persisted: dict | None = None,
         save: Callable[[], None] | None = None,
         on_health_renamed: Callable[[str], None] | None = None,
-        poe_id: str | None = None,
-        fabric: PoeFabric | None = None,
     ) -> None:
         self.hass = hass
         self.name = name
@@ -88,13 +85,6 @@ class DeviceEngine:
         self.link_device_id = link_device_id
         self._save = save or _noop
         self._on_health_renamed = on_health_renamed
-        # Optional dependency: a PoE port (by device id) this guard hangs off. When
-        # that port recovers (by anyone), we hold instead of competing, then
-        # re-validate. Resolved to a port label lazily via the shared fabric.
-        self._poe_id = poe_id
-        self._fabric = fabric
-        self._port_label: str | None = None
-        self._port_recovering = False
 
         self.state = GState.OK
         self.attempt = 0
@@ -112,7 +102,6 @@ class DeviceEngine:
         self._unsub_started: Callable[[], None] | None = None
         self._unsub_source: Callable[[], None] | None = None
         self._unsub_driver: Callable[[], None] | None = None
-        self._unsub_port: Callable[[], None] | None = None
         self._unsub_timer: Callable[[], None] | None = None
         self._verify_event: asyncio.Event | None = None
         self._cycle_task: asyncio.Task | None = None
@@ -181,18 +170,6 @@ class DeviceEngine:
         # The driver may watch its own inputs (poe_port: the port id-entities, so
         # it caches the resolved port the moment the neighbour table reports it).
         self._unsub_driver = await self.driver.async_setup()
-        # Follow our PoE-port dependency, if declared: react to its status events.
-        if self._poe_id and self._fabric is not None:
-            self._port_label = self._fabric.port_label(self._poe_id)
-            self._unsub_port = self.hass.bus.async_listen(
-                EVENT_PORT_STATUS, self._handle_port_event
-            )
-            LOGGER.debug(
-                "%s depends on PoE id %r (port %s)",
-                self.name,
-                self._poe_id,
-                self._port_label or "unresolved",
-            )
         self._evaluate()
 
     @callback
@@ -229,9 +206,6 @@ class DeviceEngine:
         if self._unsub_driver:
             self._unsub_driver()
             self._unsub_driver = None
-        if self._unsub_port:
-            self._unsub_port()
-            self._unsub_port = None
         self._cancel_timer()
         if self._cycle_task and not self._cycle_task.done():
             self._cycle_task.cancel()
@@ -324,70 +298,6 @@ class DeviceEngine:
             self._unsub_timer()
             self._unsub_timer = None
 
-    # ---------- PoE dependency coordination ----------
-    def _my_port_label(self) -> str | None:
-        """Our dependency port's label (resolved lazily; ids can settle late)."""
-        if self._port_label is None and self._fabric is not None and self._poe_id:
-            self._port_label = self._fabric.port_label(self._poe_id)
-        return self._port_label
-
-    def _busy(self) -> bool:
-        """True while our own recovery cycle runs (then don't self-suppress)."""
-        return self._cycle_task is not None and not self._cycle_task.done()
-
-    @callback
-    def _handle_port_event(self, event: Event) -> None:
-        if event.data.get("port") != self._my_port_label():
-            return
-        status = event.data.get("status")
-        if status == PORT_RECOVERING:
-            self._on_port_recovering()
-        elif status == PORT_GOOD:
-            self._on_port_resumed(repaired=True)
-        elif status == PORT_FAILED:
-            self._on_port_resumed(repaired=False)
-
-    def _on_port_recovering(self) -> None:
-        """Someone is cycling our port: hold instead of competing."""
-        if self._busy() or self._port_recovering:
-            return
-        LOGGER.info(
-            "%s: dependency port %r is recovering — holding, will validate after",
-            self.name,
-            self._port_label,
-        )
-        self._port_recovering = True
-        self._cancel_timer()
-        self._set_state(GState.RECOVERING)
-
-    def _on_port_resumed(self, *, repaired: bool) -> None:
-        """Our port settled: re-validate (if repaired) or fall back to self-recovery."""
-        if not self._port_recovering:
-            return
-        self._port_recovering = False
-        if self._busy():
-            return
-        if repaired:
-            self.hass.async_create_task(self._validate_after_port())
-        else:
-            LOGGER.info("%s: dependency port repair failed — own recovery", self.name)
-            self._set_state(GState.OK)
-            self._evaluate()
-
-    async def _validate_after_port(self) -> None:
-        """Re-check health after a shared port repair; self-recover only if needed."""
-        self._set_state(GState.VERIFY)
-        ok = await self._wait_health_ok(
-            self._int(CONF_BOOT_WINDOW, DEFAULT_BOOT_WINDOW)
-        )
-        LOGGER.info(
-            "%s: post-port-repair validation %s",
-            self.name,
-            "healthy" if ok else "still failing — own recovery",
-        )
-        self._set_state(GState.OK)
-        self._evaluate()
-
     # ---------- health handling ----------
     @callback
     def _handle_health_event(self, event) -> None:
@@ -401,11 +311,6 @@ class DeviceEngine:
             self.last_seen = dt_util.utcnow()
             # Learn the driver's current target while healthy (poe_port cache).
             self.driver.observe()
-        # While our dependency port is being cycled, expect the device to drop;
-        # hold (no competing recovery). _on_port_good/_failed resumes us.
-        if self._port_recovering:
-            self._emit()
-            return
         if self._verify_event is not None and h == Health.OK:
             self._verify_event.set()
 

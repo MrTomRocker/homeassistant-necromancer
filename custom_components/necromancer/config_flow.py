@@ -70,7 +70,6 @@ from .const import (
     CONF_ON_ACTION,
     CONF_ON_TIMEOUT,
     CONF_ON_VALUE,
-    CONF_POE_ID,
     CONF_POLICY,
     CONF_PORT_SELECTION,
     CONF_PORTS,
@@ -239,7 +238,6 @@ def _watch_fields(d: dict) -> dict:
 SECTION_STATE = "state_check"
 SECTION_TEMPLATE = "template_check"
 SECTION_DEVICE = "assigned_device"
-SECTION_DEPENDENCY = "dependency"
 SECTION_BEHAVIOR = "behavior"
 SECTION_NOTIFY = "notification"
 SECTION_POWER = "power"
@@ -345,16 +343,6 @@ def _device_schema(
                         description={"suggested_value": d.get(CONF_DEVICE_ID)},
                     ): selector.DeviceSelector(),
                 },
-            ),
-            **_section(
-                SECTION_DEPENDENCY,
-                {
-                    vol.Optional(
-                        CONF_POE_ID,
-                        description={"suggested_value": d.get(CONF_POE_ID)},
-                    ): selector.TextSelector(),
-                },
-                collapsed=True,
             ),
         }
     )
@@ -558,8 +546,6 @@ def _build_data(step1: dict, step2: dict, strategy: str) -> dict:
         data[CONF_DRIVER] = _build_driver(step2, strategy)
     if step1.get(CONF_DEVICE_ID):
         data[CONF_DEVICE_ID] = step1[CONF_DEVICE_ID]
-    if step1.get(CONF_POE_ID):
-        data[CONF_POE_ID] = str(step1[CONF_POE_ID]).strip()
     return data
 
 
@@ -596,7 +582,6 @@ def _health_defaults(data: dict) -> dict:
         **_watch_defaults(health),
         CONF_MODE: MODE_NOTIFY if is_notify else MODE_RECOVER,
         CONF_DEVICE_ID: data.get(CONF_DEVICE_ID),
-        CONF_POE_ID: data.get(CONF_POE_ID),
     }
 
 

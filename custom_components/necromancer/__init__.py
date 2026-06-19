@@ -29,7 +29,6 @@ from .const import (
     CONF_DRIVER,
     CONF_ENTITY_ID,
     CONF_HEALTH,
-    CONF_POE_ID,
     CONF_POLICY,
     CONF_PORTS,
     CONF_TYPE,
@@ -57,7 +56,6 @@ def _build_engine(
     persisted: dict | None,
     save: Callable[[], None],
     on_health_renamed: Callable[[str], None],
-    fabric: PoeFabric,
 ) -> DeviceEngine:
     """Construct a DeviceEngine from a subentry's config dict."""
     return DeviceEngine(
@@ -71,8 +69,6 @@ def _build_engine(
         persisted,
         save,
         on_health_renamed,
-        poe_id=cfg.get(CONF_POE_ID),
-        fabric=fabric,
     )
 
 
@@ -150,7 +146,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
             stored.get(subentry_id),
             _save,
             _rename_handler(hass, entry, subentry_id),
-            fabric,
         )
         await engine.async_start()
         engines[subentry_id] = engine

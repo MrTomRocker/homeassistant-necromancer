@@ -146,11 +146,6 @@ class PoeFabric:
             )
         return port
 
-    def port_label(self, identifier: str) -> str | None:
-        """Resolve an id to its port label (for guards declaring a dependency)."""
-        port = self.resolve(identifier)
-        return port[CONF_LABEL] if port else None
-
     # ---------- status ----------
     def status(self, label: str) -> str:
         return self._status.get(label, PORT_GOOD)

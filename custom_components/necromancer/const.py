@@ -33,14 +33,6 @@ MODE_NOTIFY = "notify"
 # device (optional link to an existing HA device)
 CONF_DEVICE_ID = "device_id"
 
-# guard dependency: the optional PoE-port id this guard's device hangs off. When
-# that port goes into recovery (cycled by this guard, another guard, the
-# repair_poe_port service or any automation), the guard HOLDS instead of starting
-# a competing recovery, then re-validates once the port is back online — so every
-# guard on the same port coordinates on one power-cycle. Same id space as a port's
-# identity (MAC / IP / static label).
-CONF_POE_ID = "poe_id"
-
 # health source type (wizard step): an entity's state, or a Jinja template that
 # evaluates to true/false (continuous → checkable, so verify still works).
 CONF_SOURCE_TYPE = "source_type"

@@ -161,13 +161,6 @@
             "assigned_device": {
               "name": "Assigned device (optional)",
               "description": "Attaches Necromancer's status entities to an existing device."
-            },
-            "dependency": {
-              "name": "PoE-port dependency (optional)",
-              "description": "Link this guard to a PoE port, by the same id used to find the port (MAC, IP or static label). When that port is power-cycled — by this guard, another guard, the repair_poe_port service or any automation — this guard waits instead of starting a competing recovery, then re-checks its device once the port is back. Leave empty if the device doesn't hang off a PoE port.",
-              "data": {
-                "poe_id": "PoE-port id (MAC / IP / static)"
-              }
             }
           }
         },
