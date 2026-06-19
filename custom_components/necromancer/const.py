@@ -88,6 +88,11 @@ IMPORT_MODE_REPLACE = "replace"
 CONF_PORTS_YAML = "ports_yaml"
 CONF_PORT_SELECTION = "selection"
 
+# port-level repair service (necromancer.repair_poe_port) — the shared primitive
+# guards (and other automations) call to power-cycle a port by device id.
+SERVICE_REPAIR_POE_PORT = "repair_poe_port"
+ATTR_ID = "id"
+
 # driver (switch_cycle): power-cycle a switch (off → delay → on)
 CONF_SWITCH_ENTITY = "switch_entity"
 CONF_OFF_ON_DELAY = "off_on_delay"

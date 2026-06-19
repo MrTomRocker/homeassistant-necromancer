@@ -10,13 +10,20 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.helpers.storage import Store
 
 from .const import (
+    ATTR_ID,
     CONF_BEHAVIOR,
     CONF_DEVICE_ID,
     CONF_DRIVER,
@@ -29,12 +36,14 @@ from .const import (
     LOGGER,
     PLATFORMS,
     SAVE_DELAY,
+    SERVICE_REPAIR_POE_PORT,
     STORAGE_VERSION,
     SUBENTRY_TYPE_DEVICE,
 )
 from .drivers import create_driver
 from .engine import DeviceEngine
 from .health import create_health
+from .poe import PoeFabric
 from .policies import create_policy
 
 type NecromancerConfigEntry = ConfigEntry[dict[str, DeviceEngine]]
@@ -87,9 +96,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
     stored = await store.async_load() or {}
     engines: dict[str, DeviceEngine] = {}
 
+    # PoE fabric: shared id->port resolver + per-port status/lock, driving the
+    # necromancer.repair_poe_port service. A domain-level singleton so it survives
+    # reloads (and the service handler keeps a stable reference).
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    fabric: PoeFabric = domain_data.get("fabric") or PoeFabric(hass)
+    domain_data["fabric"] = fabric
+
     @callback
     def _serialize() -> dict:
-        return {sid: engine.snapshot() for sid, engine in engines.items()}
+        data: dict = {sid: engine.snapshot() for sid, engine in engines.items()}
+        data["_poe_cache"] = fabric.cache
+        return data
 
     def _save() -> None:
         store.async_delay_save(_serialize, SAVE_DELAY)
@@ -98,8 +116,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
     # searches the whole list, so inject it into each such driver at setup. An
     # options change reloads us (the update listener below), keeping it fresh.
     ports = entry.options.get(CONF_PORTS, [])
+    fabric.set_ports(ports, cache=stored.get("_poe_cache"))
     for port in ports:
         LOGGER.info("PoE port loaded — %s", port)
+
+    if not hass.services.has_service(DOMAIN, SERVICE_REPAIR_POE_PORT):
+
+        async def _repair_poe_port(call: ServiceCall) -> None:
+            await fabric.repair(call.data[ATTR_ID])
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_REPAIR_POE_PORT,
+            _repair_poe_port,
+            schema=vol.Schema({vol.Required(ATTR_ID): cv.string}),
+        )
 
     for subentry_id, subentry in entry.subentries.items():
         if subentry.subentry_type != SUBENTRY_TYPE_DEVICE:
@@ -241,4 +272,6 @@ async def async_unload_entry(
     if unload_ok:
         for engine in entry.runtime_data.values():
             await engine.async_stop()
+        if (fabric := hass.data.get(DOMAIN, {}).get("fabric")) is not None:
+            fabric.shutdown()
     return unload_ok
