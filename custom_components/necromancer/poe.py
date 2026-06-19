@@ -98,13 +98,23 @@ class PoeFabric:
     def _on_change(self, _event: Event) -> None:
         self._relearn()
 
+    def _learn(self, pid: str, label: str) -> None:
+        """Record id -> port; INFO on first learn, WARNING on a move (re-cabling)."""
+        prev = self._cache.get(pid)
+        if prev == label:
+            return
+        if prev is None:
+            LOGGER.info("PoE fabric: learned %r -> port %r", pid, label)
+        else:
+            LOGGER.warning("PoE fabric: %r moved port %r -> %r", pid, prev, label)
+        self._cache[pid] = label
+
     def _relearn(self) -> None:
         """Refresh the last-known map from whatever the ports report right now."""
         for port in self._ports:
             pid = _norm(self._port_id(port))
-            if pid and self._cache.get(pid) != port[CONF_LABEL]:
-                LOGGER.info("PoE fabric: learned %r -> port %r", pid, port[CONF_LABEL])
-                self._cache[pid] = port[CONF_LABEL]
+            if pid:
+                self._learn(pid, port[CONF_LABEL])
 
     # ---------- resolution ----------
     def _port_id(self, port: dict) -> str | None:
@@ -125,18 +135,37 @@ class PoeFabric:
             return None
         return next((p for p in self._ports if p.get(CONF_LABEL) == label), None)
 
-    def resolve(self, identifier: str) -> dict | None:
-        """One live match wins (refreshes cache); else last-known; ambiguous fails."""
+    @property
+    def port_count(self) -> int:
+        """How many ports are configured (for a guard's config check)."""
+        return len(self._ports)
+
+    def resolve_with_reason(self, identifier: str) -> tuple[dict | None, str]:
+        """Resolve an id to its port, with a human reason when it can't.
+
+        One live match wins (and refreshes the cache); zero live falls back to the
+        last-known cached port; an ambiguous (>1) match refuses to guess. Each
+        port's reported id is traced at DEBUG so a resolution is fully auditable.
+        """
         target = _norm(identifier)
-        live = [p for p in self._ports if _norm(self._port_id(p)) == target]
-        if len(live) == 1:
-            self._cache[target] = live[0][CONF_LABEL]
-            return live[0]
-        if len(live) > 1:
-            LOGGER.error(
-                "PoE fabric: %r matches %d ports — ambiguous", identifier, len(live)
+        live: list[dict] = []
+        for port in self._ports:
+            pid = self._port_id(port)
+            hit = _norm(pid) == target
+            LOGGER.debug(
+                "PoE %s:   port %r reports id %r%s",
+                identifier,
+                port.get(CONF_LABEL),
+                pid,
+                "  <- MATCH" if hit else "",
             )
-            return None
+            if hit:
+                live.append(port)
+        if len(live) == 1:
+            self._learn(target, live[0][CONF_LABEL])
+            return live[0], ""
+        if len(live) > 1:
+            return None, f"'{identifier}' matches {len(live)} ports"
         port = self._by_label(self._cache.get(target))
         if port is not None:
             LOGGER.warning(
@@ -144,7 +173,19 @@ class PoeFabric:
                 identifier,
                 port[CONF_LABEL],
             )
-        return port
+            return port, ""
+        return None, f"no port matches '{identifier}'"
+
+    def target_info(self, identifier: str) -> str:
+        """Where an id currently resolves (for the guard's diagnostics line)."""
+        target = _norm(identifier)
+        live = [p for p in self._ports if _norm(self._port_id(p)) == target]
+        if len(live) == 1:
+            return f"{live[0].get(CONF_LABEL, '?')} → {live[0][CONF_ACTUATOR]}"
+        cached = self._by_label(self._cache.get(target))
+        if not live and cached is not None:
+            return f"{cached[CONF_LABEL]} → {cached[CONF_ACTUATOR]} (last-known)"
+        return f"id={identifier} ({len(self._ports)} port(s) in scope)"
 
     # ---------- status ----------
     def status(self, label: str) -> str:
@@ -167,9 +208,9 @@ class PoeFabric:
     # ---------- repair ----------
     async def repair(self, identifier: str) -> bool:
         """Resolve the id to its port and power-cycle it (blocking, per port)."""
-        port = self.resolve(identifier)
+        port, reason = self.resolve_with_reason(identifier)
         if port is None:
-            LOGGER.error("PoE fabric: cannot resolve %r — no repair", identifier)
+            LOGGER.error("PoE fabric: cannot repair %r — %s", identifier, reason)
             return False
         label = port[CONF_LABEL]
         lock = self._lock(label)

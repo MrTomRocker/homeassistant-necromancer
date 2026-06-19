@@ -104,10 +104,6 @@ class DeviceEngine:
         self.last_seen: datetime | None = None
         self.last_recover: datetime | None = None
         self.auto = bool(behavior.get(CONF_AUTO_RESTART, DEFAULT_AUTO_RESTART))
-        # Last-known resolved target for the driver (e.g. the poe_port port label),
-        # persisted so a down device that has aged out of the switch's neighbour
-        # table can still be recovered via the cached port.
-        self.resolved_port: str | None = None
 
         self._unsub_health: Callable[[], None] | None = None
         self._unsub_registry: Callable[[], None] | None = None
@@ -120,8 +116,6 @@ class DeviceEngine:
         self._listeners: list[Callable[[], None]] = []
 
         self._apply_persisted(persisted or {})
-        # Wire the driver's persistent resolution cache to our Store-backed state.
-        self.driver.bind_cache(self._get_resolved_port, self._set_resolved_port)
 
     def _apply_persisted(self, data: dict) -> None:
         """Seed runtime state from the Store (entity-independent persistence).
@@ -136,13 +130,6 @@ class DeviceEngine:
         self.last_seen = dt_util.parse_datetime(data.get("last_seen") or "")
         if "auto" in data:
             self.auto = bool(data["auto"])
-        if data.get("resolved_port"):
-            self.resolved_port = data["resolved_port"]
-            LOGGER.debug(
-                "%s: restored resolved_port %r from Store",
-                self.name,
-                self.resolved_port,
-            )
         if data.get("state") == GState.ESCALATED.value:
             self.state = GState.ESCALATED
             self.attempt = int(data.get("attempt", 0) or 0)
@@ -158,7 +145,6 @@ class DeviceEngine:
             else None,
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
             "auto": self.auto,
-            "resolved_port": self.resolved_port,
         }
 
     # ---------- lifecycle ----------
@@ -289,21 +275,6 @@ class DeviceEngine:
         self.auto = value
         self._save()
         self._emit()
-
-    def _get_resolved_port(self) -> str | None:
-        return self.resolved_port
-
-    def _set_resolved_port(self, label: str | None) -> None:
-        """Driver callback: persist the last-known resolved target on change."""
-        if label != self.resolved_port:
-            LOGGER.debug(
-                "%s: persisting resolved_port %r (was %r)",
-                self.name,
-                label,
-                self.resolved_port,
-            )
-            self.resolved_port = label
-            self._save()
 
     def _cancel_timer(self) -> None:
         if self._unsub_timer:
@@ -439,8 +410,6 @@ class DeviceEngine:
         LOGGER.debug("%s health=%s state=%s", self.name, h, self.state)
         if h == Health.OK:
             self.last_seen = dt_util.utcnow()
-            # Learn the driver's current target while healthy (poe_port cache).
-            self.driver.observe()
         # While following a linked guard's repair, expect our device to drop too;
         # hold (no competing recovery). _on_partner_repair_done resumes us.
         if self._following:

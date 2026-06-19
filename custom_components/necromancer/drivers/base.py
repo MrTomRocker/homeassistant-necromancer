@@ -20,37 +20,13 @@ class RecoveryDriver(ABC):
     def __init__(self, hass: HomeAssistant, config: dict) -> None:
         self.hass = hass
         self.config = config
-        # Optional persistent cache, wired by the engine via `bind_cache`: lets a
-        # driver remember a resolved target across restarts. Only `poe_port` uses
-        # it (last-known port, so a device that has aged out of the switch's
-        # neighbour table while down can still be recovered).
-        self._cache_get: Callable[[], str | None] | None = None
-        self._cache_set: Callable[[str | None], None] | None = None
-
-    def bind_cache(
-        self,
-        get: Callable[[], str | None],
-        set_: Callable[[str | None], None],
-    ) -> None:
-        """Wire a persistent get/set for the driver's resolved target."""
-        self._cache_get = get
-        self._cache_set = set_
-
-    def observe(self) -> None:  # noqa: B027
-        """Optional: learn the current target while the device is healthy.
-
-        Called by the engine on every healthy evaluation; a driver that resolves
-        its target dynamically (poe_port) refreshes its cache here so a fallback
-        is available later when live resolution fails.
-        """
 
     async def async_setup(self) -> Callable[[], None] | None:
-        """Optional: start watching what affects resolution; return an unsub.
+        """Optional: start watching what affects recovery; return an unsub.
 
-        `poe_port` uses this to refresh its cached port whenever a port's
-        id-entity changes — the switch's neighbour table updates independently of
-        the device's health entity, so observing only on health events would miss
-        it. Default: nothing to watch.
+        A driver that must react to external changes can subscribe here. Default:
+        nothing to watch. (PoE id→port resolution and its last-known cache are
+        owned by the shared fabric, not the driver, so `poe_port` needs nothing.)
         """
         return None
 

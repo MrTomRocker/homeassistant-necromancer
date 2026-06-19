@@ -163,9 +163,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
         if subentry.subentry_type != SUBENTRY_TYPE_DEVICE:
             continue
         cfg = dict(subentry.data)
-        driver = cfg.get(CONF_DRIVER, {})
-        if driver.get(CONF_TYPE) == "poe_port":
-            cfg = {**cfg, CONF_DRIVER: {**driver, CONF_PORTS: ports}}
+        # poe_port guards resolve + cycle through the shared fabric (which owns the
+        # port list), so nothing port-specific needs injecting into the driver here.
         linked = sorted(groups.get(subentry_id, {subentry_id}) - {subentry_id})
         engine = _build_engine(
             hass,
