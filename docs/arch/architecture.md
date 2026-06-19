@@ -178,9 +178,49 @@ blocks. The cache is wired generically — `RecoveryDriver.bind_cache(get, set)`
 `observe()` + `async_setup()` — so the engine owns persistence and only
 `poe_port` uses it.
 
+### PoE fabric & the `repair_poe_port` service
+
+The `poe_port` driver cycles a port from *inside* a guard. Some recoveries instead
+need to cycle a port from an **action** — e.g. cut PoE, wait for ping, then *reload*
+a config entry (the lamps only return after the reload), a sequence a driver can't
+express. The **PoE fabric** (`poe.py`) is that shared, port-level primitive: a
+domain-singleton holding the live + last-known `id → port` map (same resolution as
+`poe_port`, watching every port's id-entity), a per-port **status**
+(`good` / `recovering` / `failed`) and a per-port `asyncio.Lock`. It backs the
+**`necromancer.repair_poe_port(id)`** service — blocking, and serialised per port so
+concurrent callers (multiple guards, automations) share one cycle instead of
+double-cycling. Each status change is fired as a `necromancer_poe_port` event. The
+fabric is wired in `__init__` (singleton in `hass.data`, port list + cache from the
+Store) and the cycle logic is currently duplicated from `poe_port.py` (unify later).
+
 ---
 
-## 6. Notifications as actions
+## 6. Guard linking (groups)
+
+Guards that share a root cause are grouped so only **one** recovers and the rest
+follow — e.g. a *ping* guard and a *lamps-unavailable* guard on the same Hue bridge.
+
+- **Declaration & closure.** Every recover guard has a collapsed *Linked guards*
+  multi-select (`linked_guards` = partner subentry_ids). The relation is
+  **undirected + clique-closed**: `links.py` (`link_components`) builds connected
+  components over the union of all declarations, so a one-sided link still reads and
+  behaves as a full mutual group. The config flow reads the closure for the form
+  default; `__init__` reads it to give each engine its effective partners. Unlinking
+  clears the edge on **both** sides (`_apply_link_removals`), so the only way out of a
+  group is to clear *all* its partners (a single shared partner re-forms the clique).
+- **Coordination.** When a guard starts recovery it fires `_notify_partners_start`
+  (a direct call to each partner engine **and** a `necromancer_guard_repair` bus event
+  for outside automations). A partner that isn't already busy enters a **follow hold**
+  (RECOVERING, no own action) and suppresses its own health-driven transitions. When
+  the leader finishes (`_notify_partners_done`), each follower re-validates: healthy →
+  it settles through the **same `_recover_success` path** (cooldown + stats) as the
+  leader; still unhealthy → it falls back to its own recovery. Arbitration is
+  first-come — a guard whose debounce elapses while a partner is already repairing
+  follows instead of launching a competing cycle.
+
+---
+
+## 7. Notifications as actions
 
 There are no fixed notify targets. Each guard optionally defines a **notify
 action** (an `ActionSelector` sequence) that runs on events
@@ -200,7 +240,7 @@ stalls the engine.
 
 ---
 
-## 7. Config flow (`config_flow.py`)
+## 8. Config flow (`config_flow.py`)
 
 Steps for a recover guard: **source type → device & state → strategy → recovery**
 (notify-only guards stop after a notification step).
@@ -236,7 +276,7 @@ Steps for a recover guard: **source type → device & state → strategy → rec
 
 ---
 
-## 8. Entities & platforms
+## 9. Entities & platforms
 
 Per guard, four pure-view entities (one device per guard, or attached to a linked
 device): `sensor.*_status`, `binary_sensor.*_health`, `switch.*_auto_recovery`,
@@ -246,15 +286,18 @@ existing device uses the Battery-Notes pattern (`device_info=None` +
 
 ---
 
-## 9. Module map
+## 10. Module map
 
 ```
 __init__.py        setup: build one DeviceEngine per device subentry, inject
-                   ports into poe_port guards, reconcile devices/entities, Store
-engine.py          the state machine, timing, persistence, health wiring
+                   ports into poe_port guards, resolve link groups, wire the PoE
+                   fabric + repair_poe_port service, reconcile devices/entities, Store
+engine.py          the state machine, timing, persistence, health wiring, link coordination
 config_flow.py     service + device-subentry + options(ports) flows, schemas, sections,
                    YAML port import/export (_parse_ports_yaml / _ports_to_yaml)
 const.py           keys, defaults, strategy/source constants
+links.py           guard-link grouping (connected components / clique closure)
+poe.py             PoE fabric: shared id→port resolver, per-port status/lock, repair service
 entity.py          base entity (DeviceInfo, unique_id, link handling)
 sensor/binary_sensor/switch/button.py   the four view entities
 actions.py         validate + run user action sequences (Script helper)
@@ -266,7 +309,7 @@ policies/          base, standard, notify
 
 ---
 
-## 10. Data flow (one recovery cycle, `switch_check`)
+## 11. Data flow (one recovery cycle, `switch_check`)
 
 ```
 health entity changes

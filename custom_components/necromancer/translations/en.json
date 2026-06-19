@@ -385,5 +385,17 @@
         "replace": "Replace (overwrite all)"
       }
     }
+  },
+  "services": {
+    "repair_poe_port": {
+      "name": "Repair PoE port",
+      "description": "Resolve a device id to its PoE port and power-cycle it. Blocking and serialised per port, so multiple guards or automations coordinate on a single cycle instead of fighting over the same port.",
+      "fields": {
+        "id": {
+          "name": "Device id",
+          "description": "The id that identifies the device on its PoE port — the MAC, IP or static label configured for that port."
+        }
+      }
+    }
   }
 }

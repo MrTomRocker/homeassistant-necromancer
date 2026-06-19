@@ -379,18 +379,23 @@ class DeviceEngine:
         self.hass.async_create_task(self._validate_after_repair())
 
     async def _validate_after_repair(self) -> None:
-        """Re-check health after a group repair; fall back to own recovery if needed."""
+        """Re-check health after a group repair.
+
+        On success the follower's device was effectively recovered (by the shared
+        fix), so it settles through the same success path as the leader — COOLDOWN
+        + stats + success notification — instead of snapping straight back to OK.
+        Only if it is still unhealthy does it fall back to its own recovery.
+        """
         self._set_state(GState.VERIFY)
-        ok = await self._wait_health_ok(
-            self._int(CONF_BOOT_WINDOW, DEFAULT_BOOT_WINDOW)
-        )
-        LOGGER.info(
-            "%s: post-link-repair validation %s",
-            self.name,
-            "healthy" if ok else "still failing — own recovery",
-        )
-        self._set_state(GState.OK)
-        self._evaluate()
+        if await self._wait_health_ok(self._int(CONF_BOOT_WINDOW, DEFAULT_BOOT_WINDOW)):
+            LOGGER.info("%s: healthy after linked-guard repair", self.name)
+            self._recover_success()
+        else:
+            LOGGER.info(
+                "%s: still unhealthy after linked repair — own recovery", self.name
+            )
+            self._set_state(GState.OK)
+            self._evaluate()
 
     # ---------- health handling ----------
     @callback

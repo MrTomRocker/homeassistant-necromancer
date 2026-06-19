@@ -126,7 +126,7 @@ class PoeFabric:
         return next((p for p in self._ports if p.get(CONF_LABEL) == label), None)
 
     def resolve(self, identifier: str) -> dict | None:
-        """A single live match wins (refreshes cache); else last-known; ambiguous fails."""
+        """One live match wins (refreshes cache); else last-known; ambiguous fails."""
         target = _norm(identifier)
         live = [p for p in self._ports if _norm(self._port_id(p)) == target]
         if len(live) == 1:
@@ -166,7 +166,7 @@ class PoeFabric:
 
     # ---------- repair ----------
     async def repair(self, identifier: str) -> bool:
-        """Resolve the id to a port and power-cycle it (blocking, per-port serialised)."""
+        """Resolve the id to its port and power-cycle it (blocking, per port)."""
         port = self.resolve(identifier)
         if port is None:
             LOGGER.error("PoE fabric: cannot resolve %r — no repair", identifier)

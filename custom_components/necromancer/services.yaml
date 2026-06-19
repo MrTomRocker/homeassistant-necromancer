@@ -1,0 +1,7 @@
+repair_poe_port:
+  fields:
+    id:
+      required: true
+      example: "ec:b5:fa:12:fd:07"
+      selector:
+        text:

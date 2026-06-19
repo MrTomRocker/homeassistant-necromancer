@@ -88,6 +88,26 @@ health-check** (wait until the device reports healthy again before declaring suc
 
 Notify-only guards skip recovery entirely and just raise the event.
 
+## Linked guards (groups)
+
+Several guards often share one root cause: a Hue **bridge** behind a PoE port can be watched
+by both a *ping* guard and a *lamps-unavailable* guard, and when the bridge dies **both** fire.
+Link them into a **group** (the collapsed *Linked guards* section on any recover guard) and only
+**one** runs the recovery — the others **follow**: they hold while it repairs, then re-check their
+own health instead of power-cycling the same port a second time. Whoever trips first leads; the
+followers settle into the same cooldown once it succeeds.
+
+Linking is mutual and transitive: link A to B, and if B already links to C the whole
+`{A, B, C}` becomes one group — so the next edit shows the full set. To leave a group, clear
+all of its partners. Each repair is also fired as a `necromancer_guard_repair` event, so other
+automations can react to it.
+
+## Services
+
+| Service | What it does |
+|---|---|
+| `necromancer.repair_poe_port` | Resolve a device `id` (MAC / IP / static label) to its PoE port and power-cycle it — blocking, and serialised **per port** so concurrent callers share one cycle. The same primitive Auto-PoE uses; call it from your own actions or automations. |
+
 ## Examples
 
 Each row is **one guard** — a health source paired with a strategy:

@@ -385,5 +385,17 @@
         "replace": "Ersetzen (alles überschreiben)"
       }
     }
+  },
+  "services": {
+    "repair_poe_port": {
+      "name": "PoE-Port reparieren",
+      "description": "Löst eine Geräte-id zu ihrem PoE-Port auf und startet ihn per Stromabschaltung neu. Blockierend und pro Port serialisiert, sodass mehrere Guards oder Automatisierungen sich auf einen Cycle einigen, statt um denselben Port zu konkurrieren.",
+      "fields": {
+        "id": {
+          "name": "Geräte-id",
+          "description": "Die id, die das Gerät an seinem PoE-Port identifiziert — die MAC, IP oder das statische Label, das für den Port konfiguriert ist."
+        }
+      }
+    }
   }
 }

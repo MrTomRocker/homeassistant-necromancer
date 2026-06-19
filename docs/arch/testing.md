@@ -26,6 +26,12 @@ one of them:
 6. **UI correctness.** Reactive selectors resolve within their section; config
    translations carry no ICU `{…}` braces; every step has a description; own
    entities are excluded from pickers.
+7. **Linked guards coordinate, never compete.** When one guard in a group repairs,
+   the others *follow* (hold + re-verify afterwards) and never launch a parallel
+   recovery for the same root cause. The link relation stays symmetric and
+   clique-closed; the only way out of a group is to clear all of its partners.
+8. **Shared port recovery is serialised.** `repair_poe_port` cycles a port behind a
+   per-port lock, so concurrent callers share one cycle instead of double-cycling.
 
 ---
 
@@ -44,6 +50,8 @@ invariant:
 | `config_flow` helpers | `_flatten_sections` (nested→flat), `_as_list`, `_watch_config`/`_watch_defaults`, `_build_data` (health block per source type, behaviour per check), `_current_strategy`, `_source_type_of`. |
 | `config_flow` ports YAML | `_parse_ports_yaml`/`_normalize_imported_port`: required `label`/`actuator`/`status_entity`; reject not-a-list / empty / `null` / list-of-scalar / malformed YAML / non-numeric **or negative** timing; trim, scalar→list, missing/empty status→default, int→str, unknown keys dropped, unicode. `_ports_to_yaml` round-trips; bool/number-like values survive both ways (export quotes, import coerces YAML-1.1 `on/off/yes/no` back to strings — purely-numeric colon ids like `1:2:3` are the one thing to quote). Import **merge** = upsert by `label`, **replace** = overwrite; invalid import leaves the list untouched. *(A standalone harness — see §5 — exercises 35 of these against the real module.)* |
 | `actions.py` | `async_validate` normalises `service`→`action`; invalid sequence raises `vol.Invalid`. |
+| `links.py` | `link_components` / `group_of`: undirected union → connected components (clique closure); transitive (A–B, B–C ⇒ `{A,B,C}`); a one-sided link reads symmetric; stale ids dropped. *(standalone harness covers these.)* |
+| `poe.py` (fabric) | `resolve`: one live match wins (refreshes cache) → last-known cache → ambiguous = `None`; `repair` sets status `recovering`→`good`/`failed`, serialised by the per-port lock; a status change fires `necromancer_poe_port`. |
 
 ## 3. Level 2 — integration (HA test harness or dev container)
 
@@ -70,6 +78,16 @@ Drive the real flows and the engine:
   entity state; let it learn the port while healthy, then make the device vanish
   (id gone) **and** go unhealthy → the recovery must cycle the *cached* port
   (WARNING "falling back to last-known port"), not block with "no port matches".
+- **Guard linking**: two linked guards on a shared health source; trip one → the
+  other logs "linked guard is repairing — following", holds (no own action), and
+  re-validates after → both end OK and the follower also enters cooldown. Closure:
+  a one-sided link still shows the partner on *both* guards' next edit; unlinking
+  from one side clears the edge on both. Arbitration: if both trip, the one whose
+  debounce elapses first leads, the other follows (no double-cycle).
+- **`repair_poe_port` service**: a call resolves the id and cycles the port
+  (status `recovering`→`good`); a second concurrent call waits on the per-port lock
+  instead of double-cycling. Verified live end-to-end via a real PoE-bridge outage
+  (pull power → linked ping+lamps guards → one cycles the port → both verify OK).
 
 These run today against the dev container by driving the REST/WS flow API and
 asserting on `sensor.*_status` + the error log (see the regression checklist for
