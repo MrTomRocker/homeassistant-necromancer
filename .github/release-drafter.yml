@@ -41,6 +41,8 @@ autolabeler:
   - label: "dependencies"
     title: ["/^deps/i", "/bump/i"]
 template: |
+  [![Downloads](https://img.shields.io/github/downloads/MrTomRocker/homeassistant-necromancer/v$RESOLVED_VERSION/total?color=success)](https://github.com/MrTomRocker/homeassistant-necromancer/releases/tag/v$RESOLVED_VERSION)
+
   ## Changes
 
   $CHANGES
