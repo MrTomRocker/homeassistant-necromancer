@@ -71,6 +71,9 @@ so the verify step always works:
 | **State-based** | one entity's state or attribute vs on/off value lists | value is in the *on* list (e.g. a ping / reachability sensor reads `on`) |
 | **Template-based** | an inline Jinja template returning `true`/`false` | the template renders truthy |
 
+`unavailable`/`unknown` count as *unknown* by default (no false alarm) — but list `unavailable`
+in the **off** values to treat "entity gone" as the failure that triggers recovery.
+
 ## Recovery strategies
 
 Pick the shape that fits the device. The first three come **plain** (fire-and-forget) or **with a

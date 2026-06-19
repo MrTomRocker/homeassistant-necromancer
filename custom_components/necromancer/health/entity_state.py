@@ -3,7 +3,9 @@
 The most generic rung of the health ladder. Works with any entity: read its
 `state` or any attribute, then map it to a verdict — a value in `on_value` means
 healthy, one in `off_value` means unhealthy, anything else is `UNKNOWN` (no false
-alarm). A group or technology-specific sources (ping/http/…) layer on top later.
+alarm). `unavailable`/`unknown` are `UNKNOWN` by default, but an explicit
+`off_value` wins — list `unavailable` there to treat "entity gone" as the failure
+signal on purpose. A group or technology-specific sources layer on top later.
 
 `on_value`/`off_value` are lists (any of several states counts), but a bare
 string is accepted too. Backward compatible: older guards stored only
@@ -55,7 +57,7 @@ class EntityStateHealth(HealthSource):
 
     def evaluate(self) -> Health:
         state = self.hass.states.get(self.entity_id)
-        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+        if state is None:
             return Health.UNKNOWN
         if self.source == "state":
             actual = state.state
@@ -64,9 +66,17 @@ class EntityStateHealth(HealthSource):
             if actual is None:
                 return Health.UNKNOWN
         actual = str(actual)
+        off = self.off_values
+        # An explicit off_value wins — even unavailable/unknown — so a guard can
+        # treat "entity gone" as the failure signal on purpose.
+        if off is not None and actual in off:
+            return Health.UNHEALTHY
+        # Otherwise ambiguous states stay UNKNOWN (no false alarm).
+        if actual in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return Health.UNKNOWN
         if actual in self.on_values:
             return Health.OK
-        if self.off_values is None or actual in self.off_values:
+        if off is None:
             return Health.UNHEALTHY
         return Health.UNKNOWN
 

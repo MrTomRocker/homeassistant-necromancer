@@ -118,7 +118,7 @@ in `async_setup(on_change)` (returns an unsub) and exposes an empty
 
 | Type | What it is | Healthy when |
 |---|---|---|
-| `entity_state` | One entity’s state or attribute vs on/off **value lists**. | value ∈ `on_value`; ∈ `off_value` → unhealthy; else `UNKNOWN`. Unavailable/unknown → `UNKNOWN`. |
+| `entity_state` | One entity’s state or attribute vs on/off **value lists**. | value ∈ `on_value` → OK; ∈ `off_value` → unhealthy; else `UNKNOWN`. `unavailable`/`unknown` → `UNKNOWN` **unless** listed in `off_value` (explicit off wins). |
 | `template` | An inline Jinja template that returns `true`/`false`. | `result_as_boolean(render)` → OK/unhealthy; render error, empty, `none`, `unknown`/`unavailable` → `UNKNOWN`. |
 
 The **template** source is the inline alternative to building a template *entity*.
