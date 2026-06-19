@@ -98,10 +98,7 @@
       },
       "export_result": {
         "title": "Exported ports",
-        "description": "Copy the YAML below. You can edit it and paste it back via Import.",
-        "data": {
-          "ports_yaml": "Ports (YAML)"
-        }
+        "description": "Copy the YAML below — edit it and paste it back via “Import ports”.\n\n```\n{yaml}\n```"
       }
     },
     "error": {

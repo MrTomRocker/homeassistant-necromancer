@@ -98,10 +98,7 @@
       },
       "export_result": {
         "title": "Exportierte Ports",
-        "description": "Kopiere das YAML unten. Du kannst es bearbeiten und über „Ports importieren“ wieder einspielen.",
-        "data": {
-          "ports_yaml": "Ports (YAML)"
-        }
+        "description": "Kopiere das YAML unten – bearbeiten und über „Ports importieren“ wieder einspielen.\n\n```\n{yaml}\n```"
       }
     },
     "error": {

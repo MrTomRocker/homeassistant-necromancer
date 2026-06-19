@@ -1095,17 +1095,6 @@ def _export_select_schema(ports: list[dict]) -> vol.Schema:
     )
 
 
-def _export_result_schema(text: str) -> vol.Schema:
-    """Display the exported YAML in a copyable multiline field."""
-    return vol.Schema(
-        {
-            vol.Optional(
-                CONF_PORTS_YAML, description={"suggested_value": text}
-            ): selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
-        }
-    )
-
-
 class NecromancerOptionsFlow(OptionsFlow):
     """Manage the flat list of PoE ports shared by every poe_port guard.
 
@@ -1248,9 +1237,13 @@ class NecromancerOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         if user_input is not None:
             return await self.async_step_init()
+        # Show the YAML as a markdown code block in the description (clean,
+        # top-aligned, copyable) rather than a multiline text field, which
+        # renders a long prefilled value oddly (vertically centred).
         return self.async_show_form(
             step_id="export_result",
-            data_schema=_export_result_schema(self._export_text),
+            data_schema=vol.Schema({}),
+            description_placeholders={"yaml": self._export_text},
         )
 
     async def async_step_save(
