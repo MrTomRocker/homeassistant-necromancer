@@ -161,6 +161,13 @@
             "assigned_device": {
               "name": "Zugewiesenes Gerät (optional)",
               "description": "Hängt Necromancers Status-Entitäten an ein vorhandenes Gerät."
+            },
+            "dependency": {
+              "name": "PoE-Port-Abhängigkeit (optional)",
+              "description": "Verknüpft diesen Guard mit einem PoE-Port – über dieselbe id, mit der der Port gefunden wird (MAC, IP oder statisches Label). Wird dieser Port neu gestartet – durch diesen Guard, einen anderen Guard, den Dienst repair_poe_port oder eine beliebige Automatisierung –, wartet dieser Guard, statt eine konkurrierende Reparatur zu starten, und prüft sein Gerät erneut, sobald der Port wieder da ist. Leer lassen, wenn das Gerät nicht an einem PoE-Port hängt.",
+              "data": {
+                "poe_id": "PoE-Port-id (MAC / IP / statisch)"
+              }
             }
           }
         },
