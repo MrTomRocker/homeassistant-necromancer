@@ -40,6 +40,7 @@ invariant:
 | `health/entity_state.py` | value-list mapping → OK/UNHEALTHY/UNKNOWN; unavailable/unknown → UNKNOWN; legacy `healthy_state` fallback; multiselect membership. |
 | `health/template.py` | `result_as_boolean` cases (`true/false/on/off/1/0/'banana'/42`); empty/`none`/`unknown` → UNKNOWN; render error → UNKNOWN. |
 | `drivers/*.can_recover` | missing switch / missing+ambiguous port / invalid+empty action → `(False, reason)`. |
+| `drivers/poe_port` cache | `observe()` learns the live single match; `_select()` = live-wins → last-known fallback (on zero live) → block (ambiguous/none). Engine `resolved_port` persists in the Store, `bind_cache`/`observe` wire it, `_set_resolved_port` saves on change only. |
 | `config_flow` helpers | `_flatten_sections` (nested→flat), `_as_list`, `_watch_config`/`_watch_defaults`, `_build_data` (health block per source type, behaviour per check), `_current_strategy`, `_source_type_of`. |
 | `config_flow` ports YAML | `_parse_ports_yaml`/`_normalize_imported_port`: required `label`/`actuator`/`status_entity`; reject not-a-list / empty / `null` / list-of-scalar / malformed YAML / non-numeric **or negative** timing; trim, scalar→list, missing/empty status→default, int→str, unknown keys dropped, unicode. `_ports_to_yaml` round-trips; bool/number-like values survive both ways (export quotes, import coerces YAML-1.1 `on/off/yes/no` back to strings — purely-numeric colon ids like `1:2:3` are the one thing to quote). Import **merge** = upsert by `label`, **replace** = overwrite; invalid import leaves the list untouched. *(A standalone harness — see §5 — exercises 35 of these against the real module.)* |
 | `actions.py` | `async_validate` normalises `service`→`action`; invalid sequence raises `vol.Invalid`. |
@@ -65,6 +66,10 @@ Drive the real flows and the engine:
   untouched; `import_mode` omitted defaults to merge; export multi-select (all
   pre-selected, empty selection tolerated) → round-trip YAML. Driven
   **non-destructively** (never call `save`), so the entry's real ports are safe.
+- **Auto-PoE fallback**: build a poe_port guard whose device id is a settable
+  entity state; let it learn the port while healthy, then make the device vanish
+  (id gone) **and** go unhealthy → the recovery must cycle the *cached* port
+  (WARNING "falling back to last-known port"), not block with "no port matches".
 
 These run today against the dev container by driving the REST/WS flow API and
 asserting on `sensor.*_status` + the error log (see the regression checklist for

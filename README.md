@@ -84,7 +84,7 @@ health-check** (wait until the device reports healthy again before declaring suc
 | **Power-cycle a switch** | turn a switch off → wait → on (e.g. a smart plug) |
 | **Run an action** | one action sequence — script, service, SSH, webhook, … |
 | **Off/on actions** | an *off* action → wait → an *on* action |
-| **Auto-PoE** | resolve the device to its PoE port and power-cycle it, with staged verify (port goes offline → comes back) on top of the device health-check |
+| **Auto-PoE** | resolve the device to its PoE port and power-cycle it, with staged verify (port goes offline → comes back) on top of the device health-check. It **remembers** the port while the device is healthy, so it can still recover a device that has dropped off the switch (and so aged out of the neighbour table) |
 
 Notify-only guards skip recovery entirely and just raise the event.
 

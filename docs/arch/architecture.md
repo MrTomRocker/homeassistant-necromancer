@@ -100,8 +100,9 @@ health-check:
 
 **Persistence.** Runtime state is persisted in a `Store`
 (`.storage/necromancer.<entry_id>`), independent of the display entities:
-`{state, attempt, recover_count, last_recover, last_seen, auto}`. On restart the
-stats and `auto` flag are restored, `ESCALATED` is restored (then re-derived from
+`{state, attempt, recover_count, last_recover, last_seen, auto, resolved_port}`.
+On restart the stats, `auto` flag and the last-known `resolved_port` (poe_port's
+fallback target) are restored, `ESCALATED` is restored (then re-derived from
 live health), and transient states (RECOVERING/COOLDOWN/VERIFY) are *not*
 restored — they come back as OK/live-health. The display entities
 (`sensor.*_status`, `binary_sensor.*_health`, `switch.*_auto_recovery`,
@@ -141,7 +142,7 @@ The wizard’s first step picks the source type (`state_based` / `template_based
 | `switch_cycle` | `turn_off` → `off_on_delay` → `turn_on`. | switch entity exists. |
 | `action_call` | Run one user-defined action sequence (script syntax). | action valid & non-empty. |
 | `action_cycle` | Run an *off* action → delay → *on* action. | both actions valid. |
-| `poe_port` | Resolve the device to a PoE port by `expected_id`, then cycle its actuator with staged status verify. | exactly one matching port. |
+| `poe_port` | Resolve the device to a PoE port by `expected_id`, then cycle its actuator with staged status verify. Learns the port while healthy and falls back to the last-known port when the device has aged out. | one live **or** last-known port. |
 | `noop` | Nothing (used by notify-only guards). | — |
 
 User actions are validated (`cv.SCRIPT_SCHEMA` + `async_validate_actions_config`)
@@ -163,6 +164,16 @@ poe_port                              → poe_port        (own staged verify + h
 A strategy maps to a `driver type` + a `health_check` behaviour flag. Auto-PoE
 keeps its own staged verify (port goes offline → comes online) on top of the
 device health-check.
+
+**Auto-PoE remembers its port.** A device that is down can age out of the
+switch's FDB/LLDP neighbour table, so resolving it live would find *nothing*
+exactly when recovery is needed. The engine therefore calls `driver.observe()`
+on every healthy evaluation; `poe_port` records the resolved port (by label) in
+the per-guard `Store` (`resolved_port`). At recovery time a single live match
+still wins (and refreshes the cache); on **zero** live matches it falls back to
+that last-known port (logged at WARNING); an **ambiguous** (>1) match still
+blocks. The cache is wired generically — `RecoveryDriver.bind_cache(get, set)` +
+`observe()` — so the engine owns persistence and only `poe_port` uses it.
 
 ---
 
