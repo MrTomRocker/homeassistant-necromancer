@@ -112,15 +112,15 @@ Leader + follower of a linked group. The **leader** runs the normal §2 clock an
 addition, signals the group:
 
 ```
-leader: _start_cycle → claim RECOVERING (sync) → task: _notify_partners_start
+leader: _start_cycle → claim RECOVERING (sync) → task: links.notify_start
             (direct call to each partner + necromancer_guard_repair "start" event)
    ... leader runs its recovery + VERIFY ...
-        → finally: _notify_partners_done(success)  ("done" event)
+        → finally: links.notify_done(success)  ("done" event)
 
-follower (auto on): _on_partner_repair_start
+follower (auto on): links.on_partner_repair_start
             → hold: RECOVERING, _following=True, debounce timer cancelled
             → _evaluate suppressed while following (device drop is expected)
-        on _notify_partners_done → _validate_after_repair(leader_success):
+        on links.notify_done → links.validate_after_repair(leader_success):
             VERIFY (boot_window):
               healthy            → _recover_success (COOLDOWN + stats), same as leader
               unhealthy + leader OK   → own recovery (only our device is still down)
@@ -130,7 +130,7 @@ follower (auto on): _on_partner_repair_start
 **Claim window (arbitration).** A guard sets `RECOVERING` *synchronously* in
 `_start_cycle`, before the cycle task runs. So if two linked guards' debounces elapse in
 the same event-loop tick, the first to reach `_debounce_done` claims, and the second —
-checking `_find_repairing_partner` — sees it and follows. Without the synchronous claim
+checking `links.find_repairing_partner` — sees it and follows. Without the synchronous claim
 both would start (the state was still `SUSPECT` until the task ran): the bug fixed in
 `a2d4a03`.
 

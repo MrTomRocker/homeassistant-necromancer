@@ -175,8 +175,11 @@ cache and learns continuously: it watches every configured port's id-entity
 (`_rewatch` → `_on_change` → `_relearn`/`_learn`), so it caches the mapping the
 moment the neighbour table reports the device — not only on a health event. At
 recovery time a single live match still wins (and refreshes the cache); on
-**zero** live matches `resolve_with_reason` falls back to that last-known port
-(logged at WARNING); an **ambiguous** (>1) match still blocks. The cache lives in
+**zero** live matches `resolve_with_reason` falls back to that last-known port —
+but only if that port currently reports *nothing* connected; if it now serves a
+*different* live id (the device was re-cabled away) the stale entry is dropped and
+it blocks ("no port matches") rather than cycling the wrong device (logged at
+WARNING); an **ambiguous** (>1) match still blocks. The cache lives in
 the fabric (not per guard) and is persisted in the Store under `_poe_cache`; the
 `poe_port` driver is a thin adapter that just delegates resolve + cycle to it.
 
@@ -216,11 +219,13 @@ follow — e.g. a *ping* guard and a *lamps-unavailable* guard on the same Hue b
   every group (no inert ghost member). Unlinking clears the edge on **both** sides
   (`_apply_link_removals`), so the only way out of a group is to clear *all* its
   partners (a single shared partner re-forms the clique).
-- **Coordination.** When a guard starts recovery it fires `_notify_partners_start`
-  (a direct call to each partner engine **and** a `necromancer_guard_repair` bus event
+- **Coordination.** When a guard starts recovery the engine calls `self.links.notify_start()`
+  (`LinkCoordinator` in `links.py`), which calls each partner's coordinator
+  (`peer.links.on_partner_repair_start`) **and** fires a `necromancer_guard_repair` bus event
   for outside automations). A partner that isn't already busy enters a **follow hold**
   (RECOVERING, no own action) and suppresses its own health-driven transitions. When
-  the leader finishes (`_notify_partners_done`), each follower re-validates:
+  the leader finishes (`self.links.notify_done(success)` → each partner's
+  `on_partner_repair_done`), each follower re-validates (`validate_after_repair`):
   - healthy → it settles through the **same `_recover_success` path** (cooldown +
     stats) as the leader, instead of snapping back to OK;
   - still unhealthy **and the leader succeeded** → only the follower's device is
@@ -230,7 +235,8 @@ follow — e.g. a *ping* guard and a *lamps-unavailable* guard on the same Hue b
     re-triggering the group (no cascade).
 - **Arbitration is first-come.** A guard claims the leader role *synchronously* in
   `_start_cycle` (sets `RECOVERING` before the cycle task runs), so a linked partner
-  whose debounce elapses in the same tick already sees it as repairing and follows —
+  whose debounce elapses in the same tick already sees it as repairing
+  (`links.find_repairing_partner`) and follows —
   no double-cycle even on simultaneous trips.
 - **Auto-off means off.** A guard whose `auto` switch is disabled never participates
   in a group repair: instead of following, if its own device is affected it
@@ -310,12 +316,16 @@ existing device uses the Battery-Notes pattern (`device_info=None` +
 __init__.py        setup: build one DeviceEngine per device subentry, inject
                    ports into poe_port guards, resolve link groups, wire the PoE
                    fabric + repair_poe_port service, reconcile devices/entities, Store
-engine.py          the state machine, timing, persistence, health wiring, link coordination
+engine.py          the state machine, timing, persistence, health wiring (delegates
+                   linking to LinkCoordinator)
+state.py           the GState enum (re-exported by engine.py)
 config_flow.py     service + device-subentry + options(ports) flows, schemas, sections,
                    YAML port import/export (_parse_ports_yaml / _ports_to_yaml)
 const.py           keys, defaults, strategy/source constants
-links.py           guard-link grouping (connected components / clique closure)
-poe.py             PoE fabric: shared id→port resolver, per-port status/lock, repair service
+links.py           guard-link grouping (connected components / clique closure) +
+                   LinkCoordinator: per-engine runtime link protocol (start/hold/verify)
+poe.py             PoE fabric: shared id→port resolver, per-port status + coalesced
+                   in-flight cycle, repair service
 entity.py          base entity (DeviceInfo, unique_id, link handling)
 sensor/binary_sensor/switch/button.py   the four view entities
 actions.py         validate + run user action sequences (Script helper)

@@ -42,8 +42,8 @@ one of them:
 ## 2. Level 1 — unit (pure logic / real `hass`)
 
 Fast, deterministic. Three runnable modules cover this level today (run them with
-the dev venv, see §5): **`tests/test_units.py`** (18), **`tests/test_poe.py`** (15),
-**`tests/test_engine.py`** (11). Each row maps to an invariant:
+the dev venv, see §5): **`tests/test_units.py`** (18), **`tests/test_poe.py`** (16),
+**`tests/test_engine.py`** (30). Each row maps to an invariant:
 
 | Module | What to assert | Covered by |
 |---|---|---|
@@ -105,12 +105,13 @@ These run today against the dev container by driving the REST/WS flow API and
 asserting on `sensor.*_status` + the error log (see the regression checklist for
 exact steps).
 
-## 4. Level 3 — manual regression checklist
+## 4. Level 3 — agent regression checklist
 
-`REGRESSION.md` (kept in the dev-docs area, not shipped) is the human-run,
-priority-ordered checklist (P0/P1/P2). Run the **P0** block after any engine,
-persistence, health, or config-flow change. Each item names the expected log
-line / entity state so a run is unambiguous.
+[`AGENT_REGRESSION.md`](AGENT_REGRESSION.md) is the agent-runnable, priority-ordered
+checklist (P0/P1/P2): each item is a tickable *Prüft / Files / Treiber / Assert /
+Cleanup* block an agent drives via file inspection and the live-test helper API. Run
+the **P0** block after any engine, persistence, health, or config-flow change. Each
+item names the expected log line / entity state so a run is unambiguous.
 
 ---
 

@@ -347,7 +347,9 @@ between ports just works:
 Necromancer scans every port, finds the one currently reporting that MAC/IP, cycles it, and waits for
 the device to report healthy again. Re-patch the device to a different port and it still finds it. It
 also **remembers** the last-known port while the device is healthy, so it can still recover a device
-that has gone fully dark and aged out of the switch's neighbour table.
+that has gone fully dark and aged out of the switch's neighbour table — as long as that port still
+reports nothing connected. If a *different* device has since been patched onto the last-known port,
+Necromancer drops the stale entry and refuses rather than power-cycling the wrong device.
 
 > Ids are matched trimmed and case-insensitive (`B0:1F:81:…` matches `b0:1f:81:…`). **Exactly one** port
 > must match: zero or several blocks recovery (it's logged and the guard goes to `escalated`), so
