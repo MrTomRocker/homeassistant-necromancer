@@ -137,6 +137,33 @@ async def test_manual_recover(hass, _):
     await eng.async_stop()
 
 
+async def test_manual_recover_ignored_while_busy(hass, _):
+    # A press while a cycle is in flight must be ignored — not reset `attempt`
+    # under the running loop (which would defeat max_attempts).
+    health = FakeHealth(hass, Health.UNHEALTHY)
+    gate = asyncio.Event()
+
+    class BlockingDriver(StubDriver):
+        async def recover(self):
+            self.calls += 1
+            await gate.wait()  # hold the cycle in flight
+            health.verdict = Health.OK
+
+    driver = BlockingDriver(hass)
+    eng = make(hass, health, driver, boot_window=0)
+    await eng.async_start()
+    await eng.async_manual_recover()  # spawns the cycle task
+    await asyncio.sleep(0.05)  # let it run up to the blocked recover() (don't await it)
+    assert eng.state is GState.RECOVERING and driver.calls == 1 and eng.attempt == 1
+    await eng.async_manual_recover()  # busy → ignored
+    await asyncio.sleep(0.05)
+    assert driver.calls == 1 and eng.attempt == 1  # no second cycle, attempt intact
+    gate.set()
+    await hass.async_block_till_done()  # now the cycle can finish
+    assert eng.state in (GState.COOLDOWN, GState.OK)
+    await eng.async_stop()
+
+
 async def test_cooldown_to_suspect(hass, _):
     health = FakeHealth(hass, Health.OK)
     driver = StubDriver(hass, on_recover=lambda: setattr(health, "verdict", Health.OK))

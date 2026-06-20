@@ -2,11 +2,11 @@
 
 The fabric is the shared, port-level recovery primitive. It keeps a live +
 last-known ``id -> port`` map (watching every configured port's id-entity), a
-per-port status (``good`` / ``recovering`` / ``failed``) and a per-port lock, and
-exposes the ``necromancer.repair_poe_port`` service. Routing every PoE repair
-through it means multiple guards — and other automations — coordinate on one port
-instead of double-cycling it; the per-port status is fired as an event
-(``necromancer_poe_port``) so anything can react to it.
+per-port status (``good`` / ``recovering`` / ``failed``) and a per-port in-flight
+cycle, and exposes the ``necromancer.repair_poe_port`` service. Routing every PoE
+repair through it means multiple guards — and other automations — that fire at
+once **coalesce** onto one cycle instead of double-cycling the port; the per-port
+status is fired as an event (``necromancer_poe_port``) so anything can react to it.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ class PoeFabric:
         self._ports: list[dict] = []
         self._cache: dict[str, str] = {}  # normalized id -> port label (last-known)
         self._status: dict[str, str] = {}  # port label -> status
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._inflight: dict[str, asyncio.Task] = {}  # port label -> running cycle
         self._unsub: Callable[[], None] | None = None
 
     # ---------- lifecycle ----------
@@ -214,27 +214,43 @@ class PoeFabric:
                 EVENT_PORT_STATUS, {"port": label, "status": status}
             )
 
-    def _lock(self, label: str) -> asyncio.Lock:
-        return self._locks.setdefault(label, asyncio.Lock())
-
     # ---------- repair ----------
     async def repair(self, identifier: str) -> bool:
-        """Resolve the id to its port and power-cycle it (blocking, per port)."""
+        """Resolve the id to its port and power-cycle it (blocking, per port).
+
+        Concurrent callers for the same port **coalesce**: a call that arrives
+        while a cycle is in flight joins it and shares its result instead of
+        queuing a second power-cycle. So multiple guards (and automations) firing
+        at once produce exactly one cycle per port, not one each.
+        """
         port, reason = self.resolve_with_reason(identifier)
         if port is None:
             LOGGER.error("PoE fabric: cannot repair %r — %s", identifier, reason)
             return False
         label = port[CONF_LABEL]
-        lock = self._lock(label)
-        if lock.locked():
-            LOGGER.info("PoE port %r already recovering — waiting for it", label)
-        async with lock:
-            self._set_status(label, PORT_RECOVERING)
-            ok = await self._cycle(port)
-            self._set_status(label, PORT_GOOD if ok else PORT_FAILED)
-            if not ok:
-                LOGGER.warning("PoE port %r: repair did not confirm online", label)
-            return ok
+        task = self._inflight.get(label)
+        if task is not None and not task.done():
+            LOGGER.info(
+                "PoE port %r already recovering — joining in-flight cycle", label
+            )
+            return await asyncio.shield(task)
+        # Create + register the cycle task synchronously (no await in between), so a
+        # caller arriving in the same tick joins it instead of starting a second.
+        task = self.hass.async_create_task(self._run_cycle(port))
+        self._inflight[label] = task
+        try:
+            return await task
+        finally:
+            self._inflight.pop(label, None)
+
+    async def _run_cycle(self, port: dict) -> bool:
+        label = port[CONF_LABEL]
+        self._set_status(label, PORT_RECOVERING)
+        ok = await self._cycle(port)
+        self._set_status(label, PORT_GOOD if ok else PORT_FAILED)
+        if not ok:
+            LOGGER.warning("PoE port %r: repair did not confirm online", label)
+        return ok
 
     async def _cycle(self, port: dict) -> bool:
         actuator = port[CONF_ACTUATOR]

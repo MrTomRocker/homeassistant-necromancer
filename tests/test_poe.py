@@ -79,6 +79,7 @@ class Stubs:
         self.status_of = {}  # actuator -> status entity
         self.conc = 0
         self.max_conc = 0
+        self.cycles = 0  # one per turn_off = one power-cycle
         self.slow = 0.0
 
     def bind(self, actuator, status_entity):
@@ -92,6 +93,7 @@ class Stubs:
     def register(self):
         async def _off(call):
             self.conc += 1
+            self.cycles += 1
             self.max_conc = max(self.max_conc, self.conc)
             try:
                 if self.slow:
@@ -230,17 +232,19 @@ async def test_repair_unresolvable_returns_false(hass, stubs):
     assert ok is False
 
 
-async def test_per_port_lock_serialises(hass, stubs):
+async def test_concurrent_callers_coalesce(hass, stubs):
     stubs.bind("switch.actL", "binary_sensor.stL")
-    stubs.slow = 0.05  # widen the window so an unlocked impl would overlap
+    stubs.slow = 0.05  # widen the window so a second cycle would run if not coalesced
     hass.states.async_set("switch.actL", "on")
     hass.states.async_set("binary_sensor.stL", "on")
     f = PoeFabric(hass)
     f.set_ports([port("PL", "switch.actL", "binary_sensor.stL", id_static="dev", delay=0)])
-    await asyncio.gather(f.repair("dev"), f.repair("dev"))
+    res = await asyncio.gather(f.repair("dev"), f.repair("dev"))
     await hass.async_block_till_done()
     stubs.slow = 0.0
-    assert stubs.max_conc == 1, f"cycles overlapped (max_conc={stubs.max_conc})"
+    assert res == [True, True], res  # both callers share the one cycle's result
+    assert stubs.cycles == 1, f"concurrent callers ran {stubs.cycles} cycles (want 1)"
+    assert stubs.max_conc == 1
     assert f.status("PL") == PORT_GOOD
 
 
@@ -290,7 +294,7 @@ async def test_driver_no_ports_config_error(hass, stubs):
     assert d.config_errors(), "expected a config error when no ports configured"
 
 
-async def test_driver_and_service_share_lock(hass, stubs):
+async def test_driver_and_service_coalesce(hass, stubs):
     stubs.bind("switch.actS", "binary_sensor.stS")
     stubs.slow = 0.05
     hass.states.async_set("switch.actS", "on")
@@ -302,7 +306,8 @@ async def test_driver_and_service_share_lock(hass, stubs):
     await asyncio.gather(d.recover(), f.repair("dev"))
     await hass.async_block_till_done()
     stubs.slow = 0.0
-    assert stubs.max_conc == 1, f"driver & service overlapped (max_conc={stubs.max_conc})"
+    assert stubs.cycles == 1, f"driver & service ran {stubs.cycles} cycles (want 1)"
+    assert stubs.max_conc == 1
 
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
@@ -317,6 +322,7 @@ async def main() -> int:
             # reset concurrency tracking per test
             stubs.max_conc = 0
             stubs.conc = 0
+            stubs.cycles = 0
             stubs.slow = 0.0
             try:
                 await t(hass, stubs)
