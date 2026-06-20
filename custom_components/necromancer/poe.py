@@ -176,12 +176,25 @@ class PoeFabric:
             return None, f"'{identifier}' matches {len(live)} ports"
         port = self._by_label(self._cache.get(target))
         if port is not None:
+            # Only trust the last-known port if it currently reports *nothing*
+            # connected. If it now reports a different live id, the device was
+            # re-cabled away and another one sits there — cycling it would reboot
+            # the wrong device, so drop the stale entry and refuse instead.
+            occupant = _norm(self._port_id(port))
+            if occupant is None:
+                LOGGER.warning(
+                    "PoE fabric: %r not in any port's neighbour data — last-known port %r",
+                    identifier,
+                    port[CONF_LABEL],
+                )
+                return port, ""
             LOGGER.warning(
-                "PoE fabric: %r not in any port's neighbour data — last-known port %r",
-                identifier,
+                "PoE fabric: last-known port %r for %r now serves %r — dropping stale cache",
                 port[CONF_LABEL],
+                identifier,
+                occupant,
             )
-            return port, ""
+            self._cache.pop(target, None)
         return None, f"no port matches '{identifier}'"
 
     def target_info(self, identifier: str) -> str:

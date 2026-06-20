@@ -161,6 +161,22 @@ async def test_resolve_last_known(hass, _stubs):
     assert p is not None and p[CONF_LABEL] == "P1" and reason == "", (p, reason)
 
 
+async def test_resolve_last_known_skips_occupied_port(hass, _stubs):
+    # device A was learned on P1, then re-cabled away; another device B now sits
+    # on P1. A is still configured and goes unhealthy -> the fabric must NOT cycle
+    # P1 (that would reboot the innocent B); it drops the stale entry and refuses.
+    hass.states.async_set("sensor.nb1", "x", {"mac": "bb:bb"})  # P1 now serves B
+    f = PoeFabric(hass)
+    f.set_ports(
+        [port("P1", "switch.a1", "binary_sensor.s1", id_entity="sensor.nb1",
+              id_attribute="mac")],
+        cache={"aa:aa": "P1"},  # stale: A -> P1
+    )
+    p, reason = f.resolve_with_reason("aa:aa")
+    assert p is None and "no port matches" in reason, (p, reason)
+    assert f.cache.get("aa:aa") is None, f"stale entry not dropped: {f.cache}"
+
+
 async def test_resolve_none(hass, _stubs):
     f = PoeFabric(hass)
     f.set_ports([port("P1", "switch.a1", "binary_sensor.s1", id_static="hue")])
