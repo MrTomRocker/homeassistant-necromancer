@@ -98,6 +98,15 @@ health-check:
   raises — e.g. a missing service — it counts as a failed attempt, never a
   success.)*
 
+**Reload the assigned device's integration (optional).** If a device is assigned
+and the guard has `behavior.reload_entry`, then after `recover()` (and before
+VERIFY) the engine waits `reload_delay` seconds and reloads the device's config
+entry — `device.primary_config_entry` (fallback: all `config_entries`) via
+`hass.config_entries.async_reload` (`_maybe_reload_device_entry`). Best-effort: a
+missing device or a failing reload is logged but never aborts the cycle — VERIFY
+still decides success. Lets HA reconnect to a device that just came back without
+scripting a `homeassistant.reload_config_entry` action.
+
 **Persistence.** Runtime state is persisted in a `Store`
 (`.storage/necromancer.<entry_id>`), independent of the display entities. Per
 guard the engine stores `{state, attempt, recover_count, last_recover, last_seen,
@@ -264,15 +273,22 @@ stalls the engine.
 
 ---
 
-## 8. Config flow (`config_flow.py`)
+## 8. Config flow (`config_flow.py` + `config_flow_helpers/`)
 
-Steps for a recover guard: **source type → device & state → strategy → recovery**
-(notify-only guards stop after a notification step).
+The handler classes stay in `config_flow.py` (which must remain a file — hassfest
+requires it); the schema/selector builders live in the `config_flow_helpers`
+package (`schemas.py` + reactive `selectors.py`).
+
+Steps: **source type → device & state → strategy → recovery/notification**. The
+strategy step lists **notify-only** (first) plus the seven recovery strategies;
+picking notify-only routes to a notification step instead of a recovery one. There
+is no separate "mode" field — the notify-vs-recover choice *is* the strategy choice.
 
 - **Sections.** Fields are grouped into `data_entry_flow.section`s with a heading
-  and description (state check, behaviour, notification, assigned device; ports:
-  switch / recognition / status / timing). Sections nest their values, so submitted
-  input is flattened back up (`_flatten_sections`).
+  and description (state check, behaviour, notification, assigned device, and —
+  only when a device is assigned — *reload* the assigned device's integration after
+  a repair; ports: switch / recognition / status / timing). Sections nest their
+  values, so submitted input is flattened back up (`_flatten_sections`).
 - **Reactive selectors.** Attribute and state pickers follow their sibling entity
   field live via a per-field `context` mapping (`filter_entity` / `filter_attribute`).
   The reacting field and the entity it follows must sit in the **same section**
@@ -319,8 +335,10 @@ __init__.py        setup: build one DeviceEngine per device subentry, inject
 engine.py          the state machine, timing, persistence, health wiring (delegates
                    linking to LinkCoordinator)
 state.py           the GState enum (re-exported by engine.py)
-config_flow.py     service + device-subentry + options(ports) flows, schemas, sections,
-                   YAML port import/export (_parse_ports_yaml / _ports_to_yaml)
+config_flow.py     service + device-subentry + options(ports) flow handler classes
+                   (must stay a file — hassfest)
+config_flow_helpers/   schemas.py (all schema/section builders, _build_data, YAML
+                   port import/export) + selectors.py (reactive Live* selectors)
 const.py           keys, defaults, strategy/source constants
 links.py           guard-link grouping (connected components / clique closure) +
                    LinkCoordinator: per-engine runtime link protocol (start/hold/verify)
@@ -345,6 +363,7 @@ health entity changes
     → SUSPECT (debounce timer)
       → debounce elapsed, policy allows (auto on)
         → RECOVERING → driver.can_recover() ok → driver.recover() (off→delay→on)
+          → [reload_entry? delay + reload assigned device's config entry]
           → VERIFY → _wait_health_ok(boot_window)
               ├─ health OK in time → recover_success → COOLDOWN → OK
               └─ timeout → attempt<max ? retry : ESCALATED

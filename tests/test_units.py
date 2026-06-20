@@ -148,6 +148,22 @@ async def test_build_data_state_switch_check(hass, _):
     assert data[cf.CONF_BEHAVIOR]["boot_window"] == 90
 
 
+async def test_build_data_reload_entry(hass, _):
+    base = {cf.CONF_NAME: "G", cf.CONF_SOURCE_TYPE: cf.SOURCE_STATE,
+            cf.CONF_DEVICE_ID: "dev1", cf.CONF_ENTITY_ID: "binary_sensor.p",
+            cf.CONF_ATTRIBUTE: None, cf.CONF_ON_VALUE: ["on"], cf.CONF_OFF_VALUE: ["off"]}
+    step2 = {cf.CONF_DEBOUNCE: 30, cf.CONF_COOLDOWN: 60, cf.CONF_BOOT_WINDOW: 90,
+             cf.CONF_MAX_ATTEMPTS: 3, cf.CONF_SWITCH_ENTITY: "switch.s",
+             cf.CONF_OFF_ON_DELAY: 5, cf.CONF_RELOAD_ENTRY: True, cf.CONF_RELOAD_DELAY: 7}
+    data = cf._build_data(base, step2, cf.STRATEGY_SWITCH_CHECK)
+    assert data[cf.CONF_BEHAVIOR][cf.CONF_RELOAD_ENTRY] is True
+    assert data[cf.CONF_BEHAVIOR][cf.CONF_RELOAD_DELAY] == 7
+    # no assigned device -> reload not stored even with the flag set
+    nodev = {k: v for k, v in base.items() if k != cf.CONF_DEVICE_ID}
+    data2 = cf._build_data(nodev, step2, cf.STRATEGY_SWITCH_CHECK)
+    assert cf.CONF_RELOAD_ENTRY not in data2[cf.CONF_BEHAVIOR]
+
+
 async def test_build_data_template_notify(hass, _):
     step1 = {cf.CONF_NAME: "N", cf.CONF_SOURCE_TYPE: cf.SOURCE_TEMPLATE,
              cf.CONF_TEMPLATE: "{{ true }}"}

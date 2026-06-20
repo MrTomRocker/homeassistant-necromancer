@@ -458,6 +458,13 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
   - **Assert:** Antwort hat `errors["action"]=="action_required"`, `type!="create_entry"`, bleibt `step_id=="action"`.
   - **Cleanup:** — (kein Subentry).
 
+- [ ] **RL1 — Reload-Geräte-Integration: Checkbox nur bei zugewiesenem Gerät + Reload nach Repair** · `P1`
+  - **Prüft:** Die `reload`-Section (Checkbox „Integration neu laden" + Delay) erscheint in den Recover-Steps **nur wenn im Device-Step ein Gerät gesetzt** wurde; ist sie an, lädt die Engine nach `driver.recover()` (vor VERIFY) die Config-Entry des zugewiesenen Geräts neu (mit Delay).
+  - **Files:** `config_flow_helpers/schemas.py` → `_reload_section` (SECTION_RELOAD, BooleanSelector + `_seconds_selector`), als `reload_block`-Parameter **vor** der Notification-Section in `_switch_schema`/`_action_schema`/`_actions_schema`/`_poe_schema` eingefügt; `_build_data` (speichert `behavior.reload_entry`/`reload_delay` nur bei gesetztem `device_id`); `config_flow.py` → `_reload_block()` (gibt die Section nur zurück, wenn `self._step1[CONF_DEVICE_ID]`), an die 4 Recover-Steps via `reload_block=`; `engine.py` → `_maybe_reload_device_entry` (nach `recover()`, vor VERIFY: `dr` → `device.primary_config_entry`/`config_entries` → `hass.config_entries.async_reload`, best-effort).
+  - **Treiber:** Recover-Guard MIT zugewiesenem Gerät anlegen, Reload-Checkbox an, kleiner Delay; Health brechen, Repair abwarten.
+  - **Assert:** Schema des Recover-Steps enthält die `reload`-Section nur bei gesetztem Gerät (ohne Gerät fehlt sie), und zwar **vor** der Notification-Section; nach dem Repair erscheint im Log `"reloading the assigned device's integration (entry …)"` und die Geräte-Integration wurde neu geladen. Automatisiert: `test_units.py::test_build_data_reload_entry`, `test_engine.py::test_reload_device_entry_on_repair`.
+  - **Cleanup:** Subentry löschen.
+
 ---
 
 ## Auto-Reparatur · Notify-als-Aktion · Corner Cases/Robustheit

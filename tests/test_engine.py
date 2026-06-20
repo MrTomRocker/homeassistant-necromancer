@@ -579,6 +579,42 @@ async def test_snapshot_roundtrip(hass, _):
     await eng.async_stop()
 
 
+async def test_reload_device_entry_on_repair(hass, _):
+    from homeassistant.helpers import device_registry as dr
+
+    from tests.common import MockConfigEntry
+
+    entry = MockConfigEntry(domain="demo")
+    entry.add_to_hass(hass)
+    # Identifier tied to the (per-run unique) entry_id so the shared/persisted test
+    # device registry can't accumulate config entries on a fixed device across runs.
+    dev = dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id, identifiers={("demo", entry.entry_id)}
+    )
+    reloaded: list[str] = []
+
+    async def _fake_reload(eid):
+        reloaded.append(eid)
+
+    orig = hass.config_entries.async_reload
+    hass.config_entries.async_reload = _fake_reload
+    try:
+        eng = DeviceEngine(hass, "RL", FakeHealth(hass), StubDriver(hass),
+                           StandardPolicy({}), {"reload_entry": True, "reload_delay": 0},
+                           link_device_id=dev.id, subentry_id="rl", engines={})
+        await eng._maybe_reload_device_entry()
+        assert reloaded == [entry.entry_id], reloaded
+        # flag off -> no reload
+        reloaded.clear()
+        eng2 = DeviceEngine(hass, "RL2", FakeHealth(hass), StubDriver(hass),
+                            StandardPolicy({}), {}, link_device_id=dev.id,
+                            subentry_id="rl2", engines={})
+        await eng2._maybe_reload_device_entry()
+        assert reloaded == [], reloaded
+    finally:
+        hass.config_entries.async_reload = orig
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 

@@ -65,6 +65,7 @@ from .config_flow_helpers.schemas import (
     _port_schema,
     _port_select_schema,
     _ports_to_yaml,
+    _reload_section,
     _source_schema,
     _source_type_of,
     _strategy_schema,
@@ -73,6 +74,7 @@ from .config_flow_helpers.schemas import (
 )
 from .const import (
     CONF_ACTION,
+    CONF_BEHAVIOR,
     CONF_DEVICE_ID,
     CONF_IMPORT_MODE,
     CONF_LABEL,
@@ -204,6 +206,15 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
         section_dict = _link_section(self._link_options(), self._linked_default())
         return schema.extend(section_dict) if section_dict else schema
 
+    def _reload_block(self) -> dict:
+        """The 'reload assigned device integration' section — only when a device
+        was set in the device step (nothing to reload otherwise). Inserted before
+        the notification section by the strategy schema."""
+        if not self._step1.get(CONF_DEVICE_ID):
+            return {}
+        d = self._reconfig_data().get(CONF_BEHAVIOR, {}) if self._reconfig else {}
+        return _reload_section(d)
+
     # ---------- source type (entity state vs template) ----------
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -301,7 +312,12 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
         return self.async_show_form(
             step_id="switch",
             data_schema=self._with_link(
-                _switch_schema(d, check=self._check, exclude=_own_entities(self.hass))
+                _switch_schema(
+                    d,
+                    check=self._check,
+                    exclude=_own_entities(self.hass),
+                    reload_block=self._reload_block(),
+                )
             ),
         )
 
@@ -324,7 +340,9 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             d = _action_defaults(self._reconfig_data()) if self._reconfig else None
         return self.async_show_form(
             step_id="action",
-            data_schema=self._with_link(_action_schema(d, check=self._check)),
+            data_schema=self._with_link(
+                _action_schema(d, check=self._check, reload_block=self._reload_block())
+            ),
             errors=errors,
         )
 
@@ -347,7 +365,9 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             d = _actions_defaults(self._reconfig_data()) if self._reconfig else None
         return self.async_show_form(
             step_id="actions",
-            data_schema=self._with_link(_actions_schema(d, check=self._check)),
+            data_schema=self._with_link(
+                _actions_schema(d, check=self._check, reload_block=self._reload_block())
+            ),
             errors=errors,
         )
 
@@ -361,7 +381,10 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             )
         d = _poe_defaults(self._reconfig_data()) if self._reconfig else None
         return self.async_show_form(
-            step_id="poe_port", data_schema=self._with_link(_poe_schema(d))
+            step_id="poe_port",
+            data_schema=self._with_link(
+                _poe_schema(d, reload_block=self._reload_block())
+            ),
         )
 
     # ---------- notify-only ----------

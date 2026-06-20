@@ -128,7 +128,14 @@ health-check** (wait until the device reports healthy again before declaring suc
 | **Auto-PoE** | resolve the device to its PoE port and power-cycle it, with a staged verify (the port goes offline → comes back) on top of the device health-check. It **remembers** the port while the device is healthy, so it can still recover a device that has already dropped off the switch and aged out of the neighbour table |
 
 A **notify-only** guard skips recovery entirely — it just detects the problem and raises the event
-(and optionally notifies). Use it to be told about something you'd rather fix by hand.
+(and optionally notifies). Pick **Notify only** at the top of the strategy step to be told about
+something you'd rather fix by hand.
+
+**Restart device integration (optional).** When the guard has a device assigned, the recovery step
+shows a *Restart device integration* toggle: after the repair action — and before re-checking
+health — Necromancer reloads that device's integration (its config entry), after a delay you set.
+Handy when Home Assistant has to reconnect to a device that just came back (e.g. a bridge after a
+power-cycle), so you don't have to script a `homeassistant.reload_config_entry` action yourself.
 
 ## Timing & behaviour
 
@@ -298,14 +305,15 @@ watched.
 1. Go to **Settings → Devices & Services**, click **+ Add Integration** and search for
    **Necromancer**. Confirm — it's added with no devices yet.
 2. On the Necromancer entry, click **Add device** to create a guard. The wizard walks you through:
-   **health source → device & check → strategy → recovery/notification**.
+   **health source → device & check → what to do (notify-only or a recovery strategy) → its settings**.
 
 <div align="center">
   <img width="480px" alt="Add a guarded device" src="https://raw.githubusercontent.com/MrTomRocker/homeassistant-necromancer/main/img/add_device.png">
 </div>
 
 Along the way you set the **timing** (debounce / boot window / cooldown / max attempts — see
-[Timing & behaviour](#timing--behaviour)), an optional **notify action**, and optionally link the
+[Timing & behaviour](#timing--behaviour)), an optional **notify action**, an optional
+**restart-device-integration** toggle (when a device is assigned), and optionally link the
 guard to others. The defaults are sensible; tune them per device.
 
 **PoE ports** (only needed for the Auto-PoE strategy) are managed as a flat list under Necromancer's

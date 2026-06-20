@@ -133,6 +133,11 @@ CONF_HEALTH_CHECK = "health_check"
 # action sequence (script syntax) instead of fixed notify entities — the user
 # decides whether/how to notify. Variables: message, name, event, + event params.
 CONF_NOTIFY_ACTION = "notify_action"
+# After a repair attempt, reload the assigned device's integration (its config
+# entry) before VERIFY — only offered when a device is assigned. The delay gives
+# the just-repaired device time to come up before HA reconnects to it.
+CONF_RELOAD_ENTRY = "reload_entry"
+CONF_RELOAD_DELAY = "reload_delay"
 
 # defaults (seconds, except counts/bools)
 DEFAULT_DEBOUNCE = 120
@@ -142,6 +147,7 @@ DEFAULT_MAX_ATTEMPTS = 2
 DEFAULT_AUTO_RESTART = True
 DEFAULT_HEALTHY_STATE = "on"
 DEFAULT_OFF_ON_DELAY = 5
+DEFAULT_RELOAD_DELAY = 10
 
 # User-facing notification message templates (str.format with name/attempt/max/...).
 # Kept in code rather than strings.json because Home Assistant's translation schema

@@ -49,6 +49,8 @@ from ..const import (
     CONF_POLICY,
     CONF_PORT_SELECTION,
     CONF_PORTS_YAML,
+    CONF_RELOAD_DELAY,
+    CONF_RELOAD_ENTRY,
     CONF_SOURCE,
     CONF_SOURCE_TYPE,
     CONF_STATUS_ATTRIBUTE,
@@ -66,6 +68,7 @@ from ..const import (
     DEFAULT_OFF_ON_DELAY,
     DEFAULT_PORT_OFF_TIMEOUT,
     DEFAULT_PORT_ON_TIMEOUT,
+    DEFAULT_RELOAD_DELAY,
     DOMAIN,
     IMPORT_MODE_MERGE,
     IMPORT_MODE_REPLACE,
@@ -159,6 +162,7 @@ SECTION_POWER = "power"
 SECTION_IDENTITY = "identity"
 SECTION_STATUS = "status"
 SECTION_TIMING = "timing"
+SECTION_RELOAD = "reload"
 
 
 def _section(key: str, fields: dict, *, collapsed: bool = False) -> dict:
@@ -299,6 +303,26 @@ def _link_section(options: list[dict], default: list[str]) -> dict:
     )
 
 
+def _reload_section(d: dict) -> dict:
+    """Optional 'reload the assigned device's integration after a repair' toggle.
+
+    Only appended (by the flow) when a device is assigned. `d` is the stored
+    behavior block, so a reconfigure pre-fills the current values.
+    """
+    return _section(
+        SECTION_RELOAD,
+        {
+            vol.Required(
+                CONF_RELOAD_ENTRY, default=d.get(CONF_RELOAD_ENTRY, False)
+            ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_RELOAD_DELAY,
+                default=d.get(CONF_RELOAD_DELAY, DEFAULT_RELOAD_DELAY),
+            ): _seconds_selector(600),
+        },
+    )
+
+
 def _debounce_field(d: dict) -> dict:
     return {
         vol.Required(
@@ -352,19 +376,22 @@ def _switch_fields(d: dict, exclude: list[str]) -> dict:
 
 
 def _switch_schema(
-    d: dict | None = None, *, check: bool, exclude: list[str] = ()
+    d: dict | None = None, *, check: bool, exclude: list[str] = (), reload_block=None
 ) -> vol.Schema:
     d = d or {}
     return vol.Schema(
         {
             **_switch_fields(d, list(exclude)),
             **_behavior_section(d, check=check),
+            **(reload_block or {}),
             **_notification_section(d),
         }
     )
 
 
-def _action_schema(d: dict | None = None, *, check: bool) -> vol.Schema:
+def _action_schema(
+    d: dict | None = None, *, check: bool, reload_block=None
+) -> vol.Schema:
     """One recovery action sequence + behaviour."""
     d = d or {}
     return vol.Schema(
@@ -373,12 +400,15 @@ def _action_schema(d: dict | None = None, *, check: bool) -> vol.Schema:
                 CONF_ACTION, description={"suggested_value": d.get(CONF_ACTION)}
             ): selector.ActionSelector(),
             **_behavior_section(d, check=check),
+            **(reload_block or {}),
             **_notification_section(d),
         }
     )
 
 
-def _actions_schema(d: dict | None = None, *, check: bool) -> vol.Schema:
+def _actions_schema(
+    d: dict | None = None, *, check: bool, reload_block=None
+) -> vol.Schema:
     """An "off" and an "on" action sequence + delay + behaviour."""
     d = d or {}
     return vol.Schema(
@@ -394,6 +424,7 @@ def _actions_schema(d: dict | None = None, *, check: bool) -> vol.Schema:
                 default=d.get(CONF_OFF_ON_DELAY, DEFAULT_OFF_ON_DELAY),
             ): _seconds_selector(600),
             **_behavior_section(d, check=check),
+            **(reload_block or {}),
             **_notification_section(d),
         }
     )
@@ -464,6 +495,11 @@ def _build_data(step1: dict, step2: dict, strategy: str) -> dict:
             behavior[CONF_BOOT_WINDOW] = int(step2[CONF_BOOT_WINDOW])
             behavior[CONF_MAX_ATTEMPTS] = int(step2[CONF_MAX_ATTEMPTS])
         data[CONF_DRIVER] = _build_driver(step2, strategy)
+        if step1.get(CONF_DEVICE_ID) and step2.get(CONF_RELOAD_ENTRY):
+            behavior[CONF_RELOAD_ENTRY] = True
+            behavior[CONF_RELOAD_DELAY] = int(
+                step2.get(CONF_RELOAD_DELAY, DEFAULT_RELOAD_DELAY)
+            )
     if step1.get(CONF_DEVICE_ID):
         data[CONF_DEVICE_ID] = step1[CONF_DEVICE_ID]
     if not notify_only and step2.get(CONF_LINKED_GUARDS):
@@ -552,12 +588,13 @@ def _poe_defaults(data: dict) -> dict:
     }
 
 
-def _poe_schema(d: dict | None = None) -> vol.Schema:
+def _poe_schema(d: dict | None = None, *, reload_block=None) -> vol.Schema:
     d = d or {}
     return vol.Schema(
         {
             vol.Required(CONF_EXPECTED_ID, default=d.get(CONF_EXPECTED_ID, "")): str,
             **_behavior_section(d, check=True),
+            **(reload_block or {}),
             **_notification_section(d),
         }
     )

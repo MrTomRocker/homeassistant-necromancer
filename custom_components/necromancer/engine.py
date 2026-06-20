@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.entity_registry import EventEntityRegistryUpdatedData
 from homeassistant.helpers.event import (
     async_call_later,
@@ -31,11 +31,14 @@ from .const import (
     CONF_HEALTH_CHECK,
     CONF_MAX_ATTEMPTS,
     CONF_NOTIFY_ACTION,
+    CONF_RELOAD_DELAY,
+    CONF_RELOAD_ENTRY,
     DEFAULT_AUTO_RESTART,
     DEFAULT_BOOT_WINDOW,
     DEFAULT_COOLDOWN,
     DEFAULT_DEBOUNCE,
     DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_RELOAD_DELAY,
     DOMAIN,
     LOGGER,
     REASON_OBSERVE,
@@ -489,6 +492,11 @@ class DeviceEngine:
                         return
                     continue
 
+                # Optionally reload the assigned device's integration after the
+                # repair (and before VERIFY), so HA reconnects to a device that
+                # just came back. Best-effort: a reload failure must not abort.
+                await self._maybe_reload_device_entry()
+
                 # Without a health-check the action is assumed to have worked; the
                 # continuous health monitoring re-triggers if it didn't.
                 if not self.behavior.get(CONF_HEALTH_CHECK, True):
@@ -509,6 +517,43 @@ class DeviceEngine:
             # group — that would escalate followers off our half-finished cycle.
             if not self._stopping:
                 self.links.notify_done(self.state == GState.COOLDOWN)
+
+    async def _maybe_reload_device_entry(self) -> None:
+        """Reload the assigned device's integration after a repair, if enabled.
+
+        Best-effort: a missing device or a failing reload is logged but never
+        aborts the recovery — VERIFY still decides success.
+        """
+        if not self.behavior.get(CONF_RELOAD_ENTRY) or not self.link_device_id:
+            return
+        delay = self._int(CONF_RELOAD_DELAY, DEFAULT_RELOAD_DELAY)
+        if delay:
+            await asyncio.sleep(delay)
+        device = dr.async_get(self.hass).async_get(self.link_device_id)
+        if device is None:
+            LOGGER.warning(
+                "%s: assigned device %s gone, skipping integration reload",
+                self.name,
+                self.link_device_id,
+            )
+            return
+        entry_ids = (
+            [device.primary_config_entry]
+            if device.primary_config_entry
+            else list(device.config_entries)
+        )
+        for entry_id in entry_ids:
+            LOGGER.info(
+                "%s: reloading the assigned device's integration (entry %s)",
+                self.name,
+                entry_id,
+            )
+            try:
+                await self.hass.config_entries.async_reload(entry_id)
+            except Exception:  # noqa: BLE001
+                LOGGER.exception(
+                    "%s: failed to reload config entry %s", self.name, entry_id
+                )
 
     async def _wait_health_ok(self, timeout: int) -> bool:
         if self.health.evaluate() == Health.OK:

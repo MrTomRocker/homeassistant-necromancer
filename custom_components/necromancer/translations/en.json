@@ -203,6 +203,14 @@
               "data": {
                 "linked_guards": "Guards in this group"
               }
+            },
+            "reload": {
+              "name": "Restart device integration",
+              "description": "After a repair attempt, reload the assigned device's integration before checking its health again — useful when Home Assistant must reconnect to the device.",
+              "data": {
+                "reload_entry": "Restart the assigned device's integration after a repair",
+                "reload_delay": "Wait before restarting"
+              }
             }
           }
         },
@@ -235,6 +243,14 @@
               "description": "Group this guard with other recover guards. When any guard in the group repairs, the others follow — they wait and re-check afterwards instead of repairing in parallel. Linking is mutual and transitive: link to a guard that already has links and you join its whole group; to leave, clear all of them.",
               "data": {
                 "linked_guards": "Guards in this group"
+              }
+            },
+            "reload": {
+              "name": "Restart device integration",
+              "description": "After a repair attempt, reload the assigned device's integration before checking its health again — useful when Home Assistant must reconnect to the device.",
+              "data": {
+                "reload_entry": "Restart the assigned device's integration after a repair",
+                "reload_delay": "Wait before restarting"
               }
             }
           }
@@ -271,6 +287,14 @@
               "data": {
                 "linked_guards": "Guards in this group"
               }
+            },
+            "reload": {
+              "name": "Restart device integration",
+              "description": "After a repair attempt, reload the assigned device's integration before checking its health again — useful when Home Assistant must reconnect to the device.",
+              "data": {
+                "reload_entry": "Restart the assigned device's integration after a repair",
+                "reload_delay": "Wait before restarting"
+              }
             }
           }
         },
@@ -303,6 +327,14 @@
               "description": "Group this guard with other recover guards. When any guard in the group repairs, the others follow — they wait and re-check afterwards instead of repairing in parallel. Linking is mutual and transitive: link to a guard that already has links and you join its whole group; to leave, clear all of them.",
               "data": {
                 "linked_guards": "Guards in this group"
+              }
+            },
+            "reload": {
+              "name": "Restart device integration",
+              "description": "After a repair attempt, reload the assigned device's integration before checking its health again — useful when Home Assistant must reconnect to the device.",
+              "data": {
+                "reload_entry": "Restart the assigned device's integration after a repair",
+                "reload_delay": "Wait before restarting"
               }
             }
           }

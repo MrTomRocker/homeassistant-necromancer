@@ -17,6 +17,7 @@ shipped values from `const.py`; all of them are per-guard configurable in the wi
 | `cooldown` | **600 s** | per guard | `_recover_success` → `async_call_later` | Settle pause after a successful recovery before returning to `OK`. While cooling down a fresh fault re-enters `SUSPECT` directly. |
 | `max_attempts` | **2** | per guard (`*_check` only) | `_run_recovery_cycle` loop | How many recovery attempts before `ESCALATED`. Without a health-check there is exactly one attempt (fire-and-forget). |
 | `off_on_delay` | **5 s** | per guard (switch / actions / poe) | the cycle | Pause between *off* and *on* in a power-cycle. |
+| `reload_delay` | **10 s** | per guard (recover, only if a device is assigned + `reload_entry` on) | `_maybe_reload_device_entry`, after `recover()` and before VERIFY | Wait before reloading the assigned device's integration (config entry), so the just-repaired device has time to come up before HA reconnects. |
 | `off_timeout` | **20 s** | per **port** | `poe_port` / fabric `_await_status` | Max wait for the port's status entity to read *offline* after cutting power (staged verify). |
 | `on_timeout` | **60 s** | per **port** | `poe_port` / fabric `_await_status` | Max wait for the port's status entity to read *online* after restoring power. |
 | `SAVE_DELAY` | **5 s** | global (fixed) | `Store.async_delay_save` | Debounce on writing runtime state to disk; a flush on unload guarantees no loss across a reload. |

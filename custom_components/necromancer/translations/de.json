@@ -203,6 +203,14 @@
               "data": {
                 "linked_guards": "Guards in dieser Gruppe"
               }
+            },
+            "reload": {
+              "name": "Geräte-Integration neu laden",
+              "description": "Nach einem Reparaturversuch die Integration des zugewiesenen Geräts neu laden, bevor erneut die Health geprüft wird — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss.",
+              "data": {
+                "reload_entry": "Integration des zugewiesenen Geräts nach Reparatur neu laden",
+                "reload_delay": "Wartezeit vor dem Neuladen"
+              }
             }
           }
         },
@@ -235,6 +243,14 @@
               "description": "Gruppiert diesen Guard mit anderen reparierenden Guards. Geht einer der Gruppe in Reparatur, folgen die anderen — sie warten und prüfen danach erneut, statt parallel zu reparieren. Die Verknüpfung ist beidseitig und transitiv: Verknüpfst du mit einem Guard, der schon Links hat, trittst du der ganzen Gruppe bei; zum Austreten alle abwählen.",
               "data": {
                 "linked_guards": "Guards in dieser Gruppe"
+              }
+            },
+            "reload": {
+              "name": "Geräte-Integration neu laden",
+              "description": "Nach einem Reparaturversuch die Integration des zugewiesenen Geräts neu laden, bevor erneut die Health geprüft wird — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss.",
+              "data": {
+                "reload_entry": "Integration des zugewiesenen Geräts nach Reparatur neu laden",
+                "reload_delay": "Wartezeit vor dem Neuladen"
               }
             }
           }
@@ -271,6 +287,14 @@
               "data": {
                 "linked_guards": "Guards in dieser Gruppe"
               }
+            },
+            "reload": {
+              "name": "Geräte-Integration neu laden",
+              "description": "Nach einem Reparaturversuch die Integration des zugewiesenen Geräts neu laden, bevor erneut die Health geprüft wird — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss.",
+              "data": {
+                "reload_entry": "Integration des zugewiesenen Geräts nach Reparatur neu laden",
+                "reload_delay": "Wartezeit vor dem Neuladen"
+              }
             }
           }
         },
@@ -303,6 +327,14 @@
               "description": "Gruppiert diesen Guard mit anderen reparierenden Guards. Geht einer der Gruppe in Reparatur, folgen die anderen — sie warten und prüfen danach erneut, statt parallel zu reparieren. Die Verknüpfung ist beidseitig und transitiv: Verknüpfst du mit einem Guard, der schon Links hat, trittst du der ganzen Gruppe bei; zum Austreten alle abwählen.",
               "data": {
                 "linked_guards": "Guards in dieser Gruppe"
+              }
+            },
+            "reload": {
+              "name": "Geräte-Integration neu laden",
+              "description": "Nach einem Reparaturversuch die Integration des zugewiesenen Geräts neu laden, bevor erneut die Health geprüft wird — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss.",
+              "data": {
+                "reload_entry": "Integration des zugewiesenen Geräts nach Reparatur neu laden",
+                "reload_delay": "Wartezeit vor dem Neuladen"
               }
             }
           }
