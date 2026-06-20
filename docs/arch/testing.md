@@ -33,16 +33,17 @@ one of them:
    the others *follow* (hold + re-verify afterwards) and never launch a parallel
    recovery for the same root cause. The link relation stays symmetric and
    clique-closed; the only way out of a group is to clear all of its partners.
-8. **Shared port recovery is serialised.** `repair_poe_port` cycles a port behind a
-   per-port lock, so concurrent callers share one cycle instead of double-cycling.
+8. **Shared port recovery is coalesced.** `repair_poe_port` cycles a port via a
+   per-port in-flight task, so concurrent callers join one cycle and share its
+   result instead of double-cycling.
 
 ---
 
 ## 2. Level 1 — unit (pure logic / real `hass`)
 
 Fast, deterministic. Three runnable modules cover this level today (run them with
-the dev venv, see §5): **`tests/test_units.py`** (15), **`tests/test_poe.py`** (14),
-**`tests/test_engine.py`** (10). Each row maps to an invariant:
+the dev venv, see §5): **`tests/test_units.py`** (18), **`tests/test_poe.py`** (15),
+**`tests/test_engine.py`** (11). Each row maps to an invariant:
 
 | Module | What to assert | Covered by |
 |---|---|---|
@@ -53,7 +54,7 @@ the dev venv, see §5): **`tests/test_units.py`** (15), **`tests/test_poe.py`** 
 | `config_flow` ports YAML | `_parse_ports_yaml`/`_normalize_imported_port`: required `label`/`actuator`/`status_entity`; reject not-a-list / empty / `null` / list-of-scalar / malformed YAML / non-numeric **or negative** timing; trim, scalar→list, missing/empty status→default, int→str. `_ports_to_yaml` round-trips; import **merge** = upsert by `label`, **replace** = overwrite. | `test_units` |
 | `actions.py` | `async_validate` normalises `service`→`action`; invalid sequence raises `vol.Invalid`. | `test_units` |
 | `links.py` | `link_components` / `group_of`: undirected union → connected components (clique closure); transitive (A–B, B–C ⇒ `{A,B,C}`); a one-sided link reads symmetric; stale ids dropped. | `test_units` |
-| `poe.py` (fabric) + `poe_port` driver | `resolve_with_reason`: one live match wins (refreshes cache) → last-known cache → ambiguous/none with a reason; `repair` sets status `recovering`→`good`/`failed`, serialised by the per-port lock; a status change fires `necromancer_poe_port`; the `poe_port` driver delegates resolve+cycle to the fabric (one cache, one lock, **shared with the service**). | `test_poe` |
+| `poe.py` (fabric) + `poe_port` driver | `resolve_with_reason`: one live match wins (refreshes cache) → last-known cache → ambiguous/none with a reason; `repair` sets status `recovering`→`good`/`failed`, with concurrent callers **coalescing** onto one in-flight cycle (`test_concurrent_callers_coalesce`); a status change fires `necromancer_poe_port`; the `poe_port` driver delegates resolve+cycle to the fabric (one cache, one cycle, **shared with the service** — `test_driver_and_service_coalesce`). | `test_poe` |
 
 ## 3. Level 2 — integration (HA test harness or dev container)
 
@@ -64,7 +65,7 @@ Drive the real flows and the engine:
 - **State machine** *(automated: `tests/test_engine.py`, real hass + time-travel)*:
   happy path (recover→verify→cooldown→ok, `recover_count++`); debounce blip
   absorbed; max-attempts → `ESCALATED`; raising driver = failed attempt; auto-off →
-  `ESCALATED`; manual recover; cooldown→suspect.
+  `ESCALATED`; manual recover (and ignored while a cycle is already running); cooldown→suspect.
 - **Persistence across restart** *(automated: `tests/test_engine.py`)*: ESCALATED
   stays (still unhealthy) / auto-clears (healthy again); `recover_count` and `auto`
   survive; snapshot round-trip.
@@ -96,7 +97,7 @@ Drive the real flows and the engine:
     follower escalates (`linked_repair_failed`), it does **not** self-recover and
     re-trigger the group (no cascade).
 - **`repair_poe_port` service**: a call resolves the id and cycles the port
-  (status `recovering`→`good`); a second concurrent call waits on the per-port lock
+  (status `recovering`→`good`); a second concurrent call **joins the in-flight cycle**
   instead of double-cycling. Verified live end-to-end via a real PoE-bridge outage
   (pull power → linked ping+lamps guards → one cycles the port → both verify OK).
 

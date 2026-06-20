@@ -99,9 +99,10 @@ cut power (turn_off actuator)
   the *device* health — so there are two verifies: the port came back (staged) **and**
   the device came back (health).
 - The **fabric** (`repair_poe_port`) only does the port cycle; the *caller's* action
-  (e.g. wait-ping → reload → delay) and the engine VERIFY do the rest. Concurrency on
-  one port is serialised by a per-port `asyncio.Lock`; status changes fire
-  `necromancer_poe_port` (`good` / `recovering` / `failed`).
+  (e.g. wait-ping → reload → delay) and the engine VERIFY do the rest. Concurrent
+  callers on one port **coalesce** onto a single in-flight cycle (they join it, they
+  don't queue a second); status changes fire `necromancer_poe_port`
+  (`good` / `recovering` / `failed`).
 
 ---
 
@@ -187,7 +188,7 @@ Every distinct case the system handles. *(C = confirmed by a test/probe; L = see
 | `ESCALATED` + healthy again | auto-clears to `OK`. |
 | `recover_count`, `last_recover`, `last_seen`, `auto` | restored from the Store. |
 | transient `RECOVERING`/`VERIFY`/`COOLDOWN` | **not** restored — re-derived from live health. |
-| `resolved_port` (poe_port last-known) | restored; `_poe_cache` (fabric) restored too. |
+| PoE last-known port (fabric `_poe_cache`) | restored, so a `poe_port` guard keeps its fallback target across a reboot. |
 
 ### PoE (`poe_port` driver & fabric)
 
@@ -199,7 +200,7 @@ Every distinct case the system handles. *(C = confirmed by a test/probe; L = see
 | ambiguous (>1 live match) | blocked / `resolve` returns None (ERROR). C |
 | device aged out of the switch table while down | learned-while-healthy cache lets recovery still fire. |
 | port status sensor lags / already off | `_await_status` returns immediately or times out (WARNING) but the cycle continues. |
-| concurrent `repair_poe_port` on one port | serialised by the per-port lock — one cycle, not two. C |
+| concurrent `repair_poe_port` on one port | coalesced — callers join the in-flight cycle; one cycle, not N. C |
 | `repair_poe_port` with unresolvable id | logs ERROR, returns False; the calling action continues (health-check still gates success). |
 
 ### Guard linking

@@ -99,14 +99,17 @@ health-check:
   success.)*
 
 **Persistence.** Runtime state is persisted in a `Store`
-(`.storage/necromancer.<entry_id>`), independent of the display entities:
-`{state, attempt, recover_count, last_recover, last_seen, auto, resolved_port}`.
-On restart the stats, `auto` flag and the last-known `resolved_port` (poe_port's
-fallback target) are restored, `ESCALATED` is restored (then re-derived from
-live health), and transient states (RECOVERING/COOLDOWN/VERIFY) are *not*
-restored — they come back as OK/live-health. The display entities
+(`.storage/necromancer.<entry_id>`), independent of the display entities. Per
+guard the engine stores `{state, attempt, recover_count, last_recover, last_seen,
+auto}`; alongside those per-guard snapshots the same Store file holds the PoE
+fabric's `id → port` cache under a separate `_poe_cache` key (written by
+`__init__`'s `_serialize`). On restart the stats and `auto` flag are restored,
+`ESCALATED` is restored (then re-derived from live health), and transient states
+(RECOVERING/COOLDOWN/VERIFY) are *not* restored — they come back as
+OK/live-health. The fabric's `_poe_cache` is restored too, so a `poe_port` guard
+keeps its last-known fallback port across a reboot. The display entities
 (`sensor.*_status`, `binary_sensor.*_health`, `switch.*_auto_recovery`,
-`button.*_recover`) are **pure view**; the `Store` is the source of truth.
+`button.*_revive`) are **pure view**; the `Store` is the source of truth.
 
 ---
 
@@ -167,16 +170,15 @@ device health-check.
 
 **Auto-PoE remembers its port.** A device that is down can age out of the
 switch's FDB/LLDP neighbour table, so resolving it live would find *nothing*
-exactly when recovery is needed. It is learned two ways: the engine calls
-`driver.observe()` on every healthy evaluation, **and** the driver watches its
-port id-entities (`async_setup`) so it caches the moment the neighbour table
-reports the device — not only on a health event. `poe_port` records the resolved
-port (by label) in the per-guard `Store` (`resolved_port`). At recovery time a single live match
-still wins (and refreshes the cache); on **zero** live matches it falls back to
-that last-known port (logged at WARNING); an **ambiguous** (>1) match still
-blocks. The cache is wired generically — `RecoveryDriver.bind_cache(get, set)` +
-`observe()` + `async_setup()` — so the engine owns persistence and only
-`poe_port` uses it.
+exactly when recovery is needed. The **fabric** keeps a last-known `id → port`
+cache and learns continuously: it watches every configured port's id-entity
+(`_rewatch` → `_on_change` → `_relearn`/`_learn`), so it caches the mapping the
+moment the neighbour table reports the device — not only on a health event. At
+recovery time a single live match still wins (and refreshes the cache); on
+**zero** live matches `resolve_with_reason` falls back to that last-known port
+(logged at WARNING); an **ambiguous** (>1) match still blocks. The cache lives in
+the fabric (not per guard) and is persisted in the Store under `_poe_cache`; the
+`poe_port` driver is a thin adapter that just delegates resolve + cycle to it.
 
 ### PoE fabric & the `repair_poe_port` service
 
@@ -186,12 +188,15 @@ a config entry (the lamps only return after the reload), a sequence a driver can
 express. The **PoE fabric** (`poe.py`) is that shared, port-level primitive: a
 domain-singleton holding the live + last-known `id → port` map (same resolution as
 `poe_port`, watching every port's id-entity), a per-port **status**
-(`good` / `recovering` / `failed`) and a per-port `asyncio.Lock`. It backs the
-**`necromancer.repair_poe_port(id)`** service — blocking, and serialised per port so
-concurrent callers (multiple guards, automations) share one cycle instead of
-double-cycling. Each status change is fired as a `necromancer_poe_port` event. The
+(`good` / `recovering` / `failed`) and a per-port **in-flight cycle**. It backs the
+**`necromancer.repair_poe_port(id)`** service — blocking, and **coalesced** per port:
+concurrent callers (multiple guards, automations) join the one in-flight cycle and
+share its result instead of each cycling the port. Each status change is fired as a
+`necromancer_poe_port` event. The
 fabric is wired in `__init__` (singleton in `hass.data`, port list + cache from the
-Store) and the cycle logic is currently duplicated from `poe_port.py` (unify later).
+Store). The staged cycle lives **only** in the fabric — the `poe_port` driver delegates
+resolve + cycle to it (`can_recover` → `resolve_with_reason`, `recover` → `repair`), so a
+guard and the service share one cache and coalesce onto one in-flight cycle per port.
 
 ---
 
@@ -293,7 +298,7 @@ Steps for a recover guard: **source type → device & state → strategy → rec
 
 Per guard, four pure-view entities (one device per guard, or attached to a linked
 device): `sensor.*_status`, `binary_sensor.*_health`, `switch.*_auto_recovery`,
-`button.*_recover`. Notify-only guards omit the switch and button. Linking to an
+`button.*_revive`. Notify-only guards omit the switch and button. Linking to an
 existing device uses the Battery-Notes pattern (`device_info=None` +
 `entity.device_entry`) so Necromancer never claims ownership of a foreign device.
 

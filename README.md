@@ -95,7 +95,7 @@ Battery-Notes link pattern):
 | `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `recovering` / `verify` / `cooldown` / `escalated`. |
 | `binary_sensor.<guard>_health` | The raw health verdict from the HealthSource. |
 | `switch.<guard>_auto_recovery` | Arm/disarm automatic recovery for this guard. |
-| `button.<guard>_recover` | Trigger a recovery cycle manually. |
+| `button.<guard>_revive` | Trigger a recovery cycle manually. |
 
 <div align="center">
   <img width="320px" alt="Necromancer guard entities" src="https://raw.githubusercontent.com/MrTomRocker/homeassistant-necromancer/main/img/guard_entities.png">
@@ -180,7 +180,7 @@ automations can react to it.
 
 | Service | What it does |
 |---|---|
-| `necromancer.repair_poe_port` | Resolve a device `id` (MAC / IP / static label) to its PoE port and power-cycle it. It blocks until done and is serialised **per port**, so concurrent callers share a single cycle instead of fighting over the same port. This is the exact primitive Auto-PoE uses — call it from your own actions or automations when you want "reboot whatever is on this device's port". |
+| `necromancer.repair_poe_port` | Resolve a device `id` (MAC / IP / static label) to its PoE port and power-cycle it. It blocks until done and **coalesces per port** — concurrent callers join the one in-flight cycle instead of each cycling the port. This is the exact primitive Auto-PoE uses — call it from your own actions or automations when you want "reboot whatever is on this device's port". |
 
 ## Recipes
 
