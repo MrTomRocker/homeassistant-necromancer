@@ -17,7 +17,11 @@ import voluptuous as vol
 
 from tests.common import async_test_home_assistant
 
-from custom_components.necromancer import config_flow as cf
+from custom_components.necromancer.config_flow import (
+    DeviceSubentryFlow,
+    NecromancerOptionsFlow,
+)
+from custom_components.necromancer.config_flow_helpers import schemas as cf
 from custom_components.necromancer.actions import async_validate
 from custom_components.necromancer.drivers import create_driver
 from custom_components.necromancer.health import create_health
@@ -207,7 +211,7 @@ async def test_ports_yaml_roundtrip_and_merge(hass, _):
     again = cf._parse_ports_yaml(dumped)
     assert again[0][cf.CONF_LABEL] == "P1" and again[0][cf.CONF_STATUS_ON] == ["on"]
     # merge upserts by label; replace overwrites
-    flow = cf.NecromancerOptionsFlow()
+    flow = NecromancerOptionsFlow()
     flow._ports = list(ports)
     flow._merge_ports([{cf.CONF_LABEL: "P1", cf.CONF_ACTUATOR: "switch.NEW",
                         cf.CONF_STATUS_ENTITY: "binary_sensor.s",
@@ -251,7 +255,7 @@ async def test_links_closure(hass, _):
 
 
 async def test_flow_rejects_empty_action(hass, _):
-    flow = cf.DeviceSubentryFlow()
+    flow = DeviceSubentryFlow()
     flow.hass = hass
     flow._reconfig = False
     flow._strategy = "action"
