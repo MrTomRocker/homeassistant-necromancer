@@ -197,9 +197,49 @@ async def test_health_self_reference_warns(hass, cap):
     await eng.async_stop()
 
 
+async def test_health_template_all_missing_is_blind(hass, cap):
+    # template health whose only referenced entity is missing -> blind guard
+    h = create_health(hass, {"type": "template",
+                             "template": "{{ is_state('binary_sensor.ghost', 'on') }}"})
+    eng = DeviceEngine(hass, "G", h, _Noop(hass), StandardPolicy({}), {"debounce": 2},
+                       subentry_id="g", engines={})
+    await eng.async_start()
+    cap.clear()
+    eng._check_config(hass)
+    await hass.async_block_till_done()
+    log = cap.text()
+    ok("health:template_blind_error", "guard is blind" in log, log[-200:])
+    ok("health:template_blind_names_entity", "binary_sensor.ghost" in log, log[-200:])
+    await eng.async_stop()
+
+
+async def test_health_template_partial_missing_warns_only(hass, cap):
+    # one of two referenced entities is missing -> warn, but NOT "blind"
+    reg = er.async_get(hass)
+    e = reg.async_get_or_create("binary_sensor", "test", "tpl_live")
+    hass.states.async_set(e.entity_id, "on")
+    # `and` with a true left side forces the template to also read the ghost
+    # (an `or` would short-circuit, dropping it from referenced_entities()).
+    tmpl = (f"{{{{ is_state('{e.entity_id}', 'on') "
+            f"and states('binary_sensor.ghost') != 'never' }}}}")
+    h = create_health(hass, {"type": "template", "template": tmpl})
+    eng = DeviceEngine(hass, "G", h, _Noop(hass), StandardPolicy({}), {"debounce": 2},
+                       subentry_id="g", engines={})
+    await eng.async_start()
+    cap.clear()
+    eng._check_config(hass)
+    await hass.async_block_till_done()
+    log = cap.text()
+    ok("health:template_partial_warns", "does not exist" in log, log[-200:])
+    ok("health:template_partial_not_blind", "guard is blind" not in log, log[-200:])
+    await eng.async_stop()
+
+
 TESTS = [test_health_disable_logs_blind, test_health_rename_follows,
          test_health_remove_logs, test_poe_bogus_id_blocks_no_blind,
-         test_health_self_reference_warns]
+         test_health_self_reference_warns,
+         test_health_template_all_missing_is_blind,
+         test_health_template_partial_missing_warns_only]
 
 
 async def main():

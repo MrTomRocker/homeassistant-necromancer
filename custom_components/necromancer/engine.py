@@ -177,6 +177,36 @@ class DeviceEngine:
                 )
         for err in self.driver.config_errors():
             LOGGER.error("%s: %s", self.name, err)
+        # A tracking source (template) subscribes to nothing directly, so the loop
+        # above never sees it. Validate the entities its verdict actually reads:
+        # a single missing/disabled entity is a warning (a template may read many),
+        # but if every referenced entity is gone the guard is blind.
+        if not self.health.watched_entities:
+            referenced = self.health.referenced_entities()
+            blind = []
+            for eid in referenced:
+                entry = ent_reg.async_get(eid)
+                if entry is None and self.hass.states.get(eid) is None:
+                    blind.append(eid)
+                    LOGGER.warning(
+                        "%s: health template references %s, which does not exist",
+                        self.name,
+                        eid,
+                    )
+                elif entry is not None and entry.disabled:
+                    blind.append(eid)
+                    LOGGER.warning(
+                        "%s: health template references %s, which is disabled",
+                        self.name,
+                        eid,
+                    )
+            if referenced and len(blind) == len(referenced):
+                LOGGER.error(
+                    "%s: health template reads only missing/disabled entities %s "
+                    "— guard is blind",
+                    self.name,
+                    sorted(blind),
+                )
         # Feedback-loop guard: a (template) health that depends on this guard's own
         # entities would re-evaluate on its own state changes. State health can't
         # (the picker excludes our entities) but a free-text template can.

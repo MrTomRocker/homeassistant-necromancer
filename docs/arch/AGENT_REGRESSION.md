@@ -282,13 +282,13 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
 
 ### Automatisiert statt manuell
 
-- [ ] **AUTO-1 — Automatisierte Suiten laufen grün (18/16/30/5)** · `P0`
-  - **Prüft:** Die vier Real-HA-core-Suiten (`tests.common.async_test_home_assistant`) sind grün und decken PoE resolve/cycle/coalescing/Platzhalter, Engine-State-Machine + Persistenz, Health-Registry-Events, Linking-Koordination ab.
-  - **Files:** `tests/test_units.py` (18), `test_poe.py` (16), `test_engine.py` (30), `test_integration.py` (5 Test-Funktionen, je mit `ok(...)`-Checks). Linking-Tests u. a. `test_engine.py::test_linked_follower_recovers_with_leader`, `test_linked_follower_escalates_when_leader_fails`, `test_linked_auto_off_follower_escalates`, `test_leader_stop_does_not_escalate_follower`, `test_debounce_arbitration_second_follows`.
+- [ ] **AUTO-1 — Automatisierte Suiten laufen grün (18/16/30/7)** · `P0`
+  - **Prüft:** Die vier Real-HA-core-Suiten (`tests.common.async_test_home_assistant`) sind grün und decken PoE resolve/cycle/coalescing/Platzhalter, Engine-State-Machine + Persistenz, Health-Registry-Events inkl. Template-Blind-Erkennung (B3), Linking-Koordination ab.
+  - **Files:** `tests/test_units.py` (18), `test_poe.py` (16), `test_engine.py` (30), `test_integration.py` (7 Test-Funktionen / 12 `ok(...)`-Checks). Health-Tests u. a. `test_health_self_reference_warns`, `test_health_template_all_missing_is_blind`, `test_health_template_partial_missing_warns_only`. Linking-Tests u. a. `test_engine.py::test_linked_follower_recovers_with_leader`, `test_linked_follower_escalates_when_leader_fails`, `test_linked_auto_off_follower_escalates`, `test_leader_stop_does_not_escalate_follower`, `test_debounce_arbitration_second_follows`.
   - **Treiber:** Aus `<ha-core>`: `PYTHONPATH=<ha-core>:<ha-core>/config python -m pytest tests -q` (in-process, kein laufender Server nötig).
-  - **Assert:** `test_units` 18, `test_poe` 16, `test_engine` 30 passed; `test_integration` grün (5 Test-Funktionen, u. a. `test_health_self_reference_warns`). Gesamt **kein** FAIL/ERROR.
+  - **Assert:** `test_units` 18, `test_poe` 16, `test_engine` 30 passed; `test_integration` grün (7 Test-Funktionen → `12/12 checks passed`). Gesamt **kein** FAIL/ERROR.
   - **Cleanup:** —
-  - *Hinweis: Doc-Zähler 10/15/8/„51" sind STALE → korrigiert auf 18/16/30/5.*
+  - *Hinweis: Doc-Zähler 10/15/8/„51" sind STALE → korrigiert auf 18/16/30/7.*
 
 - [ ] **AUTO-2 — Gates grün (ruff/format)** · `P1`
   - **Prüft:** Lint-/Format-Gates bestehen für das Necromancer-Paket.
@@ -859,11 +859,19 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
   - **Assert:** Nach Reload `N.log()` enthält `"CfgLoop: health references its own entit(ies)"` und `"feedback loop"`; HA bleibt RUNNING (`N.g("/api/config")["state"]=="RUNNING"`), 0 Tracebacks.
   - **Cleanup:** Subentry `"CfgLoop"` löschen.
 
+- [ ] **CFG-6 (B3) — Template-Health blind: fehlende/disabled referenzierte Entity** · `P1`
+  - **Prüft:** `_check_config` validiert bei tracking-Sources (template) nicht nur `watched_entities` (= leer), sondern die tatsächlich gelesenen `referenced_entities()`. Eine einzelne fehlende/disabled Entity → **WARNING** (named); sind ALLE referenzierten Entities weg → **ERROR `guard is blind`** (state_based meldet das längst, template war bis B3 still blind).
+  - **Files:** engine.py Z. 180–209 — `if not self.health.watched_entities:` → pro Entity `LOGGER.warning("%s: health template references %s, which does not exist"/"which is disabled")`; bei `len(blind)==len(referenced)` zusätzlich `LOGGER.error("%s: health template reads only missing/disabled entities %s — guard is blind")`. Hängt an `referenced_entities()` (template.py Z. 43–48 = `async_render_to_info().entities`) — beachtet daher nur Entities, die beim Rendern wirklich gelesen werden (Jinja-Kurzschluss bei `or` lässt die zweite Seite aus).
+  - **Treiber:** Voll blind: `N.create_guard({source_type:"template_based", name:"CfgBlind", health:{template:"{{ is_state('binary_sensor.ghost_xyz','on') }}"}, mode:"notify", behavior:{debounce:3}})` → RESTART → `N.wait(3)` → `N.log()`. Teilweise (1 von 2 fehlt, kein false-blind): Template `"{{ is_state('<lebende Entity>','on') and states('binary_sensor.ghost_xyz') != 'never' }}"`.
+  - **Assert:** Voll blind: `N.log()` enthält `"CfgBlind: health template reads only missing/disabled entities"` + `"guard is blind"` + `"binary_sensor.ghost_xyz"`. Teilweise: `"does not exist"` für die fehlende Entity, aber **kein** `"guard is blind"`. 0 Tracebacks.
+  - **Automatisiert:** `test_integration.py::test_health_template_all_missing_is_blind` (ERROR-Pfad) + `::test_health_template_partial_missing_warns_only` (nur WARNING, kein false-blind).
+  - **Cleanup:** Subentry `"CfgBlind"` löschen.
+
 ### Hinweis zum doc-internen Zählerstand
 
 - [ ] **DOC-1 — Suite-Zählerstand im Regressions-Doc aktualisieren** · `P2`
   - **Prüft:** Der Header von REGRESSION.md nennt veraltete Testzahlen und veraltete „lock"-Formulierung.
-  - **Files:** REGRESSION.md Z. 13 („51 automatisierte Tests grün") + Z. 55 („test_units (18) · test_poe (15) · test_engine (10) · test_integration (8) = 51 grün") + Z. 56 (Wort „lock"). Aktuell: `test_units=18 · test_poe=16 · test_engine=30 · test_integration=8-checks`; PoE-Per-Port-`Lock` wurde ENTFERNT → durch **Coalescing** (`_inflight`-Task + `asyncio.shield`) ersetzt → „lock/Platzhalter" auf „Coalescing/Platzhalter" umtexten.
+  - **Files:** REGRESSION.md Z. 13 („51 automatisierte Tests grün") + Z. 55 („test_units (18) · test_poe (15) · test_engine (10) · test_integration (8) = 51 grün") + Z. 56 (Wort „lock"). Aktuell: `test_units=18 · test_poe=16 · test_engine=30 · test_integration=12-checks (7 Funktionen)`; PoE-Per-Port-`Lock` wurde ENTFERNT → durch **Coalescing** (`_inflight`-Task + `asyncio.shield`) ersetzt → „lock/Platzhalter" auf „Coalescing/Platzhalter" umtexten.
   - **Assert:** Header-Zeilen (Z. 13/55) auf die aktuellen Zahlen korrigiert; Z. 56 ersetzt „lock" durch „coalescing".
   - **Cleanup:** —
 
