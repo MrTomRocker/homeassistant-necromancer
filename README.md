@@ -402,13 +402,37 @@ nothing changes.
 ### Notifications
 
 Each guard can optionally run a **notify action** on problem / recovery / escalation. There are no
-fixed targets — you provide an action and Necromancer hands it a ready-made, localized `message`
-plus `name` and `event` as variables, so you decide whether and how to be notified:
+fixed targets — you provide an action and Necromancer hands it the resolved, localized text as
+variables, so you decide whether and how to be notified:
+
+| Variable | What it is |
+|---|---|
+| `{{ message }}` | the full ready-made line — `"<name>: <event_text>"` (e.g. *"Hue Bridge: Recovery succeeded."*) |
+| `{{ name }}` | the guard name (e.g. *"Hue Bridge"*) |
+| `{{ event_text }}` | just the event text, **without** the name (e.g. *"Recovery succeeded."*) |
+| `{{ event }}` | the event key (`recovery_attempt`, `recovery_success`, `recovery_failed`, `recovery_blocked`, `no_auto_recovery`, `problem_detected`, `linked_repair_failed`) |
+| `{{ attempt }}` / `{{ max }}` / `{{ attempts }}` | recovery attempt count, max, and the plural-correct phrase (e.g. *"3 attempts"*) — where applicable |
+
+Take the ready-made `message`, or compose your own from the parts (handy for **TTS** and to avoid
+repeating the name when you also set a title). The texts are phrased to read naturally aloud
+(*"Recovery attempt 1 of 2."*, not *"1/2"*):
 
 ```yaml
+# Simplest — the whole line:
 - action: notify.mobile_app_phone
   data:
-    message: "{{ message }}"   # e.g. "Recovery attempt 2/3 for Hue Bridge"
+    message: "{{ message }}"        # "Hue Bridge: Recovery succeeded."
+
+# Or build your own (e.g. title = name, body = event_text — no duplication):
+- action: notify.mobile_app_phone
+  data:
+    title: "{{ name }}"             # "Hue Bridge"
+    message: "{{ event_text }}"     # "Recovery succeeded."
+
+# TTS:
+- action: tts.speak
+  data:
+    message: "{{ name }}: {{ event_text }}"
 ```
 
 The action runs **detached**, so a deliberate delay in your notify flow never stalls the engine.

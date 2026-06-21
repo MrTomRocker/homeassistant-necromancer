@@ -501,16 +501,16 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
   - **Assert:** `_notification_section` baut genau ein optionales Feld `notify_action` als `ActionSelector`.
   - **Cleanup:** —
 
-- [ ] **NA2 — `{{ message }}`/`{{ name }}`/`{{ event }}` als Variablen verfügbar** · `P0`
-  - **Prüft:** Die Notify-Aktion bekommt `message` (fertige lokalisierte Meldung), `name`, `event` (Notify-Key) + Event-Params (`attempt`, `max`, `reason`) als Variablen.
-  - **Files:** `notify.py:43` `variables = {"message": message, "name": name, "event": key, **params}` → `async_run(hass, action, …, variables)` (Zeile 47).
+- [ ] **NA2 — `{{ message }}`/`{{ name }}`/`{{ event_text }}`/`{{ event }}` als Variablen verfügbar** · `P0`
+  - **Prüft:** Die Notify-Aktion bekommt `message` (= „Name: Text"), `name`, `event_text` (Text OHNE Name), `event` (Notify-Key) + Event-Params (`attempt`, `max`, `attempts` [plural-korrekt], `reason`) als Variablen.
+  - **Files:** `notify.py` → `_resolve(lang, name, key, params)` liefert `(message, event_text)` (message = `f"{name}: {event_text}"`, baut plural-`attempts`); `variables = {"message", "name", "event_text", "event", **params}` → `async_run(...)`.
   - **Treiber:** Guard `NotifyVar` (`strategy:"switch"`, `switch_entity:"switch.test_template_switch"`, Health `input_boolean.test_1`, `behavior:{debounce:5, cooldown:5}`) mit `notify_action` = Aktion, die `input_text.test_note` setzt: `notify_action:[{"action":"input_text.set_value","data":{"entity_id":"input_text.test_note","value":"{{ event }}|{{ message }}"}}]`. Health brechen (`input_boolean.turn_off test_1`), Debounce ablaufen lassen (`N.wait(7)`).
-  - **Assert:** `N.st("input_text.test_note")["state"]` enthält Event-Key + lokalisierte Meldung, z. B. beginnt mit `"recovery_attempt|NotifyVar: Reparatur 1/2"` (de-Sprache). (Bei Auto-aus-Variante stattdessen `no_auto_recovery|NotifyVar: Problem erkannt, Auto-Reparatur ist deaktiviert.`)
+  - **Assert:** `N.st("input_text.test_note")["state"]` enthält Event-Key + lokalisierte Meldung, z. B. beginnt mit `"recovery_attempt|NotifyVar: Reparaturversuch 1 von 2."` (de-Sprache). (Bei Auto-aus-Variante stattdessen `no_auto_recovery|NotifyVar: Problem erkannt, Auto-Reparatur ist deaktiviert.`)
   - **Cleanup:** `N.delete_subentry(entry, sub)` + `N.call("input_boolean","turn_on", entity_id="input_boolean.test_1")`
 
 - [ ] **NA3 — Lokalisierte de-Meldungen aus `NOTIFY_MESSAGES`** · `P0`
   - **Prüft:** Bei `language=de` rendert `{{ message }}` die deutschen Texte für `recovery_attempt/success/failed/blocked/no_auto_recovery/problem_detected`.
-  - **Files:** `const.py:149` `NOTIFY_MESSAGES`, `de`-Block ab Zeile 159 (z. B. `recovery_attempt`=`"{name}: Reparatur {attempt}/{max}"` Zeile 160, `recovery_success`=`"{name}: Reparatur erfolgreich."` Zeile 161, `no_auto_recovery`=`"{name}: Problem erkannt, Auto-Reparatur ist deaktiviert."` Zeile 164); `notify.py:32` Sprachauswahl `hass.config.language` mit en-Fallback (Zeile 33–34).
+  - **Files:** `const.py` `NOTIFY_MESSAGES` `de`-Block (Texte OHNE Name-Präfix = `event_text`; z. B. `recovery_attempt`=`"Reparaturversuch {attempt} von {max}."`, `recovery_success`=`"Reparatur erfolgreich."`, `recovery_failed`=`"Reparatur fehlgeschlagen nach {attempts}."`, `no_auto_recovery`=`"Problem erkannt, Auto-Reparatur ist deaktiviert."`); `notify.py` → `_resolve` Sprachauswahl `hass.config.language` mit en-Fallback.
   - **Treiber:** Wie NA2; einmal Auto-aus erzwingen (→ `no_auto_recovery`), einmal heilbare `*_check`-Recovery (→ `recovery_success`, vgl. CC8). `input_text.test_note` jeweils prüfen.
   - **Assert:** `test_note` enthält exakt `"Problem erkannt, Auto-Reparatur ist deaktiviert."` bzw. `"Reparatur erfolgreich."` (deutsche Strings aus `NOTIFY_MESSAGES["de"]`, NICHT englisch).
   - **Cleanup:** `N.delete_subentry(entry, sub)` + Health zurücksetzen.
@@ -980,7 +980,7 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
   - **Prüft:** Bei `hass.config.language=="de"` rendert `async_notify` die de-Templates aus `NOTIFY_MESSAGES`, während die Log-Zeilen englisch bleiben.
   - **Files:** `notify.py` → `async_notify` Zeile 32–34 (`lang=...; messages=NOTIFY_MESSAGES.get(lang,...)`); `const.py` → `NOTIFY_MESSAGES["de"]` Zeile 159–168.
   - **Treiber:** Guard `"name":"NotiDe"`, `"mode":"recover"`, `"strategy":"action_check"` (heilt nicht: Aktion schreibt `input_text.test_note`), `"notify_action":[{"service":"input_text.set_value","data":{"entity_id":"input_text.test_note","value":"{{ message }}"}}]`, `"behavior":{"debounce":1,"cooldown":3,"boot_window":2,"max_attempts":1}`. Health brechen; `N.wait(6)`; `N.st("input_text.test_note")`.
-  - **Assert:** `N.st("input_text.test_note")["state"]` enthält deutschen Text — final (max_attempts=1, escaliert) `"Reparatur fehlgeschlagen nach 1 Versuchen."`, zwischenzeitlich auch `"Reparatur 1/1"` möglich; `N.log()` bleibt englisch (`"recovery attempt"`/`"could not be recovered"`).
+  - **Assert:** `N.st("input_text.test_note")["state"]` enthält deutschen Text — final (max_attempts=1, escaliert) `"Reparatur fehlgeschlagen nach 1 Versuch."` (plural-korrekt), zwischenzeitlich auch `"Reparaturversuch 1 von 1."` möglich; `N.log()` bleibt englisch (`"recovery attempt"`/`"could not be recovered"`).
   - **Cleanup:** `N.delete_subentry(eid, sid)`
 
 - [ ] **NOT2 — Notify-Aktion mit defektem Service → gefangen, kein Crash** · `P1`
@@ -997,9 +997,9 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
   - **Assert:** Notiz endet `=="no_auto_recovery"`; in `N.log()` für diesen Guard KEIN `"recovery attempt"` (Cycle nie gestartet).
   - **Cleanup:** `N.delete_subentry(eid, sid)`
 
-- [ ] **NOT4 — Variablen `{{ message }}`/`{{ name }}`/`{{ event }}` in der Aktion** · `P1`
+- [ ] **NOT4 — Variablen `{{ message }}`/`{{ name }}`/`{{ event_text }}`/`{{ event }}` in der Aktion** · `P1`
   - **Prüft:** Die Notify-Aktion erhält die Variablen `message` (fertig lokalisiert), `name`, `event` plus Event-Params (attempt/max).
-  - **Files:** `notify.py` → Zeile 43 (`variables={"message":message,"name":name,"event":key,**params}`) + `actions.async_run` (Script-Variablen).
+  - **Files:** `notify.py` → `variables={"message","name","event_text","event",**params}` + `actions.async_run` (Script-Variablen).
   - **Treiber:** Guard `"name":"NotiVars"`, `"notify_action":[{"service":"input_text.set_value","data":{"entity_id":"input_text.test_note","value":"{{ name }}|{{ event }}|{{ message }}"}}]`, heilbar (`action_check`, `input_boolean.turn_on test_5`), `"behavior":{"debounce":1,"cooldown":3,"boot_window":10,"max_attempts":2}`. Health brechen; `N.wait(4)`; `N.st("input_text.test_note")`.
   - **Assert:** Notiz beginnt mit `"NotiVars|"`; finaler `event` ist `recovery_success` (Heilung gelingt) → `"NotiVars|recovery_success|"`, danach der lokalisierte de-`message`-Text (`"Reparatur erfolgreich."`). (Zwischenzeitlich `recovery_attempt` möglich, wird aber überschrieben.)
   - **Cleanup:** `N.delete_subentry(eid, sid)`

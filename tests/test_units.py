@@ -285,6 +285,25 @@ async def test_flow_rejects_empty_action(hass, _):
     assert captured.get("errors", {}).get(cf.CONF_ACTION) == "action_required", captured
 
 
+async def test_notify_resolve_tts_and_event_text(hass, _):
+    from custom_components.necromancer.notify import _resolve
+
+    # TTS: number as "von", not a slash; message = "name: text", event_text = text only
+    msg, ev = _resolve("de", "G", "recovery_attempt", {"attempt": 1, "max": 2})
+    assert ev == "Reparaturversuch 1 von 2." and msg == "G: Reparaturversuch 1 von 2.", (msg, ev)
+    # plural-correct attempts (de)
+    _m, a1 = _resolve("de", "G", "recovery_failed", {"attempt": 1})
+    _m, a3 = _resolve("de", "G", "recovery_failed", {"attempt": 3})
+    assert "1 Versuch" in a1 and "Versuche" not in a1, a1
+    assert "3 Versuche" in a3, a3
+    # plural-correct attempts (en)
+    _m, e1 = _resolve("en", "G", "recovery_failed", {"attempt": 1})
+    assert "1 attempt" in e1 and "attempts" not in e1, e1
+    # unknown language -> english fallback
+    _m, efb = _resolve("xx", "G", "recovery_success", {})
+    assert efb == "Recovery succeeded.", efb
+
+
 async def test_policy_reasons(hass, _):
     from custom_components.necromancer.const import REASON_AUTO_OFF, REASON_OBSERVE
     from custom_components.necromancer.policies.notify import NotifyPolicy

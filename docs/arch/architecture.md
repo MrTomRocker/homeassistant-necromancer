@@ -266,14 +266,18 @@ exposes it to the action as Jinja variables:
 
 | Variable | Value |
 |---|---|
-| `message` | The ready-made localized text (`recovery_attempt`, `recovery_success`, …). |
+| `message` | The full ready-made line, `"<name>: <event_text>"`. |
 | `name` | The guard name. |
-| `event` | The notify key. |
-| `attempt` / `max` / `reason` | Event params, where applicable. |
+| `event_text` | The localized event text **without** the name (so the user can compose their own line / avoid duplicating the name in a title). |
+| `event` | The notify key (`recovery_success`, …). |
+| `attempt` / `max` / `attempts` / `reason` | Event params, where applicable. `attempts` is the plural-correct phrase ("1 Versuch" / "3 Versuche"). |
 
-So `notify.mobile_app_x` with `message: "{{ message }}"` just works; the user
-decides whether/how to notify. The action runs **detached** so a user delay never
-stalls the engine.
+The texts (`NOTIFY_MESSAGES` in `const.py`) are the **name-less** `event_text`;
+`notify.py` (`_resolve`) prepends `"<name>: "` for `message` and computes `attempts`.
+They're phrased for **TTS** — numbers as words ("1 von 2", not "1/2"), no
+slashes/parentheses. So `message: "{{ message }}"` just works; the user decides
+whether/how to notify. The action runs **detached** so a user delay never stalls
+the engine.
 
 ---
 

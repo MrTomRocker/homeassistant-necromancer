@@ -192,7 +192,7 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the ready-made localized text), name, event.",
+              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the full line 'name: text'), name, event_text (the text without the name), event.",
               "data": {
                 "notify_action": "Action"
               }
@@ -234,7 +234,7 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the ready-made localized text), name, event.",
+              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the full line 'name: text'), name, event_text (the text without the name), event.",
               "data": {
                 "notify_action": "Action"
               }
@@ -278,7 +278,7 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the ready-made localized text), name, event.",
+              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the full line 'name: text'), name, event_text (the text without the name), event.",
               "data": {
                 "notify_action": "Action"
               }
@@ -320,7 +320,7 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the ready-made localized text), name, event.",
+              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the full line 'name: text'), name, event_text (the text without the name), event.",
               "data": {
                 "notify_action": "Action"
               }
@@ -352,7 +352,7 @@
           "sections": {
             "notification": {
               "name": "Notification",
-              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the ready-made localized text), name, event.",
+              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the full line 'name: text'), name, event_text (the text without the name), event.",
               "data": {
                 "notify_action": "Action"
               }

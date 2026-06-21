@@ -153,27 +153,30 @@ DEFAULT_HEALTHY_STATE = "on"
 DEFAULT_OFF_ON_DELAY = 5
 DEFAULT_RELOAD_DELAY = 10
 
-# User-facing notification message templates (str.format with name/attempt/max/...).
+# User-facing notification texts = the `event_text` (no name prefix; notify.py
+# prepends "<name>: " to build `message`). Phrased for TTS: numbers as words
+# ("1 von 2", not "1/2"), no slashes/parentheses, plural-correct via `{attempts}`
+# (computed in notify.py). str.format vars: {attempt}, {max}, {attempts}.
 # Kept in code rather than strings.json because Home Assistant's translation schema
 # has no "notify" category; notify.py picks the language with an English fallback.
 NOTIFY_MESSAGES: dict[str, dict[str, str]] = {
     "en": {
-        "recovery_attempt": "{name}: Recovery {attempt}/{max}",
-        "recovery_success": "{name}: Recovery succeeded.",
-        "recovery_failed": "{name}: Recovery failed after {attempt} attempt(s).",
-        "recovery_blocked": "{name}: Recovery blocked — recovery action missing or not callable.",
-        "no_auto_recovery": "{name}: Problem detected, auto-recovery is disabled.",
-        "problem_detected": "{name}: Problem detected (notify only).",
-        "linked_repair_failed": "{name}: Linked repair failed — still faulty.",
+        "recovery_attempt": "Recovery attempt {attempt} of {max}.",
+        "recovery_success": "Recovery succeeded.",
+        "recovery_failed": "Recovery failed after {attempts}.",
+        "recovery_blocked": "Recovery blocked, the recovery action is missing or not callable.",
+        "no_auto_recovery": "Problem detected, auto-recovery is disabled.",
+        "problem_detected": "Problem detected.",
+        "linked_repair_failed": "Linked repair failed, still faulty.",
     },
     "de": {
-        "recovery_attempt": "{name}: Reparatur {attempt}/{max}",
-        "recovery_success": "{name}: Reparatur erfolgreich.",
-        "recovery_failed": "{name}: Reparatur fehlgeschlagen nach {attempt} Versuchen.",
-        "recovery_blocked": "{name}: Reparatur blockiert — Reparatur-Aktion fehlt oder ist nicht aufrufbar.",
-        "no_auto_recovery": "{name}: Problem erkannt, Auto-Reparatur ist deaktiviert.",
-        "problem_detected": "{name}: Problem erkannt (nur Benachrichtigung).",
+        "recovery_attempt": "Reparaturversuch {attempt} von {max}.",
+        "recovery_success": "Reparatur erfolgreich.",
+        "recovery_failed": "Reparatur fehlgeschlagen nach {attempts}.",
+        "recovery_blocked": "Reparatur blockiert, die Reparatur-Aktion fehlt oder ist nicht aufrufbar.",
+        "no_auto_recovery": "Problem erkannt, Auto-Reparatur ist deaktiviert.",
+        "problem_detected": "Problem erkannt.",
         # linked_repair_failed: a follower escalates when the group repair failed.
-        "linked_repair_failed": "{name}: Reparatur über verknüpften Guard fehlgeschlagen.",
+        "linked_repair_failed": "Gruppen-Reparatur fehlgeschlagen, weiterhin gestört.",
     },
 }
