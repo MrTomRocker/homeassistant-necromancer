@@ -615,6 +615,40 @@ async def test_reload_device_entry_on_repair(hass, _):
         hass.config_entries.async_reload = orig
 
 
+async def test_raising_driver_warns_on_retry_traces_on_final(hass, _):
+    import logging
+
+    records: list[logging.LogRecord] = []
+
+    class _Cap(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+
+    cap = _Cap()
+    logger = logging.getLogger("custom_components.necromancer")
+    logger.addHandler(cap)
+    eng = None
+    try:
+        driver = StubDriver(hass)
+        driver.raise_it = True
+        eng = make(hass, FakeHealth(hass, Health.UNHEALTHY), driver,
+                   boot_window=0, max_attempts=2)
+        await eng.async_start()
+        await _advance(hass, 60)  # debounce -> attempt 1 (retry) -> attempt 2 (final)
+        assert eng.state is GState.ESCALATED, eng.state
+        msgs = [(r.levelno, r.getMessage(), r.exc_info is not None) for r in records]
+        # non-final attempt: WARNING, no traceback
+        retry = [m for m in msgs if m[0] == logging.WARNING and "attempt 1/2 failed" in m[1]]
+        assert retry and retry[0][2] is False, msgs
+        # final attempt: ERROR with traceback
+        final = [m for m in msgs if "Recovery driver failed" in m[1]]
+        assert final and final[0][0] == logging.ERROR and final[0][2] is True, msgs
+    finally:
+        logger.removeHandler(cap)
+        if eng:
+            await eng.async_stop()
+
+
 async def test_follower_success_notify_gated(hass, _):
     notified: list[str] = []
 

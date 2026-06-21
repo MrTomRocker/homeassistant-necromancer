@@ -484,13 +484,23 @@ class DeviceEngine:
                     return
                 try:
                     await self.driver.recover()
-                except Exception:  # noqa: BLE001
+                except Exception as err:  # noqa: BLE001
                     # The action raised (e.g. a missing service): a failed attempt,
                     # never a success — retry or escalate, even without a check.
-                    LOGGER.exception("Recovery driver failed for %s", self.name)
                     if self.attempt >= self.max_attempts:
+                        # Terminal failure: keep the full traceback for diagnosis.
+                        LOGGER.exception("Recovery driver failed for %s", self.name)
                         self._escalate()
                         return
+                    # Expected, retryable: a concise warning, not an alarming
+                    # traceback per attempt.
+                    LOGGER.warning(
+                        "%s recovery attempt %s/%s failed (%s) — retrying",
+                        self.name,
+                        self.attempt,
+                        self.max_attempts,
+                        err,
+                    )
                     continue
 
                 # Optionally reload the assigned device's integration after the
