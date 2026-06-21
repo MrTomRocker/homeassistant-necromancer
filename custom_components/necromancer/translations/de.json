@@ -372,7 +372,8 @@
           "recovering": "Reparatur läuft",
           "verify": "Prüfung",
           "cooldown": "Abkühlphase",
-          "escalated": "Eskaliert"
+          "escalated": "Eskaliert",
+          "snoozed": "Schlummert"
         }
       }
     },
@@ -428,6 +429,29 @@
           "description": "Die id, die das Gerät an seinem PoE-Port identifiziert — die MAC, IP oder das statische Label, das für den Port konfiguriert ist."
         }
       }
+    },
+    "reset": {
+      "name": "Zurücksetzen",
+      "description": "Setzt einen eskalierten Guard auf normal zurück und prüft erneut. Ist das Gerät weiterhin gestört, versucht der Guard erneut eine Reparatur; ist es wiederhergestellt, wacht er einfach weiter."
+    },
+    "snooze": {
+      "name": "Schlummern",
+      "description": "Setzt einen Guard für eine bestimmte Dauer aus — er ignoriert die Gerätegesundheit und meldet nichts (z. B. bei geplanter Wartung) und wacht danach automatisch wieder auf.",
+      "fields": {
+        "duration": {
+          "name": "Dauer",
+          "description": "Wie lange der Guard ausgesetzt wird, bevor er automatisch wieder aufwacht."
+        }
+      }
+    },
+    "unsnooze": {
+      "name": "Schlummern beenden",
+      "description": "Beendet das Schlummern eines Guards sofort, statt auf den Ablauf zu warten."
+    }
+  },
+  "exceptions": {
+    "snooze_during_recovery": {
+      "message": "{name} kann nicht schlummern, während gerade eine Reparatur läuft — warte, bis sie abgeschlossen ist."
     }
   }
 }

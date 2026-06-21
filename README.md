@@ -92,7 +92,7 @@ Battery-Notes link pattern):
 
 | Entity | Purpose |
 |---|---|
-| `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `recovering` / `verify` / `cooldown` / `escalated`. |
+| `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `recovering` / `verify` / `cooldown` / `escalated` / `snoozed`. Attributes include `recover_count`, `last_recover` and `snooze_until`. |
 | `binary_sensor.<guard>_health` | The raw health verdict from the HealthSource. |
 | `switch.<guard>_auto_recovery` | Arm/disarm automatic recovery for this guard. |
 | `button.<guard>_revive` | Trigger a recovery cycle manually. |
@@ -209,8 +209,15 @@ would loop — that case is warned about).
 
 ## Services
 
+Per-guard actions are exposed as services — target a guard's `sensor.<guard>_status`, its
+device, or a whole area (bulk). Recovering *now* and arming auto-recovery stay the per-guard
+**button** (`button.<guard>_revive`) and **switch** (`switch.<guard>_auto_recovery`) above.
+
 | Service | What it does |
 |---|---|
+| `necromancer.reset` | Clear an **escalated** guard back to normal and re-check it — a manual "try again" once you've fixed the root cause (or just to acknowledge the alarm). Still unhealthy → it recovers again; already healthy → it just resumes watching, no needless repair. |
+| `necromancer.snooze` | Suspend a guard for a `duration` — it **ignores health and raises no alerts** (planned maintenance), shows `snoozed`, then **auto-resumes** when the time elapses (the remaining time survives a restart). Unlike turning auto-recovery *off* (which still detects and alarms), snooze goes fully quiet. Refused while a recovery is in flight. |
+| `necromancer.unsnooze` | Resume a snoozed guard immediately instead of waiting for the timer. |
 | `necromancer.repair_poe_port` | Resolve a device `id` (MAC / IP / static label) to its PoE port and power-cycle it. It blocks until done and **coalesces per port** — concurrent callers join the one in-flight cycle instead of each cycling the port. This is the exact primitive Auto-PoE uses — call it from your own actions or automations when you want "reboot whatever is on this device's port". |
 
 ## Recipes

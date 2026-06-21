@@ -108,6 +108,12 @@ CONF_PORT_SELECTION = "selection"
 SERVICE_REPAIR_POE_PORT = "repair_poe_port"
 ATTR_ID = "id"
 
+# Per-guard operator services (entity-targeted at the guard's status sensor).
+SERVICE_RESET = "reset"
+SERVICE_SNOOZE = "snooze"
+SERVICE_UNSNOOZE = "unsnooze"
+ATTR_DURATION = "duration"
+
 # driver (switch_cycle): power-cycle a switch (off → delay → on)
 CONF_SWITCH_ENTITY = "switch_entity"
 CONF_OFF_ON_DELAY = "off_on_delay"

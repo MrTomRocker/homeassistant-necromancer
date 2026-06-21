@@ -372,7 +372,8 @@
           "recovering": "Recovering",
           "verify": "Verifying",
           "cooldown": "Cooldown",
-          "escalated": "Escalated"
+          "escalated": "Escalated",
+          "snoozed": "Snoozed"
         }
       }
     },
@@ -428,6 +429,29 @@
           "description": "The id that identifies the device on its PoE port — the MAC, IP or static label configured for that port."
         }
       }
+    },
+    "reset": {
+      "name": "Reset",
+      "description": "Clear an escalated guard back to normal and re-check it. If the device is still unhealthy the guard tries to recover again; if it has recovered it simply resumes watching."
+    },
+    "snooze": {
+      "name": "Snooze",
+      "description": "Temporarily suspend a guard for a set duration — it ignores the device's health and raises no alerts (e.g. during planned maintenance), then resumes automatically.",
+      "fields": {
+        "duration": {
+          "name": "Duration",
+          "description": "How long to suspend the guard before it automatically resumes."
+        }
+      }
+    },
+    "unsnooze": {
+      "name": "Unsnooze",
+      "description": "Resume a snoozed guard immediately instead of waiting for its snooze to elapse."
+    }
+  },
+  "exceptions": {
+    "snooze_during_recovery": {
+      "message": "Cannot snooze {name} while it is actively recovering — wait for the recovery to finish."
     }
   }
 }

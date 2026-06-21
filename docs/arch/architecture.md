@@ -78,6 +78,15 @@ picker by type (it would offer both services for every “Add” button).
                                                                      └────────────────────┘
 ```
 
+**Operator services (off the automatic flow).** Three services act on a guard out-of-band:
+`reset` clears `ESCALATED → OK` and re-derives from live health (a manual "try again", no
+needless repair if already healthy); `snooze`/`unsnooze` move it to/from the `SNOOZED` state —
+health is ignored, no transitions, no alerts (planned maintenance). `snooze` takes a
+`duration`, **auto-resumes** when it elapses (the remaining time survives a restart), and is
+refused (`ServiceValidationError`) while a recovery cycle is in flight; a snoozed guard also
+never follows a linked-group repair. Recovering *now* stays the `button.<guard>_revive`,
+arming the `switch.<guard>_auto_recovery`.
+
 Key timing fields (the **behaviour** block):
 
 | Field | Meaning |
@@ -110,10 +119,11 @@ scripting a `homeassistant.reload_config_entry` action.
 **Persistence.** Runtime state is persisted in a `Store`
 (`.storage/necromancer.<entry_id>`), independent of the display entities. Per
 guard the engine stores `{state, attempt, recover_count, last_recover, last_seen,
-auto}`; alongside those per-guard snapshots the same Store file holds the PoE
+auto, snooze_until}`; alongside those per-guard snapshots the same Store file holds the PoE
 fabric's `id → port` cache under a separate `_poe_cache` key (written by
 `__init__`'s `_serialize`). On restart the stats and `auto` flag are restored,
-`ESCALATED` is restored (then re-derived from live health), and transient states
+`ESCALATED` is restored (then re-derived from live health), `SNOOZED` is restored
+(re-arming the *remaining* snooze, or resuming if it elapsed), and transient states
 (RECOVERING/COOLDOWN/VERIFY) are *not* restored — they come back as
 OK/live-health. The fabric's `_poe_cache` is restored too, so a `poe_port` guard
 keeps its last-known fallback port across a reboot. The display entities
@@ -342,6 +352,13 @@ device): `sensor.*_status`, `binary_sensor.*_health`, `switch.*_auto_recovery`,
 `button.*_revive`. Notify-only guards omit the switch and button. Linking to an
 existing device uses the Battery-Notes pattern (`device_info=None` +
 `entity.device_entry`) so Necromancer never claims ownership of a foreign device.
+
+**Per-guard services** are registered on the sensor platform via
+`async_register_entity_service` (targeted at `sensor.*_status`; device/area targets
+expand to it): `reset`, `snooze(duration)`, `unsnooze` (see §3). The status sensor
+also carries the `snooze_until` attribute. Recover-now and arm stay the button/switch
+rather than duplicating them as services; the port-level `repair_poe_port` (§5) is the
+one domain-level service.
 
 ---
 

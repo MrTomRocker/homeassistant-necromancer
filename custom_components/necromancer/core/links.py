@@ -142,7 +142,7 @@ class LinkCoordinator:
         fix.
         """
         eng = self._engine
-        if not eng.allows_recovery or eng._busy() or self.following:
+        if not eng.allows_recovery or eng._busy() or self.following or eng._snoozed:
             return
         if not eng.auto:
             if eng.health.evaluate() == Health.UNHEALTHY and eng.state != (

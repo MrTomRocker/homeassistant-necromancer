@@ -16,3 +16,6 @@ class GState(StrEnum):
     VERIFY = "verify"
     COOLDOWN = "cooldown"
     ESCALATED = "escalated"
+    # Operator-snoozed (necromancer.snooze): health ignored until the timer
+    # elapses or unsnooze; survives restart (re-arms the remaining time).
+    SNOOZED = "snoozed"

@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.entity_registry import EventEntityRegistryUpdatedData
 from homeassistant.helpers.event import (
@@ -97,6 +98,11 @@ class DeviceEngine:
         self.last_seen: datetime | None = None
         self.last_recover: datetime | None = None
         self.auto = bool(behavior.get(CONF_AUTO_RESTART, DEFAULT_AUTO_RESTART))
+        # Operator snooze (necromancer.snooze): health ignored until `snooze_until`
+        # (re-armed on restart) or unsnooze. Reuses `_unsub_timer` (states are
+        # mutually exclusive, so only one timer is ever live).
+        self._snoozed = False
+        self._snooze_until: datetime | None = None
 
         self._unsub_health: Callable[[], None] | None = None
         self._unsub_registry: Callable[[], None] | None = None
@@ -127,6 +133,12 @@ class DeviceEngine:
         if data.get("state") == GState.ESCALATED.value:
             self.state = GState.ESCALATED
             self.attempt = int(data.get("attempt", 0) or 0)
+        elif data.get("state") == GState.SNOOZED.value:
+            # A snooze is deliberate — restore it; async_start re-arms the
+            # remaining time (or resumes immediately if it already elapsed).
+            self.state = GState.SNOOZED
+            self._snoozed = True
+            self._snooze_until = dt_util.parse_datetime(data.get("snooze_until") or "")
 
     def snapshot(self) -> dict:
         """Serialise persistent runtime state for the Store."""
@@ -139,6 +151,9 @@ class DeviceEngine:
             else None,
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
             "auto": self.auto,
+            "snooze_until": self._snooze_until.isoformat()
+            if self._snooze_until
+            else None,
         }
 
     # ---------- lifecycle ----------
@@ -162,6 +177,8 @@ class DeviceEngine:
         # The driver may watch its own inputs (poe_port: the port id-entities, so
         # it caches the resolved port the moment the neighbour table reports it).
         self._unsub_driver = await self.driver.async_setup()
+        if self._snoozed:
+            self._rearm_snooze()
         self._evaluate()
 
     @callback
@@ -319,6 +336,80 @@ class DeviceEngine:
         self._save()
         self._emit()
 
+    # ---------- operator services (necromancer.reset / snooze / unsnooze) ----------
+    def reset(self) -> None:
+        """Clear an ESCALATED guard back to OK, then re-derive from live health.
+
+        Still unhealthy -> re-enters the normal cycle (a manual "try again"); already
+        recovered -> settles at OK without a needless repair. No-op otherwise.
+        """
+        if self.state != GState.ESCALATED:
+            return
+        LOGGER.info("%s reset (clearing escalation)", self.name)
+        self.attempt = 0
+        self._set_state(GState.OK)
+        self._evaluate()
+
+    def snooze(self, duration: timedelta) -> None:
+        """Suspend guarding for `duration`: ignore health, auto-resume on elapse.
+
+        Refused during an active recovery cycle (RECOVERING/VERIFY) — cancelling a
+        cycle mid-flight is the entangled async path we don't touch here.
+        """
+        if self._busy():
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="snooze_during_recovery",
+                translation_placeholders={"name": self.name},
+            )
+        seconds = max(duration.total_seconds(), 0.0)
+        self._snoozed = True
+        self._snooze_until = dt_util.utcnow() + timedelta(seconds=seconds)
+        self.links.reset()
+        self.attempt = 0
+        self._cancel_timer()
+        self._unsub_timer = async_call_later(self.hass, seconds, self._snooze_done)
+        self._set_state(GState.SNOOZED)
+        LOGGER.info("%s snoozed until %s", self.name, self._snooze_until.isoformat())
+
+    def unsnooze(self) -> None:
+        """Lift a snooze early and re-derive state from live health."""
+        if not self._snoozed:
+            return
+        LOGGER.info("%s unsnoozed", self.name)
+        self._clear_snooze()
+        self._set_state(GState.OK)
+        self._evaluate()
+
+    @callback
+    def _snooze_done(self, _now) -> None:
+        if not self._snoozed:
+            return
+        LOGGER.info("%s snooze elapsed — resuming", self.name)
+        self._clear_snooze()
+        self._set_state(GState.OK)
+        self._evaluate()
+
+    def _clear_snooze(self) -> None:
+        self._snoozed = False
+        self._snooze_until = None
+        self._cancel_timer()
+
+    def _rearm_snooze(self) -> None:
+        """On restart: re-arm the remaining snooze, or resume if it already elapsed."""
+        remaining = (
+            (self._snooze_until - dt_util.utcnow()).total_seconds()
+            if self._snooze_until is not None
+            else 0.0
+        )
+        if remaining <= 0:
+            self._snoozed = False
+            self._snooze_until = None
+            self.state = GState.OK  # the following _evaluate re-derives from health
+            return
+        self._cancel_timer()
+        self._unsub_timer = async_call_later(self.hass, remaining, self._snooze_done)
+
     def _cancel_timer(self) -> None:
         if self._unsub_timer:
             self._unsub_timer()
@@ -363,6 +454,10 @@ class DeviceEngine:
 
     @callback
     def _evaluate(self) -> None:
+        # Snoozed = operator-suspended: ignore health entirely, hold the state.
+        if self._snoozed:
+            self._emit()
+            return
         h = self.health.evaluate()
         # Only log when the (health, state) pair actually changed — skips the
         # duplicate evaluation at startup and repeated identical re-evaluations.
