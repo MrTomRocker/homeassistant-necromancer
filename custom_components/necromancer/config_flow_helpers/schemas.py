@@ -159,6 +159,7 @@ SECTION_DEVICE = "assigned_device"
 SECTION_LINK = "linked_guards"
 SECTION_BEHAVIOR = "behavior"
 SECTION_NOTIFY = "notification"
+SECTION_RECOVERY = "recovery_action"
 SECTION_POWER = "power"
 SECTION_IDENTITY = "identity"
 SECTION_STATUS = "status"
@@ -424,13 +425,19 @@ def _switch_schema(
 def _action_schema(
     d: dict | None = None, *, check: bool, reload_block=None
 ) -> vol.Schema:
-    """One recovery action sequence + behaviour."""
+    """One recovery action sequence (in its own section) + behaviour."""
     d = d or {}
     return vol.Schema(
         {
-            vol.Optional(
-                CONF_ACTION, description={"suggested_value": d.get(CONF_ACTION)}
-            ): selector.ActionSelector(),
+            **_section(
+                SECTION_RECOVERY,
+                {
+                    vol.Optional(
+                        CONF_ACTION,
+                        description={"suggested_value": d.get(CONF_ACTION)},
+                    ): selector.ActionSelector(),
+                },
+            ),
             **_behavior_section(d, check=check),
             **(reload_block or {}),
             **_notification_section(d),
@@ -441,20 +448,27 @@ def _action_schema(
 def _actions_schema(
     d: dict | None = None, *, check: bool, reload_block=None
 ) -> vol.Schema:
-    """An "off" and an "on" action sequence + delay + behaviour."""
+    """An "off" and an "on" action sequence + delay, in their own section."""
     d = d or {}
     return vol.Schema(
         {
-            vol.Optional(
-                CONF_OFF_ACTION, description={"suggested_value": d.get(CONF_OFF_ACTION)}
-            ): selector.ActionSelector(),
-            vol.Optional(
-                CONF_ON_ACTION, description={"suggested_value": d.get(CONF_ON_ACTION)}
-            ): selector.ActionSelector(),
-            vol.Required(
-                CONF_OFF_ON_DELAY,
-                default=d.get(CONF_OFF_ON_DELAY, DEFAULT_OFF_ON_DELAY),
-            ): _seconds_selector(600),
+            **_section(
+                SECTION_RECOVERY,
+                {
+                    vol.Optional(
+                        CONF_OFF_ACTION,
+                        description={"suggested_value": d.get(CONF_OFF_ACTION)},
+                    ): selector.ActionSelector(),
+                    vol.Optional(
+                        CONF_ON_ACTION,
+                        description={"suggested_value": d.get(CONF_ON_ACTION)},
+                    ): selector.ActionSelector(),
+                    vol.Required(
+                        CONF_OFF_ON_DELAY,
+                        default=d.get(CONF_OFF_ON_DELAY, DEFAULT_OFF_ON_DELAY),
+                    ): _seconds_selector(600),
+                },
+            ),
             **_behavior_section(d, check=check),
             **(reload_block or {}),
             **_notification_section(d),

@@ -192,7 +192,7 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the full line 'name: text'), name, event_text (the text without the name), event.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything), and Necromancer passes the alert text as variables, so you decide whether and how to be told. Take the ready-made `message`, or build your own from `name`, `event_text` (the line without the name) and `event`; `attempt`, `max`, `attempts` and `reason` are available where they apply. Reference a variable with double curly braces in your action.",
               "data": {
                 "notify_action": "Action"
               }
@@ -218,10 +218,14 @@
         "action": {
           "title": "Run an action",
           "description": "Runs your action when the device fails. The timing settings below set how long to wait before reacting, how long to wait for the device to recover, and how often to retry.",
-          "data": {
-            "action": "Action (e.g. a script, service, SSH, webhook)"
-          },
           "sections": {
+            "recovery_action": {
+              "name": "Recovery action",
+              "description": "What to run to bring the device back. An action can be anything Home Assistant can do — a service or script call, an SSH/`shell_command`, a `rest_command` or webhook, or a multi-step sequence with delays, waits and conditions. It runs blocking; with the health-check variant Necromancer then waits (up to the boot window) for the device to report OK again.",
+              "data": {
+                "action": "Action (e.g. a script, service, SSH, webhook)"
+              }
+            },
             "behavior": {
               "name": "Behaviour",
               "description": "When Necromancer reacts and how often it retries — the defaults are usually fine.",
@@ -234,7 +238,7 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the full line 'name: text'), name, event_text (the text without the name), event.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything), and Necromancer passes the alert text as variables, so you decide whether and how to be told. Take the ready-made `message`, or build your own from `name`, `event_text` (the line without the name) and `event`; `attempt`, `max`, `attempts` and `reason` are available where they apply. Reference a variable with double curly braces in your action.",
               "data": {
                 "notify_action": "Action"
               }
@@ -260,12 +264,16 @@
         "actions": {
           "title": "Off/on actions",
           "description": "Runs the off action, waits, then the on action when the device fails. The timing settings below set how long to wait before reacting, how long to wait for the device to recover, and how often to retry.",
-          "data": {
-            "off_action": "Off action (cut power / turn the device off)",
-            "on_action": "On action (restore power / turn the device on)",
-            "off_on_delay": "Wait between off and on"
-          },
           "sections": {
+            "recovery_action": {
+              "name": "Recovery actions",
+              "description": "Two sequences with a wait between: the off action (cut power / turn off), then the on action (restore / turn on). Each can be any Home Assistant action — service or script, SSH, `rest_command`, webhook, sequence. Variables you set in the off action — plus `attempt` and `max` — are readable in the on action, so you can capture state before the cut and restore it afterwards, no helper entity needed.",
+              "data": {
+                "off_action": "Off action (cut power / turn the device off)",
+                "on_action": "On action (restore power / turn the device on)",
+                "off_on_delay": "Wait between off and on"
+              }
+            },
             "behavior": {
               "name": "Behaviour",
               "description": "When Necromancer reacts and how often it retries — the defaults are usually fine.",
@@ -278,7 +286,7 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the full line 'name: text'), name, event_text (the text without the name), event.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything), and Necromancer passes the alert text as variables, so you decide whether and how to be told. Take the ready-made `message`, or build your own from `name`, `event_text` (the line without the name) and `event`; `attempt`, `max`, `attempts` and `reason` are available where they apply. Reference a variable with double curly braces in your action.",
               "data": {
                 "notify_action": "Action"
               }
@@ -320,7 +328,7 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the full line 'name: text'), name, event_text (the text without the name), event.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything), and Necromancer passes the alert text as variables, so you decide whether and how to be told. Take the ready-made `message`, or build your own from `name`, `event_text` (the line without the name) and `event`; `attempt`, `max`, `attempts` and `reason` are available where they apply. Reference a variable with double curly braces in your action.",
               "data": {
                 "notify_action": "Action"
               }
@@ -352,7 +360,7 @@
           "sections": {
             "notification": {
               "name": "Notification",
-              "description": "Optional action on problems and recoveries. Available Jinja variables (in double curly braces): message (the full line 'name: text'), name, event_text (the text without the name), event.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything), and Necromancer passes the alert text as variables, so you decide whether and how to be told. Take the ready-made `message`, or build your own from `name`, `event_text` (the line without the name) and `event`; `attempt`, `max`, `attempts` and `reason` are available where they apply. Reference a variable with double curly braces in your action.",
               "data": {
                 "notify_action": "Action"
               }
