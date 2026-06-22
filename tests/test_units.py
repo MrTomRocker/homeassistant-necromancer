@@ -372,6 +372,48 @@ async def test_notify_custom(hass, _):
     assert len(calls) == 2, calls
 
 
+async def test_notify_full_variable_set(hass, _):
+    """Every notify path always passes the exact same variable set (>= "" each).
+
+    Locks the contract that a notify action template can reference any documented
+    variable without a `| default` guard, across every lifecycle event and the
+    custom (notify_guard) path. Captures the variables dict handed to the action.
+    """
+    import custom_components.necromancer.core.notify as notify_mod
+    from custom_components.necromancer.const import NOTIFY_MESSAGES
+
+    full = {"message", "name", "event_text", "event", "attempt", "max", "attempts", "reason"}
+    captured: list[dict] = []
+
+    async def _cap(_hass, _action, _name, variables=None):
+        captured.append(dict(variables or {}))
+        return {}
+
+    orig = notify_mod.async_run
+    notify_mod.async_run = _cap
+    try:
+        action = [{"action": "test.sink"}]
+        # built-in path: every lifecycle event delivers exactly the full set
+        for key in NOTIFY_MESSAGES["en"]:
+            captured.clear()
+            await notify_mod.async_notify(hass, "G", action, key)
+            await hass.async_block_till_done()
+            assert captured and set(captured[0]) == full, (key, captured)
+        # custom path (notify_guard): same full set, unset optionals are ""
+        captured.clear()
+        await notify_mod.async_notify_custom(hass, "G", action, "hi")
+        await hass.async_block_till_done()
+        assert set(captured[0]) == full, captured[0]
+        assert captured[0]["reason"] == "" and captured[0]["attempt"] == "", captured[0]
+        # attempts is derived from attempt on the custom path too
+        captured.clear()
+        await notify_mod.async_notify_custom(hass, "G", action, "hi", attempt=3)
+        await hass.async_block_till_done()
+        assert captured[0]["attempts"] == "3 attempts", captured[0]
+    finally:
+        notify_mod.async_run = orig
+
+
 async def test_policy_reasons(hass, _):
     from custom_components.necromancer.const import REASON_AUTO_OFF, REASON_OBSERVE
     from custom_components.necromancer.core.policies.notify import NotifyPolicy
