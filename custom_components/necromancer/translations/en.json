@@ -13,7 +13,7 @@
     "step": {
       "init": {
         "title": "PoE ports",
-        "description": "Add the PoE ports of your switches here. A monitored device using the \"Auto PoE\" strategy then finds its own port automatically and restarts it by briefly cutting power when it fails.\n\nConfigured ports:\n{ports}",
+        "description": "Add the PoE ports of your switches here. A monitored device using the \"Auto-PoE\" strategy then finds its own port automatically and restarts it by briefly cutting power when it fails.\n\nConfigured ports:\n{ports}",
         "menu_options": {
           "add_port": "Add port",
           "edit_port": "Edit port",
@@ -174,7 +174,7 @@
         },
         "switch": {
           "title": "Power-cycle a switch",
-          "description": "Powers a switch off and on when the device fails. The timing settings below set how long to wait before reacting, how long to wait for the device to recover, and how often to retry.",
+          "description": "Powers a switch off and on when the device fails. The timing settings below set how long to wait before reacting and how long to pause afterwards; with a health-check, also how long to wait for the device to recover and how often to retry.",
           "data": {
             "switch_entity": "Switch to power off and on (e.g. a smart plug)",
             "off_on_delay": "Wait between off and on"
@@ -182,11 +182,11 @@
           "sections": {
             "behavior": {
               "name": "Behaviour",
-              "description": "When Necromancer reacts and how often it retries — the defaults are usually fine.",
+              "description": "When Necromancer reacts, and — with a health-check — how often it retries before giving up. The defaults are usually fine.",
               "data": {
                 "debounce": "Wait before reacting",
                 "boot_window": "Wait until the device is healthy again",
-                "cooldown": "Pause after an attempt",
+                "cooldown": "Pause after a successful recovery",
                 "max_attempts": "Max attempts"
               }
             },
@@ -217,7 +217,7 @@
         },
         "action": {
           "title": "Run an action",
-          "description": "Runs your action when the device fails. The timing settings below set how long to wait before reacting, how long to wait for the device to recover, and how often to retry.",
+          "description": "Runs your action when the device fails. The timing settings below set how long to wait before reacting and how long to pause afterwards; with a health-check, also how long to wait for the device to recover and how often to retry.",
           "sections": {
             "recovery_action": {
               "name": "Recovery action",
@@ -228,11 +228,11 @@
             },
             "behavior": {
               "name": "Behaviour",
-              "description": "When Necromancer reacts and how often it retries — the defaults are usually fine.",
+              "description": "When Necromancer reacts, and — with a health-check — how often it retries before giving up. The defaults are usually fine.",
               "data": {
                 "debounce": "Wait before reacting",
                 "boot_window": "Wait until the device is healthy again",
-                "cooldown": "Pause after an attempt",
+                "cooldown": "Pause after a successful recovery",
                 "max_attempts": "Max attempts"
               }
             },
@@ -263,7 +263,7 @@
         },
         "actions": {
           "title": "Off/on actions",
-          "description": "Runs the off action, waits, then the on action when the device fails. The timing settings below set how long to wait before reacting, how long to wait for the device to recover, and how often to retry.",
+          "description": "Runs the off action, waits, then the on action when the device fails. The timing settings below set how long to wait before reacting and how long to pause afterwards; with a health-check, also how long to wait for the device to recover and how often to retry.",
           "sections": {
             "recovery_action": {
               "name": "Recovery actions",
@@ -276,11 +276,11 @@
             },
             "behavior": {
               "name": "Behaviour",
-              "description": "When Necromancer reacts and how often it retries — the defaults are usually fine.",
+              "description": "When Necromancer reacts, and — with a health-check — how often it retries before giving up. The defaults are usually fine.",
               "data": {
                 "debounce": "Wait before reacting",
                 "boot_window": "Wait until the device is healthy again",
-                "cooldown": "Pause after an attempt",
+                "cooldown": "Pause after a successful recovery",
                 "max_attempts": "Max attempts"
               }
             },
@@ -310,19 +310,19 @@
           }
         },
         "poe_port": {
-          "title": "Auto PoE — find the port",
-          "description": "Finds the matching PoE port by the device's id and powers it off and on. The timing settings below set how long to wait before reacting, how long to wait for the device to recover, and how often to retry. Manage the ports under the integration's \"Configure\".",
+          "title": "Auto-PoE — find the port",
+          "description": "Finds the matching PoE port by the device's id and powers it off and on. The timing settings below set how long to wait before reacting and how long to pause afterwards; with a health-check, also how long to wait for the device to recover and how often to retry. Manage the ports under the integration's \"Configure\".",
           "data": {
             "expected_id": "Device id (e.g. MAC, IP or name)"
           },
           "sections": {
             "behavior": {
               "name": "Behaviour",
-              "description": "When Necromancer reacts and how often it retries — the defaults are usually fine.",
+              "description": "When Necromancer reacts, and — with a health-check — how often it retries before giving up. The defaults are usually fine.",
               "data": {
                 "debounce": "Wait before reacting",
                 "boot_window": "Wait until the device is healthy again",
-                "cooldown": "Pause after an attempt",
+                "cooldown": "Pause after a successful recovery",
                 "max_attempts": "Max attempts"
               }
             },
@@ -431,7 +431,7 @@
         "action_check": "Run an action + health-check",
         "actions": "Off/on actions",
         "actions_check": "Off/on actions + health-check",
-        "poe_port": "Auto PoE (find the port automatically)"
+        "poe_port": "Auto-PoE (find the port automatically)"
       }
     },
     "import_mode": {
