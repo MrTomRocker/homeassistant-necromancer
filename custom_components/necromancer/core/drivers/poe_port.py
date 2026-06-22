@@ -46,7 +46,7 @@ class PoePortDriver(RecoveryDriver):
             return False, reason
         return True, ""
 
-    async def recover(self) -> None:
+    async def recover(self, variables: dict | None = None) -> None:
         """Hand off to the fabric to resolve, lock, and cycle the port."""
         fabric = self._fabric()
         if fabric is None:

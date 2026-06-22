@@ -50,14 +50,24 @@ class ActionCycleDriver(RecoveryDriver):
                 return False, f"invalid {label} action: {err}"
         return True, ""
 
-    async def recover(self) -> None:
-        """Run the off action, wait `off_on_delay`, then the on action."""
+    async def recover(self, variables: dict | None = None) -> None:
+        """Run the off action, wait `off_on_delay`, then the on action.
+
+        The engine's run context (`variables`: `attempt`, `max`, …) seeds the off
+        action, and the off action's final variables flow into the on action — so
+        engine vars and any `variables:` set during the off phase are both
+        readable in the on phase, no external helper needed across the power-cycle.
+        """
         delay = int(self.config.get(CONF_OFF_ON_DELAY, DEFAULT_OFF_ON_DELAY))
         LOGGER.debug("Recovery: off action")
-        await async_run(self.hass, self.off_action, "necromancer recovery (off)")
+        off_vars = await async_run(
+            self.hass, self.off_action, "necromancer recovery (off)", variables
+        )
         await asyncio.sleep(delay)
         LOGGER.debug("Recovery: on action")
-        await async_run(self.hass, self.on_action, "necromancer recovery (on)")
+        await async_run(
+            self.hass, self.on_action, "necromancer recovery (on)", variables=off_vars
+        )
 
     def target_info(self) -> str:
         """Return a short human description of the recovery target."""

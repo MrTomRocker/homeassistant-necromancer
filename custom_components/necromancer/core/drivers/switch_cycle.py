@@ -31,7 +31,7 @@ class SwitchCycleDriver(RecoveryDriver):
             return False, f"switch entity {self.switch_entity} not found"
         return True, ""
 
-    async def recover(self) -> None:
+    async def recover(self, variables: dict | None = None) -> None:
         """Cycle the switch off, wait `off_on_delay`, then on."""
         delay = int(self.config.get(CONF_OFF_ON_DELAY, DEFAULT_OFF_ON_DELAY))
         LOGGER.debug("Cycling %s: off", self.switch_entity)

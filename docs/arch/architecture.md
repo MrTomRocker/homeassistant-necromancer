@@ -217,6 +217,15 @@ User actions are validated (`cv.SCRIPT_SCHEMA` + `async_validate_actions_config`
 and run via the `Script` helper (`core/actions.py`), blocking for recovery, detached
 for notifications.
 
+**Action variable scope.** `recover(variables)` is handed the engine's run context —
+`attempt`, `max`, `name`, `guard_id` — which the action-running drivers (`action_call`,
+`action_cycle`) seed into the script run as template variables (`switch_cycle` / `poe_port` /
+`noop` ignore it). `async_run` returns the run's **final variable scope** (minus HA's injected
+`context`), and `action_cycle` feeds the off action's scope into the on action — so off-phase
+`variables:` and the engine context are both readable in the on phase, with no helper entity to
+carry state across the power-cycle. Variables are per-attempt (each retry runs off→on fresh);
+nothing leaks between attempts.
+
 ### The strategy matrix
 
 The wizard offers **7 strategies** = 3 action shapes × {plain, +health-check} +

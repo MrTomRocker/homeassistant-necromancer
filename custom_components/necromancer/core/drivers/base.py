@@ -35,8 +35,13 @@ class RecoveryDriver(ABC):
         return True, ""
 
     @abstractmethod
-    async def recover(self) -> None:
-        """Perform the recovery. Should return once the action is done."""
+    async def recover(self, variables: dict | None = None) -> None:
+        """Perform the recovery. Should return once the action is done.
+
+        ``variables`` carries the engine's run context (``attempt``, ``max``,
+        ``name``, ``guard_id``) into action-running drivers; the switch / PoE /
+        no-op drivers ignore it.
+        """
 
     def target_info(self) -> str:
         """Short human description of the target (e.g. the service or port)."""

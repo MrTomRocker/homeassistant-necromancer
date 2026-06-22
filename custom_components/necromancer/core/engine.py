@@ -671,7 +671,14 @@ class DeviceEngine:
                     self._escalate("recovery_blocked", reason=reason)
                     return
                 try:
-                    await self.driver.recover()
+                    await self.driver.recover(
+                        {
+                            "attempt": self.attempt,
+                            "max": self.max_attempts,
+                            "name": self.name,
+                            "guard_id": self._subentry_id,
+                        }
+                    )
                 except Exception as err:
                     # The action raised (e.g. a missing service): a failed attempt,
                     # never a success — retry or escalate, even without a check.

@@ -15,14 +15,14 @@ import sys
 
 import voluptuous as vol
 
-from tests.common import async_test_home_assistant
+from tests.common import async_mock_service, async_test_home_assistant
 
 from custom_components.necromancer.config_flow import (
     DeviceSubentryFlow,
     NecromancerOptionsFlow,
 )
 from custom_components.necromancer.config_flow_helpers import schemas as cf
-from custom_components.necromancer.core.actions import async_validate
+from custom_components.necromancer.core.actions import async_run, async_validate
 from custom_components.necromancer.core.drivers import create_driver
 from custom_components.necromancer.core.health import create_health
 from custom_components.necromancer.core.health.base import Health
@@ -337,6 +337,83 @@ async def test_template_referenced_entities(hass, _):
     h = create_health(hass, {"type": "template",
                              "template": "{{ is_state('sensor.foo', 'on') }}"})
     assert "sensor.foo" in h.referenced_entities(), h.referenced_entities()
+
+
+# ---------------- core/drivers/action_cycle: off → on variable scope ----------------
+
+
+async def test_action_cycle_passes_off_vars_to_on(hass, _):
+    """A `variables:` set in the off action is readable in the on action."""
+    calls = async_mock_service(hass, "test", "cycle_vars")
+    drv = create_driver(
+        hass,
+        {
+            "type": "action_cycle",
+            "off_on_delay": 0,
+            "off_action": [{"variables": {"marker": "carried"}}],
+            "on_action": [{"action": "test.cycle_vars", "data": {"v": "{{ marker }}"}}],
+        },
+    )
+    await drv.recover()
+    await hass.async_block_till_done()
+    assert len(calls) == 1, calls
+    assert calls[0].data["v"] == "carried", calls[0].data
+
+
+async def test_action_cycle_no_vars_backward_compatible(hass, _):
+    """Without a `variables:` carry-over, both phases still run as before."""
+    calls = async_mock_service(hass, "test", "cycle_plain")
+    drv = create_driver(
+        hass,
+        {
+            "type": "action_cycle",
+            "off_on_delay": 0,
+            "off_action": [{"action": "test.cycle_plain", "data": {"phase": "off"}}],
+            "on_action": [{"action": "test.cycle_plain", "data": {"phase": "on"}}],
+        },
+    )
+    await drv.recover()
+    await hass.async_block_till_done()
+    assert [c.data["phase"] for c in calls] == ["off", "on"], calls
+
+
+async def test_async_run_returns_vars_without_context(hass, _):
+    """Returned scope carries real variables, not HA's injected run `context`."""
+    out = await async_run(hass, [{"variables": {"x": "1"}}], "ctxprobe")
+    assert out.get("x") == "1", out
+    assert "context" not in out, out
+
+
+async def test_action_cycle_seeds_engine_vars(hass, _):
+    """Engine vars passed to recover() are readable in both off and on phases."""
+    calls = async_mock_service(hass, "test", "cycle_seed")
+    drv = create_driver(
+        hass,
+        {
+            "type": "action_cycle",
+            "off_on_delay": 0,
+            "off_action": [{"action": "test.cycle_seed", "data": {"a": "{{ attempt }}"}}],
+            "on_action": [{"action": "test.cycle_seed", "data": {"a": "{{ attempt }}"}}],
+        },
+    )
+    await drv.recover({"attempt": 2, "max": 3, "name": "X", "guard_id": "g1"})
+    await hass.async_block_till_done()
+    assert [c.data["a"] for c in calls] == [2, 2], calls
+
+
+async def test_action_call_seeds_engine_vars(hass, _):
+    """Engine vars passed to recover() are readable in an action_call recovery."""
+    calls = async_mock_service(hass, "test", "call_seed")
+    drv = create_driver(
+        hass,
+        {
+            "type": "action_call",
+            "action": [{"action": "test.call_seed", "data": {"a": "{{ attempt }}"}}],
+        },
+    )
+    await drv.recover({"attempt": 5})
+    await hass.async_block_till_done()
+    assert calls[0].data["a"] == 5, calls[0].data
 
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

@@ -202,6 +202,13 @@ A **notify-only** guard skips recovery entirely — it just detects the problem 
 (and optionally notifies). Pick **Notify only** at the top of the strategy step to be told about
 something you'd rather fix by hand.
 
+**Variables in your actions.** The *Run an action* and *Off/on actions* strategies hand your action
+the guard's run context as Jinja variables — `attempt` and `max` (the current try and the limit),
+plus `name` and `guard_id` — so an action can branch on the attempt (a gentle fix first, a harder
+one on the second try). With **Off/on actions**, any variables you set in the off action (a
+`variables:` step) are also readable in the on action, so you can capture state before cutting power
+and restore it afterwards — no helper entity needed.
+
 **Restart device integration (optional).** When the guard has a device assigned, the recovery step
 shows a *Restart device integration* toggle: after the repair action — and before re-checking
 health — Necromancer reloads that device's integration (its config entry), after a delay you set.
