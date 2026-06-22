@@ -35,7 +35,7 @@ shared script. The guard stays "dumb"; it knows nothing about phones or rooms.
 ```
 
 `message` is the full `"Name: text"` line, `name`/`event_text` are its parts (handy when a channel
-takes a separate title), `event` is the key you can branch on (`problem_detected`,
+takes a separate title), `event` is the key you can branch on (`problem_detected`, `recovery_attempt`,
 `recovery_success`, `recovery_failed`, `recovery_blocked`, `no_auto_recovery`,
 `linked_repair_failed`), and `attempt`/`max`/`attempts`/`reason` fill in where applicable. The
 `default('')` keeps the script's fields tidy when a variable isn't set for a given event.

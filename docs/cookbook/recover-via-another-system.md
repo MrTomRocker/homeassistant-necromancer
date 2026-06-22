@@ -124,4 +124,3 @@ and swap the middle step for whatever your device responds to:
 - **No health signal at all?** Then you can't verify — fall back to a fire-and-forget
   `action_call` or a **notify-only** guard, and accept that Necromancer can't confirm the
   fix or retry intelligently.
-```

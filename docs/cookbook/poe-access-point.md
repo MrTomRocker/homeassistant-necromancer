@@ -37,9 +37,9 @@ Health (template — guard is *healthy* when this renders truthy):
 Strategy: **Auto-PoE**, with the AP's MAC as the device id:
 
 ```yaml
-strategy: auto_poe
+strategy: poe_port
 poe_port:
-  device_id: "8c:30:66:44:11:3d"   # the U7 Lite's MAC — Necromancer finds its port
+  expected_id: "8c:30:66:44:11:3d"   # the U7 Lite's MAC — Necromancer finds its port
 ```
 
 Timing (see [Timing & behaviour](../../README.md#timing--behaviour)):
@@ -85,7 +85,7 @@ The whole design is in that one health template. It has three jobs:
    says, in effect, *"if the controller is the problem, then I'm fine"* — the AP isn't down,
    the reporter is. (A lightweight alternative to building a full supervisor guard.)
 
-3. **Auto-PoE by MAC** — `device_id: "8c:30:66:44:11:3d"`. Necromancer scans the ports and
+3. **Auto-PoE by MAC** — `expected_id: "8c:30:66:44:11:3d"`. Necromancer scans the ports and
    cycles the one currently reporting that MAC, so re-cabling the AP just works. And because
    it **remembers** the last-known port while the AP is healthy, it can still cycle the right
    port after the AP has gone fully dark and aged out of the switch's neighbour table.

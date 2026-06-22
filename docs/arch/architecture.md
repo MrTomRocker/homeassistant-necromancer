@@ -358,7 +358,8 @@ picking notify-only routes to a notification step instead of a recovery one. The
 is no separate "mode" field — the notify-vs-recover choice *is* the strategy choice.
 
 - **Sections.** Fields are grouped into `data_entry_flow.section`s with a heading
-  and description (state check, behaviour, notification, assigned device, and —
+  and description (state check, recovery action, behaviour, notification, assigned
+  device, linked guards, and —
   only when a device is assigned — *reload* the assigned device's integration after
   a repair; ports: switch / recognition / status / timing). Sections nest their
   values, so submitted input is flattened back up (`_flatten_sections`).

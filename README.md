@@ -224,8 +224,8 @@ the collapsed *Behaviour* section of the wizard.
 |---|---|---|
 | **Debounce** | 120 s | How long a fault must persist before recovery starts. Absorbs short blips. |
 | **Boot window** | 180 s | How long to wait for the device to report healthy again after the recovery action, before counting the attempt as failed. Set it to the slowest your device takes to come back. |
-| **Cooldown** | 600 s | The pause after a *successful* recovery before the guard returns to `ok`. Prevents tight loops; a fresh fault during cooldown re-enters the cycle immediately. |
-| **Max attempts** | 2 | How many times to retry before escalating. (`*_check` strategies only — fire-and-forget runs once.) |
+| **Cooldown** | 600 s | The pause after a *successful* recovery before the guard returns to `ok`. Prevents tight loops; if the device is still (or again) faulty when the cooldown elapses, the guard re-enters `suspect` (debounce) rather than looping straight back into recovery. |
+| **Max attempts** | 2 | How many times to retry before escalating. (Health-check strategies only — the `*_check` variants and Auto-PoE; fire-and-forget runs the action once.) |
 
 A few consequences worth knowing:
 
@@ -357,7 +357,7 @@ flag on the `done` event — so your own automations can react to it.
 ## Supervisor guards (watch other guards)
 
 A guard's **template** health can reference **other guards'** own entities — their
-`sensor.<name>_status` (`ok` / `suspect` / `recovering` / `verify` / `cooldown` / `escalated`) or
+`sensor.<name>_status` (`ok` / `suspect` / `recovering` / `verify` / `cooldown` / `escalated` / `snoozed`) or
 `binary_sensor.<name>_health`. That lets you **stage** recovery: small per-device guards try the
 cheap fix first; a higher-level **supervisor guard** watches their status and triggers a bigger
 recovery once several have given up.
