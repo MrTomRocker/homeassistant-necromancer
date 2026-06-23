@@ -167,7 +167,7 @@
         },
         "strategy": {
           "title": "Recovery strategy",
-          "description": "How should the device be brought back when it fails? \"With health-check\" waits for the device to report OK again afterwards; the plain variants assume the action worked.",
+          "description": "How should the device be brought back when it fails? On the next screen a health-check toggle (on by default) decides whether the fix is verified against the device's health before going quiet; with it off, the action is assumed to have worked.",
           "data": {
             "strategy": "Strategy"
           }
@@ -185,6 +185,7 @@
               "description": "When Necromancer reacts, and — with a health-check — how often it retries before giving up. The defaults are usually fine.",
               "data": {
                 "debounce": "Wait before reacting",
+                "health_check": "Verify recovery (health-check)",
                 "boot_window": "Wait until the device is healthy again",
                 "cooldown": "Pause after a successful recovery",
                 "max_attempts": "Max attempts"
@@ -231,6 +232,7 @@
               "description": "When Necromancer reacts, and — with a health-check — how often it retries before giving up. The defaults are usually fine.",
               "data": {
                 "debounce": "Wait before reacting",
+                "health_check": "Verify recovery (health-check)",
                 "boot_window": "Wait until the device is healthy again",
                 "cooldown": "Pause after a successful recovery",
                 "max_attempts": "Max attempts"
@@ -279,6 +281,7 @@
               "description": "When Necromancer reacts, and — with a health-check — how often it retries before giving up. The defaults are usually fine.",
               "data": {
                 "debounce": "Wait before reacting",
+                "health_check": "Verify recovery (health-check)",
                 "boot_window": "Wait until the device is healthy again",
                 "cooldown": "Pause after a successful recovery",
                 "max_attempts": "Max attempts"
@@ -321,6 +324,7 @@
               "description": "When Necromancer reacts, and — with a health-check — how often it retries before giving up. The defaults are usually fine.",
               "data": {
                 "debounce": "Wait before reacting",
+                "health_check": "Verify recovery (health-check)",
                 "boot_window": "Wait until the device is healthy again",
                 "cooldown": "Pause after a successful recovery",
                 "max_attempts": "Max attempts"
@@ -426,11 +430,8 @@
       "options": {
         "notify": "Notify only",
         "switch": "Power-cycle a switch",
-        "switch_check": "Power-cycle a switch + health-check",
         "action": "Run an action",
-        "action_check": "Run an action + health-check",
         "actions": "Off/on actions",
-        "actions_check": "Off/on actions + health-check",
         "poe_port": "Auto-PoE (find the port automatically)"
       }
     },

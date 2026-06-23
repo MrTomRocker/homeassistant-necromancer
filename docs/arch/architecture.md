@@ -142,13 +142,13 @@ Key timing fields (the **behaviour** block):
 | `cooldown` | Pause after a recovery cycle before re-arming. |
 | `max_attempts` | Retries within one cycle before escalating. |
 
-**Health-check vs fire-and-forget.** A strategy can run *with* or *without* a
-health-check:
+**Health-check vs fire-and-forget.** `behavior.health_check` (a per-recovery toggle
+in the wizard, default on) decides:
 
-- **With** (`*_check`): after `recover()`, the engine waits (event-driven, up to
-  `boot_window`) for the HealthSource to read `OK`. Not OK within the window →
-  retry up to `max_attempts` → `ESCALATED`.
-- **Without**: `recover()` is assumed to have worked → straight to success; the
+- **On**: after `recover()`, the engine waits (event-driven, up to `boot_window`)
+  for the HealthSource to read `OK`. Not OK within the window → retry up to
+  `max_attempts` → `ESCALATED`.
+- **Off**: `recover()` is assumed to have worked → straight to success; the
   continuous health monitoring re-triggers later if it didn’t. *(If `recover()`
   raises — e.g. a missing service — it counts as a failed attempt, never a
   success.)*
@@ -229,19 +229,21 @@ nothing leaks between attempts.
 
 ### The strategy matrix
 
-The wizard offers **7 strategies** = 3 action shapes × {plain, +health-check} +
-PoE:
+The wizard offers **5 options**: notify-only plus 4 recovery strategies (one per
+action shape). The health-check is a separate per-recovery toggle
+(`behavior.health_check`, default on), not a strategy variant:
 
 ```
-switch          switch_check          → switch_cycle   (no verify / verify)
-action          action_check          → action_call
-actions         actions_check         → action_cycle
-poe_port                              → poe_port        (own staged verify + health)
+notify    → noop
+switch    → switch_cycle
+action    → action_call
+actions   → action_cycle
+poe_port  → poe_port      (own staged verify; + device health-check when enabled)
 ```
 
-A strategy maps to a `driver type` + a `health_check` behaviour flag. Auto-PoE
-keeps its own staged verify (port goes offline → comes online) on top of the
-device health-check.
+A strategy maps to a `driver type`; `behavior.health_check` (the toggle) decides
+whether the engine's VERIFY step runs. Auto-PoE keeps its own staged verify (port
+goes offline → comes online) on top of the device health-check (when enabled).
 
 **Auto-PoE remembers its port.** A device that is down can age out of the
 switch's FDB/LLDP neighbour table, so resolving it live would find *nothing*
@@ -354,7 +356,7 @@ requires it); the schema/selector builders live in the `config_flow_helpers`
 package (`schemas.py` + reactive `selectors.py`).
 
 Steps: **source type → device & state → strategy → recovery/notification**. The
-strategy step lists **notify-only** (first) plus the seven recovery strategies;
+strategy step lists **notify-only** (first) plus the four recovery strategies;
 picking notify-only routes to a notification step instead of a recovery one. There
 is no separate "mode" field — the notify-vs-recover choice *is* the strategy choice.
 
@@ -456,7 +458,7 @@ core/policies/          base, standard, notify
 
 ---
 
-## 11. Data flow (one recovery cycle, `switch_check`)
+## 11. Data flow (one recovery cycle, `switch` with health-check on)
 
 ```
 health entity changes

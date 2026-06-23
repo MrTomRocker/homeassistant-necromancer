@@ -113,9 +113,10 @@ and swap the middle step for whatever your device responds to:
 - **`continue_on_timeout: true` matters.** Without it, a slow restart that misses the
   `wait_template` timeout aborts the recovery early. Keep it true and let the `boot_window`
   plus health-check decide success — that's what counts the attempt, not the wait.
-- **Fire-and-forget vs. health-check.** A plain `action_call` runs once and trusts it
-  worked. The health-check variant (the `wait_template` + boot-window verify above) is what
-  enables retries and honest success/failure. Use it whenever you can observe the device.
+- **Fire-and-forget vs. health-check.** With the health-check toggle off, an `action_call`
+  runs once and trusts it worked. With it on (the default — the `wait_template` + boot-window
+  verify above), you get retries and honest success/failure. Keep it on whenever you can
+  observe the device.
 - **Debounce long on purpose.** 1200 s is deliberate. Restarting another system is a heavy,
   external side effect — don't drop this to seconds, or every momentary blip pokes ioBroker.
 - **Make the other system idempotent if you can.** With `max_attempts: 2`, a stuck bridge

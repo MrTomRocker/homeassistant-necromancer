@@ -17,7 +17,7 @@ one of them:
    `unknown`/`unavailable`) → `UNKNOWN`, never `UNHEALTHY`. No recovery is
    triggered on `UNKNOWN`.
 2. **No false success.** A recovery only counts as success if the action ran
-   without raising *and* (for `*_check`) health verified OK. A raising
+   without raising *and* (with the health-check on) health verified OK. A raising
    `recover()` is a failed attempt → retry/escalate.
 3. **Verify is possible.** Every `HealthSource.evaluate()` is callable on demand,
    so the VERIFY step works (this is why health is a *template*, never a momentary

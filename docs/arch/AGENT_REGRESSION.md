@@ -40,9 +40,11 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
 > **Flow-Hinweis (Mode-Wahl entfernt):** Der Device-Step trägt **kein** `mode`-Feld mehr. Manuelle Flow-Treiber
 > (`N._post_flow(fid,{...})`) dürfen `"mode"` NICHT mehr im Device-Step posten — sonst `extra keys not allowed
 > @ data['mode']`. Die Strategie-Wahl kommt erst im **nächsten** Step (`strategy`): `"notify"` (erste Option,
-> → Notify-Step) oder eine Recovery-Strategie (`switch`/`switch_check`/`action`/`action_check`/`actions`/
-> `actions_check`/`poe_port` → eigener Step). `N.create_guard({...,"mode":"recover"|"notify",...})` bleibt
-> unverändert gültig — das Testkit übersetzt den Spec-Key `mode` intern in die richtige Strategy-Step-Wahl.
+> → Notify-Step) oder eine Recovery-Strategie (`switch`/`action`/`actions`/`poe_port` → eigener Step). Der
+> Health-Check ist kein Strategie-Variant mehr, sondern ein Toggle (`health_check`, default an) in der
+> Behaviour-Section. `N.create_guard({...,"mode":"recover"|"notify",...})` bleibt unverändert gültig — das
+> Testkit übersetzt `mode` in die Strategy-Wahl und akzeptiert das alte `*_check`-Kürzel weiter (→ Basis-
+> Strategie + `health_check: true`).
 > Ist im Device-Step ein `assigned_device` gesetzt, ist im Recover-Step zusätzlich die Section `"reload":{}`
 > **pflicht** (sonst `required key not provided`).
 
@@ -307,7 +309,7 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
 
 ---
 
-## Health-Quellen (state/template) · 7 Strategien + Health-Check-Semantik
+## Health-Quellen (state/template) · 4 Strategien + Health-Check-Toggle
 
 ### Health-Quellen: state_based vs template_based
 
@@ -381,13 +383,13 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
   - **Assert:** `N.log()` enthält `"references its own entit(ies)"` UND `"feedback loop"`; `N.g("/api/config")["state"]=="RUNNING"`.
   - **Cleanup:** `N.delete_subentry(eid,sub)`.
 
-### Strategien (7) + Health-Check-Semantik
+### Strategien (4) + Health-Check-Toggle
 
-- [ ] **ST1 — Strategie-Radio zeigt genau 8 (notify + 7), kein Mode-Feld im Device-Step** · `P0`
-  - **Prüft:** Das Mode-Feld (Auto-Reparatur/Nur-benachrichtigen) ist aus dem Device-Step **entfernt**; die Wahl liegt jetzt als erste Option (`notify`) im Strategie-Step, gefolgt von den 7 Recovery-Strategien.
+- [ ] **ST1 — Strategie-Radio zeigt genau 5 (notify + 4), kein Mode-Feld im Device-Step** · `P0`
+  - **Prüft:** Das Mode-Feld (Auto-Reparatur/Nur-benachrichtigen) ist aus dem Device-Step **entfernt**; die Wahl liegt jetzt als erste Option (`notify`) im Strategie-Step, gefolgt von den 4 Recovery-Strategien. Der Health-Check ist ein Toggle (`health_check`, default an) in jeder Recovery-Behaviour-Section.
   - **Files:** `config_flow_helpers/schemas.py` → `_device_schema` (kein `CONF_MODE` mehr), `_strategy_schema` (`options=[MODE_NOTIFY, *_STRATEGIES]`), `_build_data` (`notify_only = strategy == MODE_NOTIFY`); `config_flow.py` → `async_step_strategy`-Dispatch (`MODE_NOTIFY: async_step_notify`).
   - **Treiber:** Flow starten (`fid=r["flow_id"]`) → `{"source_type":"state_based"}` → device-Step posten mit `{"name":"STseven","assigned_device":{},"state_check":{"entity_id":"input_boolean.test_1","on_value":["on"],"off_value":["off"]}}` (KEIN `mode`).
-  - **Assert:** Device-Step-Schema hat **kein** `mode`-Feld; `r["step_id"]=="strategy"`; das `strategy`-select hat options `["notify","switch","switch_check","action","action_check","actions","actions_check","poe_port"]` (8 Einträge, genau diese Reihenfolge). `notify` wählen → `step_id=="notify"`.
+  - **Assert:** Device-Step-Schema hat **kein** `mode`-Feld; `r["step_id"]=="strategy"`; das `strategy`-select hat options `["notify","switch","action","actions","poe_port"]` (5 Einträge, genau diese Reihenfolge). `notify` wählen → `step_id=="notify"`.
   - **Cleanup:** — (Flow nicht abgeschlossen).
 
 - [ ] **ST2 — switch: off→delay→on Power-Cycle** · `P0`
@@ -439,18 +441,18 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
   - **Assert:** `N.guard("stfail")[0]=="escalated"`, `attrs["attempt"]==2`, `attrs.get("recover_count",0)==0`; `N.log()` enthält `"STfail could not be recovered after 2 attempt(s)"`.
   - **Cleanup:** `N.delete_subentry(eid,sub)`; `N.setstate("input_boolean.test_1","on")`.
 
-- [ ] **ST8 — boot_window/max_attempts nur bei *_check sichtbar** · `P0`
-  - **Prüft:** Die Behavior-Section zeigt `boot_window`+`max_attempts` nur für Check-Strategien (und poe_port); bei Nicht-Check sind beide ausgeblendet.
-  - **Files:** `config_flow.py` → `_behavior_section` Z. 416-446 (`if check: boot_window/max_attempts`), `_CHECK_STRATEGIES` Z. 114-117, `_poe_schema` ruft `_behavior_section(check=True)` Z. 666.
-  - **Treiber:** Zwei Flows je bis zum Strategie-Submit treiben (state_based, mode recover; `fid=r["flow_id"]` je Flow): Flow A wählt `strategy=action`, Flow B wählt `strategy=action_check`; jeweils das nächste Form (`step_id=="action"`) inspizieren.
-  - **Assert:** In Flow A (`action`) hat die `behavior`-Section NUR `debounce`,`cooldown` (kein `boot_window`/`max_attempts`). In Flow B (`action_check`) hat sie zusätzlich `boot_window` UND `max_attempts`.
+- [ ] **ST8 — Behavior-Section: health_check-Toggle + boot_window/max_attempts immer sichtbar** · `P0`
+  - **Prüft:** Jede Recovery-Strategie (switch/action/actions/poe) zeigt in der Behaviour-Section den `health_check`-Toggle (default an) plus `boot_window` + `max_attempts` — unabhängig vom Toggle-Zustand (HA-birth/will-Muster: editierbar trotz aus). `cooldown` steht VOR dem Toggle, damit klar ist, dass der Toggle nur boot_window/max_attempts steuert.
+  - **Files:** `config_flow_helpers/schemas.py` → `_behavior_section` (kein `check`-Param mehr; `health_check`/`boot_window`/`max_attempts` immer enthalten), `_build_data` (`check = bool(step2.get(CONF_HEALTH_CHECK, True))`), `_poe_schema` ruft `_behavior_section(d)`.
+  - **Treiber:** Flow bis zum Strategie-Submit treiben (state_based, mode recover); `strategy=action` wählen; das `action`-Form inspizieren. Zweiter Flow mit `strategy=poe_port`.
+  - **Assert:** Die `behavior`-Section enthält `debounce`,`cooldown`,`health_check`,`boot_window`,`max_attempts` (genau diese Reihenfolge); `health_check` hat `default==true`. Auch die `poe_port`-Behaviour-Section enthält `health_check`.
   - **Cleanup:** — (Flows nicht abgeschlossen).
 
 - [ ] **ST9 — Reconfigure-Vorauswahl der Strategie via _current_strategy** · `P1`
-  - **Prüft:** Beim Reconfigure ist das Strategie-Radio mit der gespeicherten Strategie vorbelegt (driver-type + health_check-Flag).
+  - **Prüft:** Beim Reconfigure ist das Strategie-Radio mit der gespeicherten Strategie vorbelegt — abgeleitet aus dem driver-type (der Health-Check ist separat der Toggle, nicht Teil der Strategie).
   - **Files:** `config_flow.py` → `_current_strategy` (Z. 580-590), `async_step_strategy` Z. 929-933 (default aus `_current_strategy(self._reconfig_data())`).
   - **Treiber:** Guard `STrc` als `actions_check` anlegen (`strategy="actions_check"`, off/on-action + `behavior` mit boot_window/max_attempts). Reconfigure-Flow starten: `r=requests.post(N.BASE+"/api/config/config_entries/subentries/flow", headers=N.H, json={"handler":[eid,"device"],"subentry_id":sub}, timeout=15).json(); fid=r["flow_id"]`; Source-Step mit `{"source_type":"state_based"}` quittieren; device-Step durchreichen bis `strategy`.
-  - **Assert:** Das `strategy`-Feld im Reconfigure-Strategie-Step hat `default=="actions_check"`.
+  - **Assert:** Das `strategy`-Feld im Reconfigure-Strategie-Step hat `default=="actions"` (Basis-Strategie; der `actions_check`-Spec legt via Testkit `health_check: true` an, aber die Strategie ist `actions`).
   - **Cleanup:** `N.delete_subentry(eid,sub)`.
 
 - [ ] **ST10 — Vorbedingung fehlt: switch_cycle ohne Switch → recovery_blocked → ESCALATED** · `P1`
@@ -1033,7 +1035,7 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
   - **Prüft:** Der Reconfigure-Flow lädt Source-Type, Name, Entität/Template, on/off-Listen, Strategie, Verhalten, Notify-Aktion und device_id korrekt vor.
   - **Files:** `config_flow.py` → `_source_type_of` (Z.297), `_health_defaults` (Z.603–613, inkl. `CONF_DEVICE_ID` Z.612), `_current_strategy` (Z.580–590, liest `CONF_HEALTH_CHECK`), `_switch_defaults`/`_action_defaults`/`_behavior_defaults` (Z.616–656).
   - **Treiber:** Guard `eid,sid=N.create_guard({"source_type":"state_based","name":"CFRe","mode":"recover","health":{"entity_id":"input_boolean.test_5"},"strategy":"switch_check","switch_entity":"switch.test_template_switch","behavior":{"debounce":1,"cooldown":3,"boot_window":10,"max_attempts":2}})`. Reconfigure-Subentry-Flow starten (`/api/config/config_entries/subentries/flow` mit `{"handler":[hub,"device"],"subentry_id":sid}`), die Steps NICHT submitten, sondern `data_schema`-Defaults inspizieren.
-  - **Assert:** Source-Step Default == `state_based`; Device-Step suggested `name=="CFRe"`, on=`["on"]`/off=`["off"]`; Strategy-Step Default == `switch_check` (weil `health_check` gespeichert, `_build_data` Z.568); Switch-Step suggested `switch_entity=="switch.test_template_switch"`; Behavior-Werte == die gesetzten.
+  - **Assert:** Source-Step Default == `state_based`; Device-Step suggested `name=="CFRe"`, on=`["on"]`/off=`["off"]`; Strategy-Step Default == `switch` (Basis-Strategie via `_current_strategy`; der Health-Check ist nicht Teil der Strategie); Switch-Step suggested `switch_entity=="switch.test_template_switch"`; Behavior-Section: `health_check`-Toggle vorbelegt `true` (gespeichert), Behavior-Werte == die gesetzten.
   - **Cleanup:** `N.delete_subentry(eid,sid)`
 
 - [ ] **CF4 — Reconfigure Source-Wechsel state↔template** · `P1`

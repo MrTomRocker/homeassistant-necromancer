@@ -57,16 +57,13 @@ CONF_HEALTHY_STATE = "healthy_state"
 # health (template)
 CONF_TEMPLATE = "template"
 
-# recovery strategy (recover mode → which driver, + optional health-check). The
-# health-check variants verify recovery against the device's health entity (the
-# engine's VERIFY step); the plain ones assume the action worked.
+# recovery strategy (recover mode → which driver). Whether recovery is verified
+# against the device's health entity (the engine's VERIFY step) is a separate
+# per-guard `health_check` toggle (CONF_HEALTH_CHECK), not part of the strategy.
 CONF_STRATEGY = "strategy"
 STRATEGY_SWITCH = "switch"
-STRATEGY_SWITCH_CHECK = "switch_check"
 STRATEGY_ACTION = "action"
-STRATEGY_ACTION_CHECK = "action_check"
 STRATEGY_ACTIONS = "actions"
-STRATEGY_ACTIONS_CHECK = "actions_check"
 STRATEGY_POE = "poe_port"
 
 # recovery action sequences: action_call = one action; action_cycle = off + on

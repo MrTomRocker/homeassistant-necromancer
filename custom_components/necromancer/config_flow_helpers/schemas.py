@@ -77,12 +77,9 @@ from ..const import (
     SOURCE_STATE,
     SOURCE_TEMPLATE,
     STRATEGY_ACTION,
-    STRATEGY_ACTION_CHECK,
     STRATEGY_ACTIONS,
-    STRATEGY_ACTIONS_CHECK,
     STRATEGY_POE,
     STRATEGY_SWITCH,
-    STRATEGY_SWITCH_CHECK,
 )
 from .selectors import (
     _ATTRIBUTE_SELECTOR,
@@ -94,18 +91,13 @@ from .selectors import (
     _seconds_selector,
 )
 
-# Strategies that verify recovery against the health entity (engine VERIFY step).
-_CHECK_STRATEGIES = frozenset(
-    {STRATEGY_SWITCH_CHECK, STRATEGY_ACTION_CHECK, STRATEGY_ACTIONS_CHECK}
-)
-# Every recovery strategy offered in the wizard, in display order.
+# Every recovery strategy offered in the wizard, in display order. The health-check
+# is not a separate strategy — it's a per-recovery toggle in the behaviour section
+# (see `_behavior_section`), defaulting on.
 _STRATEGIES = [
     STRATEGY_SWITCH,
-    STRATEGY_SWITCH_CHECK,
     STRATEGY_ACTION,
-    STRATEGY_ACTION_CHECK,
     STRATEGY_ACTIONS,
-    STRATEGY_ACTIONS_CHECK,
     STRATEGY_POE,
 ]
 
@@ -362,34 +354,36 @@ def _debounce_field(d: dict) -> dict:
     }
 
 
-def _behavior_section(d: dict, *, check: bool) -> dict:
-    """Timing/retry behaviour, in a section collapsed by default (good defaults).
+def _behavior_section(d: dict) -> dict:
+    """Timing/retry behaviour, in a titled section (good defaults).
 
-    With a health-check, recovery is verified against the health entity, so the
-    boot window (time to come back) and retry count apply; without it the action
-    is fire-and-forget and both are omitted.
+    Field order is deliberate: debounce + cooldown first, then the `health_check`
+    toggle directly above the two fields it governs (boot window = how long to wait
+    for the device to read healthy, retries) — so it's visually clear what the
+    checkbox controls. Like HA core's birth/will fields, those two stay visible and
+    editable even when the check is off; they simply don't apply then. The toggle
+    is shown for every strategy (PoE included — it gates the engine's device-health
+    VERIFY; the PoE driver's own "port came back" check runs regardless).
     """
-    fields: dict = {**_debounce_field(d)}
-    if check:
-        fields[
-            vol.Required(
-                CONF_BOOT_WINDOW, default=d.get(CONF_BOOT_WINDOW, DEFAULT_BOOT_WINDOW)
-            )
-        ] = _seconds_selector(3600)
-    fields[
-        vol.Required(CONF_COOLDOWN, default=d.get(CONF_COOLDOWN, DEFAULT_COOLDOWN))
-    ] = _seconds_selector(86400)
-    if check:
-        fields[
-            vol.Required(
-                CONF_MAX_ATTEMPTS,
-                default=d.get(CONF_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS),
-            )
-        ] = selector.NumberSelector(
+    fields: dict = {
+        **_debounce_field(d),
+        vol.Required(
+            CONF_COOLDOWN, default=d.get(CONF_COOLDOWN, DEFAULT_COOLDOWN)
+        ): _seconds_selector(86400),
+        vol.Required(
+            CONF_HEALTH_CHECK, default=d.get(CONF_HEALTH_CHECK, True)
+        ): selector.BooleanSelector(),
+        vol.Required(
+            CONF_BOOT_WINDOW, default=d.get(CONF_BOOT_WINDOW, DEFAULT_BOOT_WINDOW)
+        ): _seconds_selector(3600),
+        vol.Required(
+            CONF_MAX_ATTEMPTS, default=d.get(CONF_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS)
+        ): selector.NumberSelector(
             selector.NumberSelectorConfig(
                 min=1, max=10, mode=selector.NumberSelectorMode.BOX
             )
-        )
+        ),
+    }
     # Auto-recovery is not a setup field: it's the per-guard runtime switch entity
     # (persisted), so guards start with it on (DEFAULT_AUTO_RESTART).
     return _section(SECTION_BEHAVIOR, fields)
@@ -408,23 +402,21 @@ def _switch_fields(d: dict, exclude: list[str]) -> dict:
 
 
 def _switch_schema(
-    d: dict | None = None, *, check: bool, exclude: list[str] = (), reload_block=None
+    d: dict | None = None, *, exclude: list[str] = (), reload_block=None
 ) -> vol.Schema:
     """Build the switch power-cycle recovery form schema."""
     d = d or {}
     return vol.Schema(
         {
             **_switch_fields(d, list(exclude)),
-            **_behavior_section(d, check=check),
+            **_behavior_section(d),
             **(reload_block or {}),
             **_notification_section(d),
         }
     )
 
 
-def _action_schema(
-    d: dict | None = None, *, check: bool, reload_block=None
-) -> vol.Schema:
+def _action_schema(d: dict | None = None, *, reload_block=None) -> vol.Schema:
     """One recovery action sequence (in its own section) + behaviour."""
     d = d or {}
     return vol.Schema(
@@ -438,16 +430,14 @@ def _action_schema(
                     ): selector.ActionSelector(),
                 },
             ),
-            **_behavior_section(d, check=check),
+            **_behavior_section(d),
             **(reload_block or {}),
             **_notification_section(d),
         }
     )
 
 
-def _actions_schema(
-    d: dict | None = None, *, check: bool, reload_block=None
-) -> vol.Schema:
+def _actions_schema(d: dict | None = None, *, reload_block=None) -> vol.Schema:
     """An "off" and an "on" action sequence + delay, in their own section."""
     d = d or {}
     return vol.Schema(
@@ -469,7 +459,7 @@ def _actions_schema(
                     ): _seconds_selector(600),
                 },
             ),
-            **_behavior_section(d, check=check),
+            **_behavior_section(d),
             **(reload_block or {}),
             **_notification_section(d),
         }
@@ -495,9 +485,9 @@ def _build_driver(step2: dict, strategy: str) -> dict:
     """Build the stored driver block for the chosen recovery strategy."""
     if strategy == STRATEGY_POE:
         return {CONF_TYPE: "poe_port", CONF_EXPECTED_ID: step2[CONF_EXPECTED_ID]}
-    if strategy in (STRATEGY_ACTION, STRATEGY_ACTION_CHECK):
+    if strategy == STRATEGY_ACTION:
         return {CONF_TYPE: "action_call", CONF_ACTION: step2.get(CONF_ACTION)}
-    if strategy in (STRATEGY_ACTIONS, STRATEGY_ACTIONS_CHECK):
+    if strategy == STRATEGY_ACTIONS:
         return {
             CONF_TYPE: "action_cycle",
             CONF_OFF_ACTION: step2.get(CONF_OFF_ACTION),
@@ -516,7 +506,8 @@ def _build_data(step1: dict, step2: dict, strategy: str) -> dict:
     step1 = _flatten_sections(step1)
     step2 = _flatten_sections(step2)
     notify_only = strategy == MODE_NOTIFY
-    check = strategy in _CHECK_STRATEGIES or strategy == STRATEGY_POE
+    # Health-check is a per-recovery toggle (in step2), shown for every strategy.
+    check = bool(step2.get(CONF_HEALTH_CHECK, True))
     behavior = {
         CONF_DEBOUNCE: int(step2[CONF_DEBOUNCE]),
         CONF_NOTIFY_ACTION: step2.get(CONF_NOTIFY_ACTION),
@@ -540,9 +531,10 @@ def _build_data(step1: dict, step2: dict, strategy: str) -> dict:
     else:
         behavior[CONF_COOLDOWN] = int(step2[CONF_COOLDOWN])
         behavior[CONF_HEALTH_CHECK] = check
-        if check:
-            behavior[CONF_BOOT_WINDOW] = int(step2[CONF_BOOT_WINDOW])
-            behavior[CONF_MAX_ATTEMPTS] = int(step2[CONF_MAX_ATTEMPTS])
+        # The numbers are always in the form (editable even when the check is off,
+        # like HA's birth/will fields); store them so toggling back keeps them.
+        behavior[CONF_BOOT_WINDOW] = int(step2[CONF_BOOT_WINDOW])
+        behavior[CONF_MAX_ATTEMPTS] = int(step2[CONF_MAX_ATTEMPTS])
         data[CONF_DRIVER] = _build_driver(step2, strategy)
         if step1.get(CONF_DEVICE_ID) and step2.get(CONF_RELOAD_ENTRY):
             behavior[CONF_RELOAD_ENTRY] = True
@@ -559,19 +551,21 @@ def _build_data(step1: dict, step2: dict, strategy: str) -> dict:
 
 
 def _current_strategy(data: dict) -> str:
-    """Derive the wizard strategy key from a stored guard's driver + check flag."""
+    """Derive the wizard strategy key from a stored guard's driver type.
+
+    The health-check is no longer part of the strategy (it's a per-recovery
+    toggle), so the driver type alone determines the strategy.
+    """
     if data.get(CONF_POLICY, {}).get(CONF_TYPE) == MODE_NOTIFY:
         return MODE_NOTIFY
-    driver = data.get(CONF_DRIVER, {})
-    dtype = driver.get(CONF_TYPE)
-    check = bool(data.get(CONF_BEHAVIOR, {}).get(CONF_HEALTH_CHECK))
+    dtype = data.get(CONF_DRIVER, {}).get(CONF_TYPE)
     if dtype == "poe_port":
         return STRATEGY_POE
     if dtype == "action_cycle":
-        return STRATEGY_ACTIONS_CHECK if check else STRATEGY_ACTIONS
+        return STRATEGY_ACTIONS
     if dtype == "action_call":
-        return STRATEGY_ACTION_CHECK if check else STRATEGY_ACTION
-    return STRATEGY_SWITCH_CHECK if check else STRATEGY_SWITCH
+        return STRATEGY_ACTION
+    return STRATEGY_SWITCH
 
 
 def _watch_defaults(block: dict) -> dict:
@@ -601,6 +595,7 @@ def _behavior_defaults(data: dict) -> dict:
     b = data.get(CONF_BEHAVIOR, {})
     return {
         CONF_DEBOUNCE: b.get(CONF_DEBOUNCE, DEFAULT_DEBOUNCE),
+        CONF_HEALTH_CHECK: b.get(CONF_HEALTH_CHECK, True),
         CONF_BOOT_WINDOW: b.get(CONF_BOOT_WINDOW, DEFAULT_BOOT_WINDOW),
         CONF_COOLDOWN: b.get(CONF_COOLDOWN, DEFAULT_COOLDOWN),
         CONF_MAX_ATTEMPTS: b.get(CONF_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS),
@@ -652,7 +647,7 @@ def _poe_schema(d: dict | None = None, *, reload_block=None) -> vol.Schema:
     return vol.Schema(
         {
             vol.Required(CONF_EXPECTED_ID, default=d.get(CONF_EXPECTED_ID, "")): str,
-            **_behavior_section(d, check=True),
+            **_behavior_section(d),
             **(reload_block or {}),
             **_notification_section(d),
         }

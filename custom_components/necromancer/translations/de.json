@@ -167,7 +167,7 @@
         },
         "strategy": {
           "title": "Reparatur-Strategie",
-          "description": "Wie soll das Gerät wieder zum Laufen gebracht werden, wenn es ausfällt? „mit Health-Check“ wartet danach, bis das Gerät wieder „in Ordnung“ meldet; die einfachen Varianten nehmen an, dass die Aktion gewirkt hat.",
+          "description": "Wie soll das Gerät wieder zum Laufen gebracht werden, wenn es ausfällt? Im nächsten Schritt entscheidet ein Health-Check-Schalter (standardmäßig an), ob die Reparatur gegen den Gesundheitszustand des Geräts verifiziert wird; ist er aus, wird angenommen, dass die Aktion gewirkt hat.",
           "data": {
             "strategy": "Strategie"
           }
@@ -185,6 +185,7 @@
               "description": "Wann Necromancer reagiert und — mit Health-Check — wie oft es vor dem Aufgeben wiederholt. Die Standardwerte passen meist.",
               "data": {
                 "debounce": "Wartezeit vor Reaktion",
+                "health_check": "Reparatur verifizieren (Health-Check)",
                 "boot_window": "Warten, bis das Gerät wieder gesund ist",
                 "cooldown": "Pause nach erfolgreicher Reparatur",
                 "max_attempts": "Max. Versuche"
@@ -231,6 +232,7 @@
               "description": "Wann Necromancer reagiert und — mit Health-Check — wie oft es vor dem Aufgeben wiederholt. Die Standardwerte passen meist.",
               "data": {
                 "debounce": "Wartezeit vor Reaktion",
+                "health_check": "Reparatur verifizieren (Health-Check)",
                 "boot_window": "Warten, bis das Gerät wieder gesund ist",
                 "cooldown": "Pause nach erfolgreicher Reparatur",
                 "max_attempts": "Max. Versuche"
@@ -279,6 +281,7 @@
               "description": "Wann Necromancer reagiert und — mit Health-Check — wie oft es vor dem Aufgeben wiederholt. Die Standardwerte passen meist.",
               "data": {
                 "debounce": "Wartezeit vor Reaktion",
+                "health_check": "Reparatur verifizieren (Health-Check)",
                 "boot_window": "Warten, bis das Gerät wieder gesund ist",
                 "cooldown": "Pause nach erfolgreicher Reparatur",
                 "max_attempts": "Max. Versuche"
@@ -321,6 +324,7 @@
               "description": "Wann Necromancer reagiert und — mit Health-Check — wie oft es vor dem Aufgeben wiederholt. Die Standardwerte passen meist.",
               "data": {
                 "debounce": "Wartezeit vor Reaktion",
+                "health_check": "Reparatur verifizieren (Health-Check)",
                 "boot_window": "Warten, bis das Gerät wieder gesund ist",
                 "cooldown": "Pause nach erfolgreicher Reparatur",
                 "max_attempts": "Max. Versuche"
@@ -426,11 +430,8 @@
       "options": {
         "notify": "Nur benachrichtigen",
         "switch": "Schalter aus- und einschalten",
-        "switch_check": "Schalter aus-/einschalten + Health-Check",
         "action": "Aktion ausführen",
-        "action_check": "Aktion ausführen + Health-Check",
         "actions": "Aktionen Aus/Ein",
-        "actions_check": "Aktionen Aus/Ein + Health-Check",
         "poe_port": "Auto-PoE (Port automatisch finden)"
       }
     },

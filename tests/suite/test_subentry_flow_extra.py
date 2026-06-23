@@ -24,8 +24,17 @@ STATE_HEALTH = {
     "on_value": ["on"],
     "off_value": ["off"],
 }
-NON_CHECK_BEHAVIOR = {"debounce": 5, "cooldown": 10}
-CHECK_BEHAVIOR = {"debounce": 5, "boot_window": 5, "cooldown": 10, "max_attempts": 2}
+# The behaviour section always carries the numbers now; the health_check toggle
+# (default on) decides whether they apply. PoE has no toggle (always verifies).
+CHECK_BEHAVIOR = {
+    "debounce": 5,
+    "health_check": True,
+    "boot_window": 5,
+    "cooldown": 10,
+    "max_attempts": 2,
+}
+NON_CHECK_BEHAVIOR = {"debounce": 5, "health_check": False, "cooldown": 10}
+POE_BEHAVIOR = {"debounce": 5, "boot_window": 5, "cooldown": 10, "max_attempts": 2}
 SAMPLE_ACTION = [
     {"action": "input_boolean.turn_on", "data": {"entity_id": "input_boolean.x"}}
 ]
@@ -62,7 +71,7 @@ async def _to_strategy(
     ("strategy", "final_step", "final_input", "driver_type", "health_check"),
     [
         pytest.param(
-            "switch_check",
+            "switch",
             "switch",
             {
                 "switch_entity": "switch.guard_target",
@@ -72,7 +81,7 @@ async def _to_strategy(
             },
             "switch_cycle",
             True,
-            id="switch_check",
+            id="switch_verify",
         ),
         pytest.param(
             "action",
@@ -84,10 +93,10 @@ async def _to_strategy(
             },
             "action_call",
             False,
-            id="action",
+            id="action_no_verify",
         ),
         pytest.param(
-            "action_check",
+            "action",
             "action",
             {
                 "recovery_action": {"action": SAMPLE_ACTION},
@@ -96,7 +105,7 @@ async def _to_strategy(
             },
             "action_call",
             True,
-            id="action_check",
+            id="action_verify",
         ),
         pytest.param(
             "actions",
@@ -112,10 +121,10 @@ async def _to_strategy(
             },
             "action_cycle",
             False,
-            id="actions",
+            id="actions_no_verify",
         ),
         pytest.param(
-            "actions_check",
+            "actions",
             "actions",
             {
                 "recovery_action": {
@@ -128,14 +137,14 @@ async def _to_strategy(
             },
             "action_cycle",
             True,
-            id="actions_check",
+            id="actions_verify",
         ),
         pytest.param(
             "poe_port",
             "poe_port",
             {
                 "expected_id": "aa:bb",
-                "behavior": CHECK_BEHAVIOR,
+                "behavior": POE_BEHAVIOR,
                 "notification": {},
             },
             "poe_port",
@@ -218,7 +227,7 @@ async def test_reconfigure_renames_same_subentry(
     )
     assert result["step_id"] == "strategy"
 
-    result = await _cfg(hass, result["flow_id"], {"strategy": "switch_check"})
+    result = await _cfg(hass, result["flow_id"], {"strategy": "switch"})
     assert result["step_id"] == "switch"
 
     result = await _cfg(

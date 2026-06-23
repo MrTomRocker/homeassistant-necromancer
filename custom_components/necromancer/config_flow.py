@@ -4,12 +4,12 @@ The integration is a **single service** entry (added once, blank). Every guarded
 device is a config **subentry** of type `device`, added via "Add device" and
 edited via its "Reconfigure" button.
 
-The strategy step offers eight choices: notify-only (just observe) plus seven
-recovery strategies — power-cycle a `switch`, run one `action` sequence, or an
-off/on pair of `actions` (each with or without a health check), and `poe_port`
-(auto-resolve the device to a PoE port by id). The health-check variants verify
-recovery against the device's health entity (the engine's VERIFY step); the plain
-ones assume the action worked.
+The strategy step offers five choices: notify-only (just observe) plus four
+recovery strategies — power-cycle a `switch`, run one `action` sequence, an off/on
+pair of `actions`, and `poe_port` (auto-resolve the device to a PoE port by id).
+Whether recovery is verified against the device's health entity (the engine's
+VERIFY step) is a per-recovery `health_check` toggle in the behaviour section,
+defaulting on, shown for every strategy.
 
 The health "what to watch" block — entity + attribute (empty = state) + on/off
 values — lives in the device step. Every guard is device & health → strategy →
@@ -44,7 +44,6 @@ from homeassistant.core import callback
 from homeassistant.helpers import device_registry as dr
 
 from .config_flow_helpers.schemas import (
-    _CHECK_STRATEGIES,
     _action_defaults,
     _action_schema,
     _actions_defaults,
@@ -97,12 +96,9 @@ from .const import (
     MODE_NOTIFY,
     SOURCE_STATE,
     STRATEGY_ACTION,
-    STRATEGY_ACTION_CHECK,
     STRATEGY_ACTIONS,
-    STRATEGY_ACTIONS_CHECK,
     STRATEGY_POE,
     STRATEGY_SWITCH,
-    STRATEGY_SWITCH_CHECK,
     SUBENTRY_TYPE_DEVICE,
 )
 from .core.links import group_of
@@ -308,11 +304,8 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             return await {
                 MODE_NOTIFY: self.async_step_notify,
                 STRATEGY_SWITCH: self.async_step_switch,
-                STRATEGY_SWITCH_CHECK: self.async_step_switch,
                 STRATEGY_ACTION: self.async_step_action,
-                STRATEGY_ACTION_CHECK: self.async_step_action,
                 STRATEGY_ACTIONS: self.async_step_actions,
-                STRATEGY_ACTIONS_CHECK: self.async_step_actions,
                 STRATEGY_POE: self.async_step_poe_port,
             }[self._strategy]()
         default = (
@@ -323,11 +316,6 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
         return self.async_show_form(
             step_id="strategy", data_schema=_strategy_schema(default)
         )
-
-    @property
-    def _check(self) -> bool:
-        """Return True if the chosen strategy verifies recovery (a check variant)."""
-        return self._strategy in _CHECK_STRATEGIES
 
     # ---------- recovery strategy forms (one step per action shape) ----------
     async def async_step_switch(
@@ -344,7 +332,6 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             data_schema=self._with_link(
                 _switch_schema(
                     d,
-                    check=self._check,
                     exclude=_own_entities(self.hass),
                     reload_block=self._reload_block(),
                 )
@@ -372,7 +359,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
         return self.async_show_form(
             step_id="action",
             data_schema=self._with_link(
-                _action_schema(d, check=self._check, reload_block=self._reload_block())
+                _action_schema(d, reload_block=self._reload_block())
             ),
             errors=errors,
         )
@@ -398,7 +385,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
         return self.async_show_form(
             step_id="actions",
             data_schema=self._with_link(
-                _actions_schema(d, check=self._check, reload_block=self._reload_block())
+                _actions_schema(d, reload_block=self._reload_block())
             ),
             errors=errors,
         )

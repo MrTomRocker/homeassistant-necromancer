@@ -218,8 +218,8 @@ Two guarantees fall out of this design:
 
 - **No false alarm.** Ambiguous health — a missing entity, a render error, `unknown`/`unavailable`
   — is treated as *unknown*, never as a fault. Nothing is ever cycled on a hunch.
-- **No false success.** A `*_check` recovery is only "done" once health verifies OK again; an
-  action that ran but didn't fix anything is a failed attempt, not a success.
+- **No false success.** With the health-check on, a recovery is only "done" once health verifies OK
+  again; an action that ran but didn't fix anything is a failed attempt, not a success.
 
 State that matters across a Home Assistant restart — the escalation verdict, attempt counters,
 recovery stats and the per-guard auto-recovery switch — is **persisted** independently of the
@@ -244,15 +244,19 @@ Both the **on** and **off** sides accept a *list* of values, so several states c
 
 ## Recovery strategies
 
-Pick the shape that fits the device. The first three come **plain** (fire-and-forget) or **with a
-health-check** (wait until the device reports healthy again before declaring success):
+Pick the shape that fits the device:
 
 | Strategy | What it does |
 |---|---|
 | **Power-cycle a switch** | turn a switch off → wait → on (e.g. a smart plug) |
 | **Run an action** | one action sequence — script, service, SSH, webhook, … |
 | **Off/on actions** | an *off* action → wait → an *on* action |
-| **Auto-PoE** | resolve the device to its PoE port and power-cycle it, with a staged verify (the port goes offline → comes back) on top of the device health-check. It **remembers** the port while the device is healthy, so it can still recover a device that has already dropped off the switch and aged out of the neighbour table |
+| **Auto-PoE** | resolve the device to its PoE port and power-cycle it, with a staged verify (the port goes offline → comes back) on top of the device health-check (when its toggle is on). It **remembers** the port while the device is healthy, so it can still recover a device that has already dropped off the switch and aged out of the neighbour table |
+
+Every recovery has a **health-check** toggle (on by default). With it on, Necromancer waits until the
+device reports healthy again before declaring success — the boot window and retries below apply. Turn
+it off for **fire-and-forget**: the action runs once and success is assumed (continuous monitoring
+re-triggers if it didn't take). The toggle and its two numbers sit in the *Behaviour* section.
 
 A **notify-only** guard skips recovery entirely — it just detects the problem and raises the event
 (and optionally notifies). Pick **Notify only** at the top of the strategy step to be told about
@@ -283,7 +287,7 @@ the collapsed *Behaviour* section of the wizard.
 | **Debounce** | 120 s | How long a fault must persist before recovery starts. Absorbs short blips. |
 | **Boot window** | 180 s | How long to wait for the device to report healthy again after the recovery action, before counting the attempt as failed. Set it to the slowest your device takes to come back. |
 | **Cooldown** | 600 s | The pause after a *successful* recovery before the guard returns to `ok`. Prevents tight loops; if the device is still (or again) faulty when the cooldown elapses, the guard re-enters `suspect` (debounce) rather than looping straight back into recovery. |
-| **Max attempts** | 2 | How many times to retry before escalating. (Health-check strategies only — the `*_check` variants and Auto-PoE; fire-and-forget runs the action once.) |
+| **Max attempts** | 2 | How many times to retry before escalating. (Applies when the health-check is on; with it off the action runs once, fire-and-forget.) |
 
 A few consequences worth knowing:
 
@@ -636,11 +640,12 @@ outage instead (cut power, unplug), or override the state — don't disable the 
 another recover guard to link to — so your very first guard has nothing to offer there. Add the
 second guard, then link them from either guard's **Reconfigure**.
 
-**When should I pick a "with health-check" strategy?** Whenever the recovery can fail *silently* —
-for example Auto-PoE/`repair_poe_port` with an id that might not resolve, or an action whose effect
-you can't otherwise confirm. The health-check variants only declare success once the device reports
-healthy again; the plain (fire-and-forget) variants assume the action worked and rely on continuous
-monitoring to re-trigger if it didn't, which can mean one premature "recovered" notification.
+**When should I leave the health-check on?** Keep it on (the default) whenever the recovery can fail
+*silently* — for example Auto-PoE/`repair_poe_port` with an id that might not resolve, or an action
+whose effect you can't otherwise confirm. With the health-check on, the guard only declares success
+once the device reports healthy again. Turn it off (fire-and-forget) only when the action is
+inherently reliable: success is then assumed, and continuous monitoring re-triggers if it didn't
+take — which can mean one premature "recovered" notification.
 
 **What happens if Home Assistant restarts mid-recovery?** The in-flight cycle is dropped — on startup
 the guard re-evaluates from live health and takes it from there. Only the lasting verdicts survive a

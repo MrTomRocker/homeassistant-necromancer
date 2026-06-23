@@ -73,13 +73,14 @@ async def test_create_switch_guard(
     }
     assert data["policy"] == {"type": "standard"}
     assert data["health"]["type"] == "entity_state"
-    assert data["behavior"]["health_check"] is False
+    # Health-check now defaults on (toggle omitted -> verify is the default).
+    assert data["behavior"]["health_check"] is True
 
 
-async def test_strategy_step_lists_eight_options(
+async def test_strategy_step_lists_options(
     hass: HomeAssistant, setup_guards: SetupGuards
 ) -> None:
-    """The strategy step offers notify first, then the seven recovery strategies."""
+    """The strategy step offers notify first, then the four recovery strategies."""
     entry = await setup_guards()
     result = await _init(hass, entry.entry_id)
     result = await _cfg(hass, result["flow_id"], {"source_type": "state_based"})
@@ -95,11 +96,8 @@ async def test_strategy_step_lists_eight_options(
     assert options == [
         "notify",
         "switch",
-        "switch_check",
         "action",
-        "action_check",
         "actions",
-        "actions_check",
         "poe_port",
     ]
 

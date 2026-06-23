@@ -140,7 +140,7 @@ async def test_source_type_and_current_strategy(hass, _):
     assert cf._current_strategy({"driver": {"type": "poe_port"}}) == cf.STRATEGY_POE
     assert cf._current_strategy(
         {"driver": {"type": "action_call"}, "behavior": {"health_check": True}}
-    ) == cf.STRATEGY_ACTION_CHECK
+    ) == cf.STRATEGY_ACTION
     assert cf._current_strategy(
         {"driver": {"type": "switch_cycle"}, "behavior": {"health_check": False}}
     ) == cf.STRATEGY_SWITCH
@@ -153,11 +153,29 @@ async def test_build_data_state_switch_check(hass, _):
     step2 = {cf.CONF_DEBOUNCE: 30, cf.CONF_COOLDOWN: 60, cf.CONF_BOOT_WINDOW: 90,
              cf.CONF_MAX_ATTEMPTS: 3, cf.CONF_SWITCH_ENTITY: "switch.s",
              cf.CONF_OFF_ON_DELAY: 5}
-    data = cf._build_data(step1, step2, cf.STRATEGY_SWITCH_CHECK)
+    data = cf._build_data(step1, step2, cf.STRATEGY_SWITCH)
     assert data[cf.CONF_HEALTH]["type"] == "entity_state"
     assert data[cf.CONF_DRIVER]["type"] == "switch_cycle"
     assert data[cf.CONF_BEHAVIOR]["health_check"] is True
     assert data[cf.CONF_BEHAVIOR]["boot_window"] == 90
+
+
+async def test_build_data_health_check_toggle(hass, _):
+    step1 = {cf.CONF_NAME: "G", cf.CONF_SOURCE_TYPE: cf.SOURCE_STATE,
+             cf.CONF_ENTITY_ID: "binary_sensor.p",
+             cf.CONF_ATTRIBUTE: None, cf.CONF_ON_VALUE: ["on"], cf.CONF_OFF_VALUE: ["off"]}
+    step2 = {cf.CONF_DEBOUNCE: 30, cf.CONF_COOLDOWN: 60, cf.CONF_BOOT_WINDOW: 90,
+             cf.CONF_MAX_ATTEMPTS: 3, cf.CONF_SWITCH_ENTITY: "switch.s",
+             cf.CONF_OFF_ON_DELAY: 5, cf.CONF_HEALTH_CHECK: False}
+    # Toggle off -> not verified, but the numbers stay stored (editable later).
+    off = cf._build_data(step1, step2, cf.STRATEGY_SWITCH)
+    assert off[cf.CONF_BEHAVIOR]["health_check"] is False
+    assert off[cf.CONF_BEHAVIOR]["boot_window"] == 90
+    assert off[cf.CONF_BEHAVIOR]["max_attempts"] == 3
+    # Absent toggle defaults to on (verify is the default).
+    no_toggle = {k: v for k, v in step2.items() if k != cf.CONF_HEALTH_CHECK}
+    on = cf._build_data(step1, no_toggle, cf.STRATEGY_SWITCH)
+    assert on[cf.CONF_BEHAVIOR]["health_check"] is True
 
 
 async def test_build_data_reload_entry(hass, _):
@@ -167,12 +185,12 @@ async def test_build_data_reload_entry(hass, _):
     step2 = {cf.CONF_DEBOUNCE: 30, cf.CONF_COOLDOWN: 60, cf.CONF_BOOT_WINDOW: 90,
              cf.CONF_MAX_ATTEMPTS: 3, cf.CONF_SWITCH_ENTITY: "switch.s",
              cf.CONF_OFF_ON_DELAY: 5, cf.CONF_RELOAD_ENTRY: True, cf.CONF_RELOAD_DELAY: 7}
-    data = cf._build_data(base, step2, cf.STRATEGY_SWITCH_CHECK)
+    data = cf._build_data(base, step2, cf.STRATEGY_SWITCH)
     assert data[cf.CONF_BEHAVIOR][cf.CONF_RELOAD_ENTRY] is True
     assert data[cf.CONF_BEHAVIOR][cf.CONF_RELOAD_DELAY] == 7
     # no assigned device -> reload not stored even with the flag set
     nodev = {k: v for k, v in base.items() if k != cf.CONF_DEVICE_ID}
-    data2 = cf._build_data(nodev, step2, cf.STRATEGY_SWITCH_CHECK)
+    data2 = cf._build_data(nodev, step2, cf.STRATEGY_SWITCH)
     assert cf.CONF_RELOAD_ENTRY not in data2[cf.CONF_BEHAVIOR]
 
 
