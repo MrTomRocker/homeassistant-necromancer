@@ -25,6 +25,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME
 from homeassistant.core import (
     CALLBACK_TYPE,
+    Event,
     HomeAssistant,
     ServiceCall,
     ServiceResponse,
@@ -38,6 +39,7 @@ from homeassistant.helpers import (
     entity_registry as er,
     issue_registry as ir,
 )
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 
@@ -402,6 +404,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
         _reconcile_issues(_hass, engines, fabric)
 
     entry.async_on_unload(async_at_started(hass, _validate_configs))
+
+    # Live config re-validation: re-reconcile when a watched entity appears or
+    # disappears (a state-only entity loading, an entity removed or disabled). Only
+    # existence transitions matter — a value change doesn't affect config issues.
+    watched: set[str] = set(fabric.referenced_entities())
+    for eng in engines.values():
+        watched.update(eng.health.watched_entities)
+        watched.update(eng.health.referenced_entities())
+
+    @callback
+    def _on_watched_change(event: Event) -> None:
+        old, new = event.data.get("old_state"), event.data.get("new_state")
+        if (old is None) != (new is None):  # appeared or disappeared
+            _reconcile_issues(hass, engines, fabric)
+
+    if watched:
+        entry.async_on_unload(
+            async_track_state_change_event(hass, list(watched), _on_watched_change)
+        )
     return True
 
 

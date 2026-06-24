@@ -935,6 +935,17 @@ async def test_reconcile_creates_and_clears_config_issue(hass, _):
     assert ("necromancer", "g_health_entity_missing") not in ir.async_get(hass).issues
 
 
+async def test_reconcile_clears_issue_for_removed_guard(hass, _):
+    # Deleting a guard subentry (its engine gone) must clear its stale repair issue.
+    health = EntityStateHealth(hass, {"entity_id": "sensor.ghost2"})
+    eng = make(hass, health, StubDriver(hass))
+    fabric = PoeFabric(hass)
+    _reconcile_issues(hass, {"g": eng}, fabric)
+    assert ("necromancer", "g_health_entity_missing") in ir.async_get(hass).issues
+    _reconcile_issues(hass, {}, fabric)  # subentry deleted -> no engines
+    assert ("necromancer", "g_health_entity_missing") not in ir.async_get(hass).issues
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 

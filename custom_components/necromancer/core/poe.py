@@ -197,6 +197,15 @@ class PoeFabric:
                     )
         return problems
 
+    def referenced_entities(self) -> set[str]:
+        """Every entity the ports reference — for live config re-validation."""
+        eids: set[str] = set()
+        for port in self._ports:
+            for conf in (CONF_ACTUATOR, CONF_STATUS_ENTITY, CONF_ID_ENTITY):
+                if port.get(conf):
+                    eids.add(port[conf])
+        return eids
+
     def resolve_with_reason(self, identifier: str) -> tuple[dict | None, str]:
         """Resolve an id to its port, with a human reason when it can't.
 
