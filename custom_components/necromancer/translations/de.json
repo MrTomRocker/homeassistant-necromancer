@@ -139,7 +139,7 @@
       "error": {
         "no_self_link": "Necromancer-eigene Geräte können nicht verknüpft werden. Wähle ein anderes Gerät.",
         "duplicate_name": "Ein Guard mit diesem Namen existiert bereits. Wähle einen eindeutigen Namen, damit die Status-Entitäten eindeutig bleiben.",
-        "action_required": "Diese Recovery braucht eine Aktion — ein Guard ohne Aktion kann nur eskalieren."
+        "action_required": "Diese Reparatur braucht eine Aktion — ein Guard ohne Aktion kann nur eskalieren."
       },
       "abort": {
         "reconfigure_successful": "Neukonfiguration erfolgreich."
@@ -182,8 +182,8 @@
           }
         },
         "strategy": {
-          "title": "Recovery-Strategie",
-          "description": "Wie soll das überwachte Gerät wieder zum Laufen gebracht werden, wenn es ausfällt? Im nächsten Schritt entscheidet ein Health-Check-Schalter (standardmäßig an), ob die Recovery gegen den Health State des überwachten Geräts verifiziert wird; ist er aus, wird angenommen, dass die Aktion gewirkt hat.",
+          "title": "Reparatur-Strategie",
+          "description": "Wie soll das überwachte Gerät wieder zum Laufen gebracht werden, wenn es ausfällt? Im nächsten Schritt entscheidet ein Health-Check-Schalter (standardmäßig an), ob die Reparatur gegen den Health State des überwachten Geräts verifiziert wird; ist er aus, wird angenommen, dass die Aktion gewirkt hat.",
           "data": {
             "strategy": "Strategie"
           }
@@ -205,47 +205,47 @@
               "description": "Wann Necromancer reagiert und — mit Health Check — wie oft es vor dem Aufgeben wiederholt. Die Standardwerte passen meist.",
               "data": {
                 "debounce": "Wartezeit vor Reaktion",
-                "health_check": "Recovery verifizieren (Health Check)",
+                "health_check": "Reparatur verifizieren (Health Check)",
                 "boot_window": "Warten, bis das überwachte Gerät wieder gesund ist",
-                "cooldown": "Pause nach erfolgreicher Recovery",
+                "cooldown": "Pause nach erfolgreicher Reparatur",
                 "max_attempts": "Max. Versuche"
               },
               "data_description": {
-                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen und lösen keine Recovery aus.",
-                "health_check": "An (Standard): die Recovery wird gegen den Health State des überwachten Geräts verifiziert, bevor der Guard wieder ruhig wird. Aus: die Aktion gilt als erfolgreich und geht direkt in den Cooldown.",
+                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen und lösen keine Reparatur aus.",
+                "health_check": "An (Standard): die Reparatur wird gegen den Health State des überwachten Geräts verifiziert, bevor der Guard wieder ruhig wird. Aus: die Aktion gilt als erfolgreich und geht direkt in die Abkühlphase.",
                 "boot_window": "Mit Health Check an: wie lange nach der Aktion auf „gesund“ des überwachten Geräts gewartet wird.",
-                "cooldown": "Ruhephase nach erfolgreicher Recovery, bevor der Guard wieder überwacht.",
+                "cooldown": "Ruhephase nach erfolgreicher Reparatur, bevor der Guard wieder überwacht.",
                 "max_attempts": "Wie oft wiederholt wird, bevor eskaliert wird — beim Verifizieren (Health Check an) oder wenn die Aktion selbst fehlschlägt."
               }
             },
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Recovery oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
                 "notify_action": "Aktion"
               }
             },
             "linked_guards": {
               "name": "Verknüpfte Guards",
-              "description": "Gruppiert diesen Guard mit anderen Recovery-Guards, damit sie sich abstimmen statt parallel zu reparieren.",
+              "description": "Gruppiert diesen Guard mit anderen Reparatur-Guards, damit sie sich abstimmen statt parallel zu reparieren.",
               "data": {
                 "linked_guards": "Guards in dieser Gruppe",
-                "notify_follower_success": "Erfolg melden, auch wenn dieser Guard einer Gruppen-Recovery folgt"
+                "notify_follower_success": "Erfolg melden, auch wenn dieser Guard einer Gruppen-Reparatur folgt"
               },
               "data_description": {
-                "linked_guards": "Geht einer der Gruppe in Recovery, folgen die anderen — sie warten und prüfen danach erneut, statt parallel eine eigene Recovery zu starten. Die Verknüpfung ist beidseitig und transitiv: Verknüpfst du mit einem Guard, der schon Links hat, trittst du der ganzen Gruppe bei; zum Austreten alle abwählen.",
-                "notify_follower_success": "An: ein Guard, der nur durch die Gruppe wieder gesund wurde (selbst nichts getan hat), meldet trotzdem Erfolg. Aus: nur die eigene Recovery zählt."
+                "linked_guards": "Geht einer der Gruppe in Reparatur, folgen die anderen — sie warten und prüfen danach erneut, statt parallel eine eigene Reparatur zu starten. Die Verknüpfung ist beidseitig und transitiv: Verknüpfst du mit einem Guard, der schon Links hat, trittst du der ganzen Gruppe bei; zum Austreten alle abwählen.",
+                "notify_follower_success": "An: ein Guard, der nur durch die Gruppe wieder gesund wurde (selbst nichts getan hat), meldet trotzdem Erfolg. Aus: nur die eigene Reparatur zählt."
               }
             },
             "reload": {
               "name": "Geräte-Integration neu laden",
-              "description": "Nach einer Recovery die Integration des zugewiesenen Geräts neu laden, bevor erneut geprüft wird.",
+              "description": "Nach einer Reparatur die Integration des zugewiesenen Geräts neu laden, bevor erneut geprüft wird.",
               "data": {
-                "reload_entry": "Integration des zugewiesenen Geräts nach Recovery neu laden",
+                "reload_entry": "Integration des zugewiesenen Geräts nach Reparatur neu laden",
                 "reload_delay": "Wartezeit vor dem Neuladen"
               },
               "data_description": {
-                "reload_entry": "Lädt die Integration des zugewiesenen Geräts nach der Recovery-Aktion neu, bevor der Health Check läuft — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss, damit es wieder gesund meldet.",
+                "reload_entry": "Lädt die Integration des zugewiesenen Geräts nach der Reparatur-Aktion neu, bevor der Health Check läuft — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss, damit es wieder gesund meldet.",
                 "reload_delay": "Wie lange nach dem Neuladen gewartet wird, bevor erneut geprüft wird — gibt der Integration Zeit, sich neu zu verbinden."
               }
             }
@@ -256,7 +256,7 @@
           "description": "Führt deine Aktion aus, wenn das überwachte Gerät ausfällt.",
           "sections": {
             "recovery_action": {
-              "name": "Recovery-Aktion",
+              "name": "Reparatur-Aktion",
               "description": "Was ausgeführt wird, um das überwachte Gerät zurückzuholen. Eine Aktion kann alles sein, was Home Assistant kann — ein Dienst-/Skript-Aufruf, ein SSH-/shell_command, ein rest_command oder Webhook, oder eine mehrstufige Sequenz mit Verzögerungen, Waits und Bedingungen. Sie läuft blockierend; mit Health Check an wartet Necromancer danach (bis zum Ablauf des Boot-Fensters), bis das überwachte Gerät wieder OK meldet. Variablen: attempt, max, name, guard_entity_id.",
               "data": {
                 "action": "Aktion (z. B. Skript, Dienst, SSH, Webhook)"
@@ -267,47 +267,47 @@
               "description": "Wann Necromancer reagiert und — mit Health Check — wie oft es vor dem Aufgeben wiederholt. Die Standardwerte passen meist.",
               "data": {
                 "debounce": "Wartezeit vor Reaktion",
-                "health_check": "Recovery verifizieren (Health Check)",
+                "health_check": "Reparatur verifizieren (Health Check)",
                 "boot_window": "Warten, bis das überwachte Gerät wieder gesund ist",
-                "cooldown": "Pause nach erfolgreicher Recovery",
+                "cooldown": "Pause nach erfolgreicher Reparatur",
                 "max_attempts": "Max. Versuche"
               },
               "data_description": {
-                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen und lösen keine Recovery aus.",
-                "health_check": "An (Standard): die Recovery wird gegen den Health State des überwachten Geräts verifiziert, bevor der Guard wieder ruhig wird. Aus: die Aktion gilt als erfolgreich und geht direkt in den Cooldown.",
+                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen und lösen keine Reparatur aus.",
+                "health_check": "An (Standard): die Reparatur wird gegen den Health State des überwachten Geräts verifiziert, bevor der Guard wieder ruhig wird. Aus: die Aktion gilt als erfolgreich und geht direkt in die Abkühlphase.",
                 "boot_window": "Mit Health Check an: wie lange nach der Aktion auf „gesund“ des überwachten Geräts gewartet wird.",
-                "cooldown": "Ruhephase nach erfolgreicher Recovery, bevor der Guard wieder überwacht.",
+                "cooldown": "Ruhephase nach erfolgreicher Reparatur, bevor der Guard wieder überwacht.",
                 "max_attempts": "Wie oft wiederholt wird, bevor eskaliert wird — beim Verifizieren (Health Check an) oder wenn die Aktion selbst fehlschlägt."
               }
             },
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Recovery oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
                 "notify_action": "Aktion"
               }
             },
             "linked_guards": {
               "name": "Verknüpfte Guards",
-              "description": "Gruppiert diesen Guard mit anderen Recovery-Guards, damit sie sich abstimmen statt parallel zu reparieren.",
+              "description": "Gruppiert diesen Guard mit anderen Reparatur-Guards, damit sie sich abstimmen statt parallel zu reparieren.",
               "data": {
                 "linked_guards": "Guards in dieser Gruppe",
-                "notify_follower_success": "Erfolg melden, auch wenn dieser Guard einer Gruppen-Recovery folgt"
+                "notify_follower_success": "Erfolg melden, auch wenn dieser Guard einer Gruppen-Reparatur folgt"
               },
               "data_description": {
-                "linked_guards": "Geht einer der Gruppe in Recovery, folgen die anderen — sie warten und prüfen danach erneut, statt parallel eine eigene Recovery zu starten. Die Verknüpfung ist beidseitig und transitiv: Verknüpfst du mit einem Guard, der schon Links hat, trittst du der ganzen Gruppe bei; zum Austreten alle abwählen.",
-                "notify_follower_success": "An: ein Guard, der nur durch die Gruppe wieder gesund wurde (selbst nichts getan hat), meldet trotzdem Erfolg. Aus: nur die eigene Recovery zählt."
+                "linked_guards": "Geht einer der Gruppe in Reparatur, folgen die anderen — sie warten und prüfen danach erneut, statt parallel eine eigene Reparatur zu starten. Die Verknüpfung ist beidseitig und transitiv: Verknüpfst du mit einem Guard, der schon Links hat, trittst du der ganzen Gruppe bei; zum Austreten alle abwählen.",
+                "notify_follower_success": "An: ein Guard, der nur durch die Gruppe wieder gesund wurde (selbst nichts getan hat), meldet trotzdem Erfolg. Aus: nur die eigene Reparatur zählt."
               }
             },
             "reload": {
               "name": "Geräte-Integration neu laden",
-              "description": "Nach einer Recovery die Integration des zugewiesenen Geräts neu laden, bevor erneut geprüft wird.",
+              "description": "Nach einer Reparatur die Integration des zugewiesenen Geräts neu laden, bevor erneut geprüft wird.",
               "data": {
-                "reload_entry": "Integration des zugewiesenen Geräts nach Recovery neu laden",
+                "reload_entry": "Integration des zugewiesenen Geräts nach Reparatur neu laden",
                 "reload_delay": "Wartezeit vor dem Neuladen"
               },
               "data_description": {
-                "reload_entry": "Lädt die Integration des zugewiesenen Geräts nach der Recovery-Aktion neu, bevor der Health Check läuft — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss, damit es wieder gesund meldet.",
+                "reload_entry": "Lädt die Integration des zugewiesenen Geräts nach der Reparatur-Aktion neu, bevor der Health Check läuft — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss, damit es wieder gesund meldet.",
                 "reload_delay": "Wie lange nach dem Neuladen gewartet wird, bevor erneut geprüft wird — gibt der Integration Zeit, sich neu zu verbinden."
               }
             }
@@ -318,7 +318,7 @@
           "description": "Führt die Aus-Aktion, wartet, dann die Ein-Aktion aus, wenn das überwachte Gerät ausfällt.",
           "sections": {
             "recovery_action": {
-              "name": "Recovery-Aktionen",
+              "name": "Reparatur-Aktionen",
               "description": "Zwei Sequenzen mit einer Wartezeit dazwischen: die Aus-Aktion, dann die Ein-Aktion. Jede kann eine beliebige Home-Assistant-Aktion sein — Dienst/Skript, SSH, rest_command, Webhook, Sequenz. Variablen: attempt, max, name, guard_entity_id; jede Variable, die du in der Aus-Aktion setzt, ist auch in der Ein-Aktion lesbar, sodass du vor dem Abschalten einen Zustand erfassen und danach wiederherstellen kannst — ganz ohne Helfer-Entität.",
               "data": {
                 "off_action": "Aus-Aktion (Strom kappen / überwachtes Gerät ausschalten)",
@@ -334,47 +334,47 @@
               "description": "Wann Necromancer reagiert und — mit Health Check — wie oft es vor dem Aufgeben wiederholt. Die Standardwerte passen meist.",
               "data": {
                 "debounce": "Wartezeit vor Reaktion",
-                "health_check": "Recovery verifizieren (Health Check)",
+                "health_check": "Reparatur verifizieren (Health Check)",
                 "boot_window": "Warten, bis das überwachte Gerät wieder gesund ist",
-                "cooldown": "Pause nach erfolgreicher Recovery",
+                "cooldown": "Pause nach erfolgreicher Reparatur",
                 "max_attempts": "Max. Versuche"
               },
               "data_description": {
-                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen und lösen keine Recovery aus.",
-                "health_check": "An (Standard): die Recovery wird gegen den Health State des überwachten Geräts verifiziert, bevor der Guard wieder ruhig wird. Aus: die Aktion gilt als erfolgreich und geht direkt in den Cooldown.",
+                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen und lösen keine Reparatur aus.",
+                "health_check": "An (Standard): die Reparatur wird gegen den Health State des überwachten Geräts verifiziert, bevor der Guard wieder ruhig wird. Aus: die Aktion gilt als erfolgreich und geht direkt in die Abkühlphase.",
                 "boot_window": "Mit Health Check an: wie lange nach der Aktion auf „gesund“ des überwachten Geräts gewartet wird.",
-                "cooldown": "Ruhephase nach erfolgreicher Recovery, bevor der Guard wieder überwacht.",
+                "cooldown": "Ruhephase nach erfolgreicher Reparatur, bevor der Guard wieder überwacht.",
                 "max_attempts": "Wie oft wiederholt wird, bevor eskaliert wird — beim Verifizieren (Health Check an) oder wenn die Aktion selbst fehlschlägt."
               }
             },
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Recovery oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
                 "notify_action": "Aktion"
               }
             },
             "linked_guards": {
               "name": "Verknüpfte Guards",
-              "description": "Gruppiert diesen Guard mit anderen Recovery-Guards, damit sie sich abstimmen statt parallel zu reparieren.",
+              "description": "Gruppiert diesen Guard mit anderen Reparatur-Guards, damit sie sich abstimmen statt parallel zu reparieren.",
               "data": {
                 "linked_guards": "Guards in dieser Gruppe",
-                "notify_follower_success": "Erfolg melden, auch wenn dieser Guard einer Gruppen-Recovery folgt"
+                "notify_follower_success": "Erfolg melden, auch wenn dieser Guard einer Gruppen-Reparatur folgt"
               },
               "data_description": {
-                "linked_guards": "Geht einer der Gruppe in Recovery, folgen die anderen — sie warten und prüfen danach erneut, statt parallel eine eigene Recovery zu starten. Die Verknüpfung ist beidseitig und transitiv: Verknüpfst du mit einem Guard, der schon Links hat, trittst du der ganzen Gruppe bei; zum Austreten alle abwählen.",
-                "notify_follower_success": "An: ein Guard, der nur durch die Gruppe wieder gesund wurde (selbst nichts getan hat), meldet trotzdem Erfolg. Aus: nur die eigene Recovery zählt."
+                "linked_guards": "Geht einer der Gruppe in Reparatur, folgen die anderen — sie warten und prüfen danach erneut, statt parallel eine eigene Reparatur zu starten. Die Verknüpfung ist beidseitig und transitiv: Verknüpfst du mit einem Guard, der schon Links hat, trittst du der ganzen Gruppe bei; zum Austreten alle abwählen.",
+                "notify_follower_success": "An: ein Guard, der nur durch die Gruppe wieder gesund wurde (selbst nichts getan hat), meldet trotzdem Erfolg. Aus: nur die eigene Reparatur zählt."
               }
             },
             "reload": {
               "name": "Geräte-Integration neu laden",
-              "description": "Nach einer Recovery die Integration des zugewiesenen Geräts neu laden, bevor erneut geprüft wird.",
+              "description": "Nach einer Reparatur die Integration des zugewiesenen Geräts neu laden, bevor erneut geprüft wird.",
               "data": {
-                "reload_entry": "Integration des zugewiesenen Geräts nach Recovery neu laden",
+                "reload_entry": "Integration des zugewiesenen Geräts nach Reparatur neu laden",
                 "reload_delay": "Wartezeit vor dem Neuladen"
               },
               "data_description": {
-                "reload_entry": "Lädt die Integration des zugewiesenen Geräts nach der Recovery-Aktion neu, bevor der Health Check läuft — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss, damit es wieder gesund meldet.",
+                "reload_entry": "Lädt die Integration des zugewiesenen Geräts nach der Reparatur-Aktion neu, bevor der Health Check läuft — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss, damit es wieder gesund meldet.",
                 "reload_delay": "Wie lange nach dem Neuladen gewartet wird, bevor erneut geprüft wird — gibt der Integration Zeit, sich neu zu verbinden."
               }
             }
@@ -395,47 +395,47 @@
               "description": "Wann Necromancer reagiert und — mit Health Check — wie oft es vor dem Aufgeben wiederholt. Die Standardwerte passen meist.",
               "data": {
                 "debounce": "Wartezeit vor Reaktion",
-                "health_check": "Recovery verifizieren (Health Check)",
+                "health_check": "Reparatur verifizieren (Health Check)",
                 "boot_window": "Warten, bis das überwachte Gerät wieder gesund ist",
-                "cooldown": "Pause nach erfolgreicher Recovery",
+                "cooldown": "Pause nach erfolgreicher Reparatur",
                 "max_attempts": "Max. Versuche"
               },
               "data_description": {
-                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen und lösen keine Recovery aus.",
-                "health_check": "An (Standard): die Recovery wird gegen den Health State des überwachten Geräts verifiziert, bevor der Guard wieder ruhig wird. Aus: die Aktion gilt als erfolgreich und geht direkt in den Cooldown.",
+                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen und lösen keine Reparatur aus.",
+                "health_check": "An (Standard): die Reparatur wird gegen den Health State des überwachten Geräts verifiziert, bevor der Guard wieder ruhig wird. Aus: die Aktion gilt als erfolgreich und geht direkt in die Abkühlphase.",
                 "boot_window": "Mit Health Check an: wie lange nach der Aktion auf „gesund“ des überwachten Geräts gewartet wird.",
-                "cooldown": "Ruhephase nach erfolgreicher Recovery, bevor der Guard wieder überwacht.",
+                "cooldown": "Ruhephase nach erfolgreicher Reparatur, bevor der Guard wieder überwacht.",
                 "max_attempts": "Wie oft wiederholt wird, bevor eskaliert wird — beim Verifizieren (Health Check an) oder wenn die Aktion selbst fehlschlägt."
               }
             },
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Recovery oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
                 "notify_action": "Aktion"
               }
             },
             "linked_guards": {
               "name": "Verknüpfte Guards",
-              "description": "Gruppiert diesen Guard mit anderen Recovery-Guards, damit sie sich abstimmen statt parallel zu reparieren.",
+              "description": "Gruppiert diesen Guard mit anderen Reparatur-Guards, damit sie sich abstimmen statt parallel zu reparieren.",
               "data": {
                 "linked_guards": "Guards in dieser Gruppe",
-                "notify_follower_success": "Erfolg melden, auch wenn dieser Guard einer Gruppen-Recovery folgt"
+                "notify_follower_success": "Erfolg melden, auch wenn dieser Guard einer Gruppen-Reparatur folgt"
               },
               "data_description": {
-                "linked_guards": "Geht einer der Gruppe in Recovery, folgen die anderen — sie warten und prüfen danach erneut, statt parallel eine eigene Recovery zu starten. Die Verknüpfung ist beidseitig und transitiv: Verknüpfst du mit einem Guard, der schon Links hat, trittst du der ganzen Gruppe bei; zum Austreten alle abwählen.",
-                "notify_follower_success": "An: ein Guard, der nur durch die Gruppe wieder gesund wurde (selbst nichts getan hat), meldet trotzdem Erfolg. Aus: nur die eigene Recovery zählt."
+                "linked_guards": "Geht einer der Gruppe in Reparatur, folgen die anderen — sie warten und prüfen danach erneut, statt parallel eine eigene Reparatur zu starten. Die Verknüpfung ist beidseitig und transitiv: Verknüpfst du mit einem Guard, der schon Links hat, trittst du der ganzen Gruppe bei; zum Austreten alle abwählen.",
+                "notify_follower_success": "An: ein Guard, der nur durch die Gruppe wieder gesund wurde (selbst nichts getan hat), meldet trotzdem Erfolg. Aus: nur die eigene Reparatur zählt."
               }
             },
             "reload": {
               "name": "Geräte-Integration neu laden",
-              "description": "Nach einer Recovery die Integration des zugewiesenen Geräts neu laden, bevor erneut geprüft wird.",
+              "description": "Nach einer Reparatur die Integration des zugewiesenen Geräts neu laden, bevor erneut geprüft wird.",
               "data": {
-                "reload_entry": "Integration des zugewiesenen Geräts nach Recovery neu laden",
+                "reload_entry": "Integration des zugewiesenen Geräts nach Reparatur neu laden",
                 "reload_delay": "Wartezeit vor dem Neuladen"
               },
               "data_description": {
-                "reload_entry": "Lädt die Integration des zugewiesenen Geräts nach der Recovery-Aktion neu, bevor der Health Check läuft — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss, damit es wieder gesund meldet.",
+                "reload_entry": "Lädt die Integration des zugewiesenen Geräts nach der Reparatur-Aktion neu, bevor der Health Check läuft — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss, damit es wieder gesund meldet.",
                 "reload_delay": "Wie lange nach dem Neuladen gewartet wird, bevor erneut geprüft wird — gibt der Integration Zeit, sich neu zu verbinden."
               }
             }
@@ -453,7 +453,7 @@
           "sections": {
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Recovery oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
                 "notify_action": "Aktion"
               }
@@ -544,7 +544,7 @@
     },
     "reset": {
       "name": "Zurücksetzen",
-      "description": "Setzt einen eskalierten Guard auf normal zurück und prüft erneut. Ist das überwachte Gerät weiterhin gestört, versucht der Guard erneut eine Recovery; ist es wiederhergestellt, wacht er einfach weiter."
+      "description": "Setzt einen eskalierten Guard auf normal zurück und prüft erneut. Ist das überwachte Gerät weiterhin gestört, versucht der Guard erneut eine Reparatur; ist es wiederhergestellt, wacht er einfach weiter."
     },
     "snooze": {
       "name": "Schlummern",
@@ -562,7 +562,7 @@
     },
     "notify_guard": {
       "name": "Über Guard benachrichtigen",
-      "description": "Sendet eine eigene Nachricht über die Notify-Aktion eines Guards — für Recovery-Skripte, die ihren eigenen Fortschritt über denselben Kanal melden wollen, den der Guard ohnehin nutzt.",
+      "description": "Sendet eine eigene Nachricht über die Notify-Aktion eines Guards — für Reparatur-Skripte, die ihren eigenen Fortschritt über denselben Kanal melden wollen, den der Guard ohnehin nutzt.",
       "fields": {
         "message": {
           "name": "Nachricht",
@@ -588,7 +588,7 @@
     },
     "snooze_all": {
       "name": "Alle schlummern",
-      "description": "Setzt alle Guards für eine Dauer aus — systemweiter Wartungsmodus. Jeder Guard ignoriert die Gesundheit und meldet nichts und wacht danach automatisch wieder auf. Guards mitten in einer Recovery werden übersprungen (best-effort).",
+      "description": "Setzt alle Guards für eine Dauer aus — systemweiter Wartungsmodus. Jeder Guard ignoriert die Gesundheit und meldet nichts und wacht danach automatisch wieder auf. Guards mitten in einer Reparatur werden übersprungen (best-effort).",
       "fields": {
         "duration": {
           "name": "Dauer",
@@ -602,21 +602,21 @@
     },
     "check_health": {
       "name": "Health prüfen",
-      "description": "Wertet die Health eines Guards sofort aus und gibt sie zurück (`ok` / `unhealthy` / `unknown`) — damit ein Recovery-Skript den eigenen Health Check des Guards wiederverwendet, statt sie nachzubauen.",
+      "description": "Wertet die Health eines Guards sofort aus und gibt sie zurück (`ok` / `unhealthy` / `unknown`) — damit ein Reparatur-Skript den eigenen Health Check des Guards wiederverwendet, statt sie nachzubauen.",
       "fields": {
         "guard": {
           "name": "Guard",
-          "description": "Die Status-Entity des Guards — der Wert, den eine Recovery-Aktion als `guard_entity_id` erhält."
+          "description": "Die Status-Entity des Guards — der Wert, den eine Reparatur-Aktion als `guard_entity_id` erhält."
         }
       }
     },
     "wait_for_health": {
       "name": "Auf Health warten",
-      "description": "Wartet, bis ein Guard wieder gesund meldet, oder bis der Timeout greift. Gibt `health`, `timed_out` und `waited_s` zurück — so kann eine gestufte Recovery zwischen den Stufen über den eigenen Health Check des Guards verifizieren.",
+      "description": "Wartet, bis ein Guard wieder gesund meldet, oder bis der Timeout greift. Gibt `health`, `timed_out` und `waited_s` zurück — so kann eine gestufte Reparatur zwischen den Stufen über den eigenen Health Check des Guards verifizieren.",
       "fields": {
         "guard": {
           "name": "Guard",
-          "description": "Die Status-Entity des Guards — der Wert, den eine Recovery-Aktion als `guard_entity_id` erhält."
+          "description": "Die Status-Entity des Guards — der Wert, den eine Reparatur-Aktion als `guard_entity_id` erhält."
         },
         "timeout": {
           "name": "Timeout",
@@ -631,10 +631,10 @@
   },
   "exceptions": {
     "snooze_during_recovery": {
-      "message": "{name} kann nicht schlummern, während gerade eine Recovery läuft — warte, bis sie abgeschlossen ist."
+      "message": "{name} kann nicht schlummern, während gerade eine Reparatur läuft — warte, bis sie abgeschlossen ist."
     },
     "unknown_guard": {
-      "message": "{entity_id} ist keine Necromancer-Guard-Status-Entity — übergib den Status-Sensor des Guards (sensor.<name>_status, das guard_entity_id, das eine Recovery-Aktion erhält)."
+      "message": "{entity_id} ist keine Necromancer-Guard-Status-Entity — übergib den Status-Sensor des Guards (sensor.<name>_status, das guard_entity_id, das eine Reparatur-Aktion erhält)."
     }
   }
 }

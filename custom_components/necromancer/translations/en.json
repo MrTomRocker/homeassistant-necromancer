@@ -601,7 +601,7 @@
       "description": "Resume every snoozed guard immediately."
     },
     "check_health": {
-      "name": "Check health",
+      "name": "Check Health",
       "description": "Evaluate a guard's health right now and return it (`ok` / `unhealthy` / `unknown`) — for a recovery script to re-use the guard's own Health Check instead of rebuilding it.",
       "fields": {
         "guard": {
@@ -611,7 +611,7 @@
       }
     },
     "wait_for_health": {
-      "name": "Wait for health",
+      "name": "Wait for Health",
       "description": "Wait until a guard reports healthy again, or the timeout elapses. Returns `health`, `timed_out` and `waited_s` — so a staged recovery can verify between tiers using the guard's own Health Check.",
       "fields": {
         "guard": {
