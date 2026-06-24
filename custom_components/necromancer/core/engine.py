@@ -98,8 +98,12 @@ class DeviceEngine:
         self.state = GState.OK
         self.attempt = 0
         self.recover_count = 0
+        self.fail_count = 0
         self.last_seen: datetime | None = None
         self.last_recover: datetime | None = None
+        self.last_fail: datetime | None = None
+        self.last_recover_driver_result: str | None = None
+        self.last_recover_driver_time: datetime | None = None
         self.auto = bool(behavior.get(CONF_AUTO_RESTART, DEFAULT_AUTO_RESTART))
         # Operator snooze (necromancer.snooze): health ignored until `snooze_until`
         # (re-armed on restart) or unsnooze. Reuses `_unsub_timer` (states are
@@ -134,8 +138,14 @@ class DeviceEngine:
         live health by the first evaluation in async_start.
         """
         self.recover_count = int(data.get("recover_count", 0) or 0)
+        self.fail_count = int(data.get("fail_count", 0) or 0)
         self.last_recover = dt_util.parse_datetime(data.get("last_recover") or "")
         self.last_seen = dt_util.parse_datetime(data.get("last_seen") or "")
+        self.last_fail = dt_util.parse_datetime(data.get("last_fail") or "")
+        self.last_recover_driver_result = data.get("last_recover_driver_result")
+        self.last_recover_driver_time = dt_util.parse_datetime(
+            data.get("last_recover_driver_time") or ""
+        )
         if "auto" in data:
             self.auto = bool(data["auto"])
         if data.get("state") == GState.ESCALATED.value:
@@ -154,10 +164,16 @@ class DeviceEngine:
             "state": self.state.value,
             "attempt": self.attempt,
             "recover_count": self.recover_count,
+            "fail_count": self.fail_count,
             "last_recover": self.last_recover.isoformat()
             if self.last_recover
             else None,
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
+            "last_fail": self.last_fail.isoformat() if self.last_fail else None,
+            "last_recover_driver_result": self.last_recover_driver_result,
+            "last_recover_driver_time": self.last_recover_driver_time.isoformat()
+            if self.last_recover_driver_time
+            else None,
             "auto": self.auto,
             "snooze_until": self._snooze_until.isoformat()
             if self._snooze_until
@@ -684,7 +700,7 @@ class DeviceEngine:
                     "sensor", DOMAIN, f"{self._subentry_id}_status"
                 )
                 try:
-                    await self.driver.recover(
+                    driver_ok = await self.driver.recover(
                         {
                             "attempt": self.attempt,
                             "max": self.max_attempts,
@@ -695,6 +711,7 @@ class DeviceEngine:
                 except Exception as err:
                     # The action raised (e.g. a missing service): a failed attempt,
                     # never a success — retry or escalate, even without a check.
+                    self._record_driver_result(False)
                     if self.attempt >= self.max_attempts:
                         # Terminal failure: keep the full traceback for diagnosis.
                         LOGGER.exception("Recovery driver failed for %s", self.name)
@@ -710,17 +727,29 @@ class DeviceEngine:
                         err,
                     )
                     continue
+                self._record_driver_result(driver_ok)
 
                 # Optionally reload the assigned device's integration after the
                 # repair (and before VERIFY), so HA reconnects to a device that
                 # just came back. Best-effort: a reload failure must not abort.
                 await self._maybe_reload_device_entry()
 
-                # Without a health-check the action is assumed to have worked; the
-                # continuous health monitoring re-triggers if it didn't.
+                # Without a health-check the driver's own verdict decides; with one,
+                # the device VERIFY decides (the verdict above is only recorded).
                 if not self.behavior.get(CONF_HEALTH_CHECK, True):
-                    self._recover_success()
-                    return
+                    if driver_ok:
+                        self._recover_success()
+                        return
+                    if self.attempt >= self.max_attempts:
+                        self._escalate()
+                        return
+                    LOGGER.warning(
+                        "%s recovery attempt %s/%s reported failure — retrying",
+                        self.name,
+                        self.attempt,
+                        self.max_attempts,
+                    )
+                    continue
                 self._set_state(GState.VERIFY)
                 if await self._wait_health_ok(
                     self._int(CONF_BOOT_WINDOW, DEFAULT_BOOT_WINDOW)
@@ -819,6 +848,16 @@ class DeviceEngine:
         finally:
             self._health_waiters.discard(waiter)
 
+    def _record_driver_result(self, ok: bool) -> None:
+        """Record the driver's own verdict for the most recent attempt."""
+        self.last_recover_driver_result = "good" if ok else "failed"
+        self.last_recover_driver_time = dt_util.utcnow()
+
+    def _record_failure(self) -> None:
+        """Record a failed recovery (counter + timestamp) for the status surface."""
+        self.fail_count += 1
+        self.last_fail = dt_util.utcnow()
+
     def _recover_success(self, *, via_link: bool = False) -> None:
         """Record a successful repair and move into the COOLDOWN settling window.
 
@@ -882,6 +921,7 @@ class DeviceEngine:
                 "%s could not be recovered after %s attempt(s)", self.name, self.attempt
             )
         params.setdefault("attempt", self.attempt)
+        self._record_failure()
         self._set_state(GState.ESCALATED)
         self._fire_event(
             "blocked" if notify_key == "recovery_blocked" else "escalated",

@@ -48,6 +48,7 @@ class StubDriver(RecoveryDriver):
         self.calls = 0
         self.on_recover = on_recover
         self.raise_it = False
+        self.result = True  # driver verdict returned by recover()
 
     async def can_recover(self):
         return True, ""
@@ -58,6 +59,7 @@ class StubDriver(RecoveryDriver):
             raise RuntimeError("boom")
         if self.on_recover:
             self.on_recover()
+        return self.result
 
 
 def make(hass, health, driver, **behavior):
@@ -127,6 +129,61 @@ async def test_raising_driver_is_failed_attempt(hass, _):
     await eng.async_start()
     await _advance(hass, 30)
     assert eng.state is GState.ESCALATED  # raise = failed, not false success
+    await eng.async_stop()
+
+
+async def test_health_check_off_driver_failure_escalates(hass, _):
+    # Model B: with no health-check, a driver that reports failure is a failed
+    # attempt (not a blind success) -> escalate + fail_count + driver result.
+    health = FakeHealth(hass, Health.UNHEALTHY)
+    driver = StubDriver(hass)
+    driver.result = False  # driver runs but reports failure
+    eng = make(hass, health, driver, health_check=False, boot_window=0, max_attempts=1)
+    await eng.async_start()
+    await _advance(hass, 30)  # debounce -> recover (driver failed) -> escalate
+    assert eng.state is GState.ESCALATED, eng.state
+    assert eng.fail_count == 1 and eng.last_fail is not None
+    assert eng.last_recover_driver_result == "failed"
+    await eng.async_stop()
+
+
+async def test_health_check_off_driver_ok_succeeds(hass, _):
+    # Model B: no health-check + driver reports good -> success (unchanged path).
+    health = FakeHealth(hass, Health.UNHEALTHY)
+    driver = StubDriver(hass)  # result True
+    eng = make(hass, health, driver, health_check=False, max_attempts=1)
+    await eng.async_start()
+    await _advance(hass, 30)
+    assert eng.state is GState.COOLDOWN
+    assert eng.recover_count == 1 and eng.last_recover_driver_result == "good"
+    await eng.async_stop()
+
+
+async def test_fail_count_and_driver_good_on_verify_timeout(hass, _):
+    # health-check on, driver runs clean but the device never returns: overall
+    # failure (fail_count) yet the *driver* result is good (the diagnostic split).
+    health = FakeHealth(hass, Health.UNHEALTHY)
+    driver = StubDriver(hass)  # never fixes health -> verify times out
+    eng = make(hass, health, driver, boot_window=0, max_attempts=1)
+    await eng.async_start()
+    await _advance(hass, 30)
+    assert eng.state is GState.ESCALATED
+    assert eng.fail_count == 1 and eng.last_fail is not None
+    assert eng.last_recover_driver_result == "good"  # driver ran; device didn't return
+    await eng.async_stop()
+
+
+async def test_new_fields_persist(hass, _):
+    health = FakeHealth(hass, Health.UNHEALTHY)
+    driver = StubDriver(hass)
+    eng = make(hass, health, driver, boot_window=0, max_attempts=1)
+    await eng.async_start()
+    await _advance(hass, 30)  # escalate -> fail_count, driver result recorded
+    snap = eng.snapshot()
+    eng2 = make(hass, FakeHealth(hass, Health.OK), StubDriver(hass))
+    eng2._apply_persisted(snap)
+    assert eng2.fail_count == 1 and eng2.last_fail is not None
+    assert eng2.last_recover_driver_result == "good"
     await eng.async_stop()
 
 

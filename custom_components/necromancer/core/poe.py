@@ -283,7 +283,14 @@ class PoeFabric:
         """Mark the port recovering, run one cycle, then set good/failed by result."""
         label = port[CONF_LABEL]
         self._set_status(label, PORT_RECOVERING)
-        ok = await self._cycle(port)
+        try:
+            ok = await self._cycle(port)
+        except Exception:
+            # A raising service must still leave a terminal status, not strand the
+            # port on "recovering". CancelledError (BaseException) passes through.
+            self._set_status(label, PORT_FAILED)
+            LOGGER.exception("PoE port %r: repair raised", label)
+            raise
         self._set_status(label, PORT_GOOD if ok else PORT_FAILED)
         if not ok:
             LOGGER.warning("PoE port %r: repair did not confirm online", label)

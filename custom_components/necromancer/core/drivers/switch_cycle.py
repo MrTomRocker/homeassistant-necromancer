@@ -31,8 +31,8 @@ class SwitchCycleDriver(RecoveryDriver):
             return False, f"switch entity {self.switch_entity} not found"
         return True, ""
 
-    async def recover(self, variables: dict | None = None) -> None:
-        """Cycle the switch off, wait `off_on_delay`, then on."""
+    async def recover(self, variables: dict | None = None) -> bool:
+        """Cycle the switch off, wait `off_on_delay`, then on (`good` unless it raises)."""
         delay = int(self.config.get(CONF_OFF_ON_DELAY, DEFAULT_OFF_ON_DELAY))
         LOGGER.debug("Cycling %s: off", self.switch_entity)
         await self.hass.services.async_call(
@@ -46,6 +46,7 @@ class SwitchCycleDriver(RecoveryDriver):
         await self.hass.services.async_call(
             "homeassistant", "turn_on", {"entity_id": self.switch_entity}, blocking=True
         )
+        return True
 
     def target_info(self) -> str:
         """Return a short human description of the recovery target."""

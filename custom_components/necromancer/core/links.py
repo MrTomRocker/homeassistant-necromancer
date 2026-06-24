@@ -217,6 +217,7 @@ class LinkCoordinator:
                     "%s: linked repair failed and still unhealthy — escalating",
                     eng.name,
                 )
+                eng._record_failure()
                 eng._set_state(GState.ESCALATED)
                 eng.hass.async_create_task(eng._notify("linked_repair_failed"))
         finally:

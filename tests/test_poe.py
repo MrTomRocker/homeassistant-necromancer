@@ -41,6 +41,7 @@ from custom_components.necromancer.const import (
 from custom_components.necromancer.core.drivers.poe_port import PoePortDriver
 from custom_components.necromancer.core.poe import (
     EVENT_PORT_STATUS,
+    PORT_FAILED,
     PORT_GOOD,
     PORT_RECOVERING,
     PoeFabric,
@@ -259,6 +260,30 @@ async def test_repair_unresolvable_returns_false(hass, stubs):
     assert ok is False
 
 
+async def test_run_cycle_marks_failed_when_actuator_raises(hass, stubs):
+    # If the actuator service raises mid-cycle, the port must end FAILED (and fire
+    # the failed transition), not stay stuck on RECOVERING forever.
+    hass.states.async_set("switch.actX", "on")
+    hass.states.async_set("binary_sensor.stX", "on")
+    seen = _events(hass)
+
+    async def _boom(call):
+        raise RuntimeError("actuator offline")
+
+    hass.services.async_register("homeassistant", "turn_off", _boom)  # override stub
+    f = PoeFabric(hass)
+    f.set_ports([port("PX", "switch.actX", "binary_sensor.stX", id_static="dev")])
+    try:
+        await f.repair("dev")  # raises -> propagates (engine would retry/escalate)
+    except RuntimeError:
+        pass
+    finally:
+        stubs.register()  # restore normal turn_off/on for the remaining tests
+    await hass.async_block_till_done()
+    assert f.status("PX") == PORT_FAILED, f.status("PX")  # not stuck on RECOVERING
+    assert PORT_FAILED in [s for _, s in seen], seen  # failed transition fired
+
+
 async def test_concurrent_callers_coalesce(hass, stubs):
     stubs.bind("switch.actL", "binary_sensor.stL")
     stubs.slow = 0.05  # widen the window so a second cycle would run if not coalesced
@@ -308,10 +333,19 @@ async def test_driver_recover_cycles_via_fabric(hass, stubs):
     f = PoeFabric(hass)
     f.set_ports([port("PR", "switch.actR", "binary_sensor.stR", id_static="dev")])
     d = _driver(hass, f, "dev")
-    await d.recover()
+    assert await d.recover() is True  # fabric verdict: port confirmed online
     await hass.async_block_till_done()
     assert hass.states.get("switch.actR").state == "on"
     assert f.status("PR") == PORT_GOOD
+
+
+async def test_driver_recover_returns_fabric_verdict(hass, stubs):
+    # poe_port.recover() returns the fabric's verdict so the engine can use it
+    # when there is no device health-check (unresolvable id -> False).
+    f = PoeFabric(hass)
+    f.set_ports([port("PD", "switch.actD", "binary_sensor.stD", id_static="dev")])
+    d = _driver(hass, f, "ghost")  # unresolvable -> no cycle, verdict False
+    assert await d.recover() is False
 
 
 async def test_driver_no_ports_config_error(hass, stubs):

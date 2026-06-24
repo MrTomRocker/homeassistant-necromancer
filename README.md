@@ -219,7 +219,10 @@ Two guarantees fall out of this design:
 - **No false alarm.** Ambiguous health — a missing entity, a render error, `unknown`/`unavailable`
   — is treated as *unknown*, never as a fault. Nothing is ever cycled on a hunch.
 - **No false success.** With the Health Check on, a recovery is only "done" once health verifies OK
-  again; an action that ran but didn't fix anything is a failed attempt, not a success.
+  again; an action that ran but didn't fix anything is a failed attempt, not a success. With the
+  Health Check **off** there's no device check, so the **driver's own result** decides: a PoE port
+  that doesn't come back online, or an action that set `recover_failed`, counts as a failed attempt —
+  not a blind success.
 
 State that matters across a Home Assistant restart — the escalation verdict, attempt counters,
 recovery stats and the per-guard auto-recovery switch — is **persisted** independently of the
@@ -273,6 +276,12 @@ and restore it afterwards — no helper entity needed. A variable you set only *
 an `if`/`choose` that may not run) is `undefined` when that branch is skipped — read it with
 `| default(...)` in the on action.
 
+**Report a failed repair.** Set `recover_failed: true` (a `variables:` step) in your recovery
+action to tell the guard the repair did **not** work. Without a Health Check this turns the attempt
+into a failure (retry, then escalate) instead of a blind success; with one, the device check still
+decides — either way the verdict shows in `last_recover_driver_result`. Leave it unset for a normal
+(good) outcome.
+
 **Restart device integration (optional).** When the guard has a device assigned, the recovery step
 shows a *Restart device integration* toggle: after the repair action — and before re-checking
 health — Necromancer reloads that device's integration (its config entry), after a delay you set.
@@ -309,7 +318,7 @@ recover guards get all five, notify-only guards just the status sensor + health:
 
 | Entity | Purpose |
 |---|---|
-| `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `recovering` / `verify` / `cooldown` / `escalated` / `snoozed`. Attributes include `recover_count`, `last_recover` and `snooze_until`. |
+| `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `recovering` / `verify` / `cooldown` / `escalated` / `snoozed`. Attributes include `recover_count` / `fail_count`, `last_recover` / `last_fail`, the `recover_driver` and its last verdict, and `snooze_until`. |
 | `binary_sensor.<guard>_health` | The raw health verdict from the HealthSource. |
 | `switch.<guard>_auto_recovery` | Arm/disarm automatic recovery for this guard (a configuration entity). |
 | `button.<guard>_revive` | Trigger a recovery cycle manually. |
@@ -334,9 +343,12 @@ lifecycle:
 | `escalated` | Gave up, or the recovery was blocked — your alarm. |
 | `snoozed` | Operator-suspended (`necromancer.snooze`) — health ignored, no alerts. |
 
-Attributes: `attempt` (retries in the current cycle), `recover_count` (lifetime total),
-`last_recover` (timestamp), `target` (what gets cycled — the switch/port), `snooze_until`
-(when a snooze auto-resumes).
+Attributes: `attempt` (retries in the current cycle), `recover_count` / `fail_count`
+(lifetime successes / failures), `last_recover` / `last_fail` (timestamps),
+`recover_driver` (what gets cycled — the switch / port / actions),
+`last_recover_driver_result` / `last_recover_driver_time` (the recovery driver's own
+last verdict — `good` / `failed` — and when, distinct from the overall state above),
+`snooze_until` (when a snooze auto-resumes).
 
 ### Recovery events — `event.<guard>_recovery`
 

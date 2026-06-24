@@ -563,6 +563,23 @@ async def test_action_call_seeds_engine_vars(hass, _):
     assert calls[0].data["a"] == 5, calls[0].data
 
 
+async def test_action_call_recover_failed_var(hass, _):
+    """An action that sets `recover_failed` makes the driver report failure."""
+    drv = create_driver(
+        hass,
+        {"type": "action_call", "action": [{"variables": {"recover_failed": True}}]},
+    )
+    assert await drv.recover() is False
+
+
+async def test_action_call_clean_run_is_good(hass, _):
+    """An action that doesn't flag failure reports good."""
+    calls = async_mock_service(hass, "test", "ok_run")
+    drv = create_driver(hass, {"type": "action_call", "action": [{"action": "test.ok_run"}]})
+    assert await drv.recover() is True
+    assert len(calls) == 1
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 

@@ -25,8 +25,12 @@ async def test_status_sensor_reflects_engine_state(
     assert set(state.attributes) >= {
         "attempt",
         "recover_count",
+        "fail_count",
         "last_recover",
-        "target",
+        "last_fail",
+        "recover_driver",
+        "last_recover_driver_result",
+        "last_recover_driver_time",
         "snooze_until",
     }
     # auto_restart (use the switch) and last_seen are intentionally not attributes.

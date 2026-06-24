@@ -35,8 +35,14 @@ class RecoveryDriver(ABC):
         return True, ""
 
     @abstractmethod
-    async def recover(self, variables: dict | None = None) -> None:
-        """Perform the recovery. Should return once the action is done.
+    async def recover(self, variables: dict | None = None) -> bool:
+        """Perform the recovery; return the driver's own verdict.
+
+        ``True`` = the recovery ran cleanly; ``False`` = it ran but reported failure
+        (a PoE port that did not come back online, or an action that set
+        ``recover_failed``). Raising signals a hard failure. With ``health_check``
+        off the engine uses this verdict to decide retry/escalate; with it on the
+        device VERIFY decides and the verdict is only recorded for diagnostics.
 
         ``variables`` carries the engine's run context (``attempt``, ``max``,
         ``name``, ``guard_entity_id``) into action-running drivers; the switch /

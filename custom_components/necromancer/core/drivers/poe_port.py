@@ -46,15 +46,19 @@ class PoePortDriver(RecoveryDriver):
             return False, reason
         return True, ""
 
-    async def recover(self, variables: dict | None = None) -> None:
-        """Hand off to the fabric to resolve, lock, and cycle the port."""
+    async def recover(self, variables: dict | None = None) -> bool:
+        """Hand off to the fabric to resolve, lock, and cycle the port.
+
+        Returns the fabric's verdict (port confirmed back online?) so the engine
+        can use it when there is no device health-check; with one, VERIFY decides.
+        """
         fabric = self._fabric()
         if fabric is None:
             LOGGER.error("PoE %s: fabric not available", self.expected_id)
-            return
+            return False
         # The fabric resolves, locks the port, cycles it and sets its status; the
         # engine's VERIFY step then checks the device's own health.
-        await fabric.repair(self.expected_id)
+        return await fabric.repair(self.expected_id)
 
     def target_info(self) -> str:
         """Return a short human description of the resolved port target."""

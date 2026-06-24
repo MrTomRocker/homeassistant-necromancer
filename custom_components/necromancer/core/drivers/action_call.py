@@ -37,10 +37,13 @@ class ActionCallDriver(RecoveryDriver):
             return False, f"invalid recovery action: {err}"
         return True, ""
 
-    async def recover(self, variables: dict | None = None) -> None:
-        """Run the configured action, blocking until it finishes."""
+    async def recover(self, variables: dict | None = None) -> bool:
+        """Run the action; `good` unless it set `recover_failed`."""
         LOGGER.debug("Running recovery action")
-        await async_run(self.hass, self.action, "necromancer recovery", variables)
+        result = await async_run(
+            self.hass, self.action, "necromancer recovery", variables
+        )
+        return not result.get("recover_failed")
 
     def target_info(self) -> str:
         """Return a short human description of the recovery target."""
