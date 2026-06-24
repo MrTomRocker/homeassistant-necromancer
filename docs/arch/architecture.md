@@ -225,7 +225,13 @@ for notifications.
 `context`), and `action_cycle` feeds the off action's scope into the on action — so off-phase
 `variables:` and the engine context are both readable in the on phase, with no helper entity to
 carry state across the power-cycle. Variables are per-attempt (each retry runs off→on fresh);
-nothing leaks between attempts.
+nothing leaks between attempts. Within a run the scope is one flat namespace (HA
+`ScriptRunVariables`, a ChainMap whose writes land in the nearest scope that already defines the
+name, else top-level): a `variables:` set inside an `if`/`choose`/`repeat`/`sequence` leaks to the
+rest of the run — and on into the on phase — so a *conditionally* set variable is simply `undefined`
+when its branch is skipped (read it with `| default(...)`). Only `parallel` branches are isolated
+(each gets a copy, merged back afterwards); `repeat`'s `repeat` var and a parallel-`protected` `wait`
+are the sole truly-local names.
 
 ### The strategy matrix
 

@@ -269,7 +269,9 @@ attempt (a gentle fix first, a harder one on the second try), or report its own 
 guard's notify channel via `necromancer.notify_guard` (`target: {entity_id: "{{ guard_entity_id }}"}`).
 With **Off/on actions**, any variables you set in the off action (a
 `variables:` step) are also readable in the on action, so you can capture state before cutting power
-and restore it afterwards — no helper entity needed.
+and restore it afterwards — no helper entity needed. A variable you set only *conditionally* (inside
+an `if`/`choose` that may not run) is `undefined` when that branch is skipped — read it with
+`| default(...)` in the on action.
 
 **Restart device integration (optional).** When the guard has a device assigned, the recovery step
 shows a *Restart device integration* toggle: after the repair action — and before re-checking
