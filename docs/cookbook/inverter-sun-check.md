@@ -48,8 +48,9 @@ The template is `false` (UNHEALTHY) only when **all three** signals line up:
   standby.
 
 The outer `not (...)` flips that: healthy whenever the "stuck in the sun" condition is *not* met.
-A `false` that persists for the full 900 s debounce moves the guard into `suspect` and then fires
-the notify event — you get the message, and nothing else changes.
+A `false` holds the guard in `suspect` for the full 900 s debounce; when the debounce elapses it
+fires the notify event and the guard goes to `escalated` (your alarm) — you get the message, but
+nothing is acted on. It clears itself back to `ok` the moment health returns.
 
 ## The clever bit
 

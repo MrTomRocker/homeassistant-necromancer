@@ -214,7 +214,7 @@ Every distinct case the system handles. *(C = confirmed by a test/probe; L = see
 | exactly one live id match | wins, refreshes the cache. |
 | zero live matches, cached port known | falls back to last-known (WARNING). C |
 | zero live, no cache | blocked ("no port matches"). |
-| ambiguous (>1 live match) | blocked / `resolve` returns None (ERROR). C |
+| ambiguous (>1 live match) | blocked / `resolve_with_reason` returns `(None, …)` (ERROR). C |
 | device aged out of the switch table while down | learned-while-healthy cache lets recovery still fire. |
 | port status sensor lags / already off | `_await_status` returns immediately or times out (WARNING) but the cycle continues. |
 | concurrent `repair_poe_port` on one port | coalesced — callers join the in-flight cycle; one cycle, not N. C |
