@@ -23,6 +23,7 @@ async def test_status_sensor_reflects_engine_state(
     assert state is not None
     assert state.state == "ok"
     assert set(state.attributes) >= {
+        "guard_name",
         "attempt",
         "recover_count",
         "fail_count",
@@ -36,6 +37,8 @@ async def test_status_sensor_reflects_engine_state(
     # auto_restart (use the switch) and last_seen are intentionally not attributes.
     assert "auto_restart" not in state.attributes
     assert "last_seen" not in state.attributes
+    # guard_name carries the subentry title so dashboards can label guards generically.
+    assert state.attributes["guard_name"] == "Status Guard"
     assert state.attributes["attempt"] == 0
     assert state.attributes["recover_count"] == 0
 

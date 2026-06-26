@@ -35,8 +35,11 @@ async def async_setup_entry(
 ) -> None:
     """Set up the sensor platform from a config entry."""
     for subentry_id, engine in entry.runtime_data.engines.items():
+        subentry = entry.subentries.get(subentry_id)
+        guard_name = subentry.title if subentry else engine.name
         async_add_entities(
-            [StatusSensor(engine, subentry_id)], config_subentry_id=subentry_id
+            [StatusSensor(engine, subentry_id, guard_name)],
+            config_subentry_id=subentry_id,
         )
 
     # Per-guard operator services, targeted at the status sensor (device/area
@@ -70,9 +73,10 @@ class StatusSensor(NecromancerEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = [s.value for s in GState]
 
-    def __init__(self, engine: DeviceEngine, subentry_id: str) -> None:
+    def __init__(self, engine: DeviceEngine, subentry_id: str, guard_name: str) -> None:
         """Initialize the status sensor."""
         super().__init__(engine, subentry_id, "status")
+        self._guard_name = guard_name
 
     @property
     def native_value(self) -> str:
@@ -84,6 +88,7 @@ class StatusSensor(NecromancerEntity, SensorEntity):
         """Return the status attributes."""
         e = self._engine
         return {
+            "guard_name": self._guard_name,
             "attempt": e.attempt,
             "recover_count": e.recover_count,
             "fail_count": e.fail_count,

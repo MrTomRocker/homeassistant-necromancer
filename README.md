@@ -330,7 +330,7 @@ recover guards get all five, notify-only guards just the status sensor + health:
 
 | Entity | Purpose |
 |---|---|
-| `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `blind` / `recovering` / `verify` / `cooldown` / `escalated` / `snoozed`. Attributes include `recover_count` / `fail_count`, `last_recover` / `last_fail`, the `recover_driver` and its last verdict, and `snooze_until`. |
+| `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `blind` / `recovering` / `verify` / `cooldown` / `escalated` / `snoozed`. Attributes include `guard_name` (the guard's name), `recover_count` / `fail_count`, `last_recover` / `last_fail`, the `recover_driver` and its last verdict, and `snooze_until`. |
 | `binary_sensor.<guard>_health` | The raw health verdict from the HealthSource. |
 | `switch.<guard>_auto_recovery` | Arm/disarm automatic recovery for this guard (a configuration entity). |
 | `button.<guard>_revive` | Trigger a recovery cycle manually. |
@@ -364,8 +364,10 @@ lifecycle:
 | `escalated` | Gave up, or the recovery was blocked — your alarm. |
 | `snoozed` | Operator-suspended (`necromancer.snooze`) — health ignored, no alerts. |
 
-Attributes: `attempt` (retries in the current cycle), `recover_count` / `fail_count`
-(lifetime successes / failures), `last_recover` / `last_fail` (timestamps),
+Attributes: `guard_name` (the guard's display name — its subentry title, handy for
+labeling guards generically on a dashboard), `attempt` (retries in the current cycle),
+`recover_count` / `fail_count` (lifetime successes / failures),
+`last_recover` / `last_fail` (timestamps),
 `recover_driver` (what gets cycled — the switch / port / actions),
 `last_recover_driver_result` / `last_recover_driver_time` (the recovery driver's own
 last verdict — `good` / `failed` — and when, distinct from the overall state above),
