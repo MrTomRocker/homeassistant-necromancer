@@ -8,7 +8,11 @@ import voluptuous as vol
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv, entity_platform
+from homeassistant.helpers import (
+    config_validation as cv,
+    entity_platform,
+    entity_registry as er,
+)
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import NecromancerConfigEntry
@@ -19,6 +23,7 @@ from .const import (
     ATTR_EVENT_TEXT,
     ATTR_MAX,
     ATTR_MESSAGE,
+    DOMAIN,
     SERVICE_NOTIFY_GUARD,
     SERVICE_RESET,
     SERVICE_SNOOZE,
@@ -89,6 +94,10 @@ class StatusSensor(NecromancerEntity, SensorEntity):
         e = self._engine
         return {
             "guard_name": self._guard_name,
+            "health_entity": self._sibling("binary_sensor", "health"),
+            "auto_recovery_entity": self._sibling("switch", "auto_restart"),
+            "revive_entity": self._sibling("button", "recover"),
+            "recovery_event_entity": self._sibling("event", "recovery_event"),
             "attempt": e.attempt,
             "recover_count": e.recover_count,
             "fail_count": e.fail_count,
@@ -99,6 +108,12 @@ class StatusSensor(NecromancerEntity, SensorEntity):
             "last_recover_driver_time": e.last_recover_driver_time,
             "snooze_until": e._snooze_until,
         }
+
+    def _sibling(self, domain: str, key: str) -> str | None:
+        """Resolve a sibling entity's id from its unique_id (live, never stored)."""
+        return er.async_get(self.hass).async_get_entity_id(
+            domain, DOMAIN, f"{self._subentry_id}_{key}"
+        )
 
     # ---------- operator services (registered above) ----------
     async def async_reset(self) -> None:

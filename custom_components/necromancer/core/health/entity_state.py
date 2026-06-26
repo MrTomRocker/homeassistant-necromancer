@@ -90,3 +90,8 @@ class EntityStateHealth(HealthSource):
         if self.source == "state":
             return self.entity_id
         return f"{self.entity_id}[{self.source}]"
+
+    @property
+    def health_source(self) -> str:
+        """The guard's monitored partner entity_id."""
+        return self.entity_id

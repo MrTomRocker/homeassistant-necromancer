@@ -63,3 +63,5 @@ async def test_health_binary_sensor_device_class(
     state = hass.states.get(eid)
     assert state is not None
     assert state.attributes["device_class"] == "connectivity"
+    # health_source points at the watched partner entity for entity-based health.
+    assert state.attributes["health_source"] == "binary_sensor.guard_health"

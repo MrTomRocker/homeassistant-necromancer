@@ -85,3 +85,12 @@ class TemplateHealth(HealthSource):
     def describe(self) -> str:
         """Return a short human description for diagnostics."""
         return f"template: {self.config['template']}"
+
+    @property
+    def health_source(self) -> str:
+        """A marker — template health has no single partner entity to point at.
+
+        The raw template is intentionally not exposed: it would bloat the
+        recorder on every state write and a dashboard can't act on it anyway.
+        """
+        return "template"

@@ -24,6 +24,10 @@ async def test_status_sensor_reflects_engine_state(
     assert state.state == "ok"
     assert set(state.attributes) >= {
         "guard_name",
+        "health_entity",
+        "auto_recovery_entity",
+        "revive_entity",
+        "recovery_event_entity",
         "attempt",
         "recover_count",
         "fail_count",
@@ -39,6 +43,13 @@ async def test_status_sensor_reflects_engine_state(
     assert "last_seen" not in state.attributes
     # guard_name carries the subentry title so dashboards can label guards generically.
     assert state.attributes["guard_name"] == "Status Guard"
+    # Sibling entity_ids are resolved live from the unique_id, so they survive renames.
+    assert state.attributes["health_entity"] == entity_id_for(
+        hass, "guard0", "binary_sensor", "health"
+    )
+    assert state.attributes["auto_recovery_entity"] == entity_id_for(
+        hass, "guard0", "switch", "auto_restart"
+    )
     assert state.attributes["attempt"] == 0
     assert state.attributes["recover_count"] == 0
 

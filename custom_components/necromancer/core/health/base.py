@@ -61,3 +61,8 @@ class HealthSource(ABC):
     def describe(self) -> str:
         """Short human description for diagnostics."""
         return self.config.get("type", "")
+
+    @property
+    def health_source(self) -> str:
+        """The watched entity_id or the raw template — for dashboards/diagnostics."""
+        return self.describe()

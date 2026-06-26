@@ -393,6 +393,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
     _reconcile_devices(hass, entry, engines)
     _reconcile_entities(hass, entry, engines)
 
+    # Status sensors resolve their sibling entity_ids from the registry, which is
+    # only complete once every platform set up above — nudge one re-render so the
+    # sibling attributes populate (instead of waiting for the next engine tick).
+    for engine in engines.values():
+        engine.refresh_entities()
+
     # Validate guard configs once HA is started AND the platforms above have
     # registered each guard's own view-entities — so the self-reference (feedback
     # loop) check sees them even when a guard is added at runtime. async_at_started

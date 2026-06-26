@@ -217,6 +217,8 @@ stateDiagram-v2
     COOLDOWN --> OK: healthy after cooldown
     COOLDOWN --> SUSPECT: faulty again
     ESCALATED --> OK: health returns
+    OK --> SNOOZED: necromancer.snooze (from any state)
+    SNOOZED --> OK: unsnooze / snooze elapsed
 ```
 
 Two guarantees fall out of this design:
@@ -330,8 +332,8 @@ recover guards get all five, notify-only guards just the status sensor + health:
 
 | Entity | Purpose |
 |---|---|
-| `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `blind` / `recovering` / `verify` / `cooldown` / `escalated` / `snoozed`. Attributes include `guard_name` (the guard's name), `recover_count` / `fail_count`, `last_recover` / `last_fail`, the `recover_driver` and its last verdict, and `snooze_until`. |
-| `binary_sensor.<guard>_health` | The raw health verdict from the HealthSource. |
+| `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `blind` / `recovering` / `verify` / `cooldown` / `escalated` / `snoozed`. Attributes include `guard_name` (the guard's name), `recover_count` / `fail_count`, `last_recover` / `last_fail`, the `recover_driver` and its last verdict, `snooze_until`, plus the guard's resolved sibling entity_ids (`health_entity`, `auto_recovery_entity`, …). |
+| `binary_sensor.<guard>_health` | The raw health verdict from the HealthSource. Its `health_source` attribute names what's watched — the partner `entity_id`, or `template`. |
 | `switch.<guard>_auto_recovery` | Arm/disarm automatic recovery for this guard (a configuration entity). |
 | `button.<guard>_revive` | Trigger a recovery cycle manually. |
 | `event.<guard>_recovery` | Fires on each recovery outcome — `recovered` / `escalated` / `blocked` — for dashboards, automations and history. |
@@ -372,6 +374,12 @@ labeling guards generically on a dashboard), `attempt` (retries in the current c
 `last_recover_driver_result` / `last_recover_driver_time` (the recovery driver's own
 last verdict — `good` / `failed` — and when, distinct from the overall state above),
 `snooze_until` (when a snooze auto-resumes).
+
+Plus the guard's **sibling entity_ids** — `health_entity`, `auto_recovery_entity`,
+`revive_entity`, `recovery_event_entity` — each resolved live from its `unique_id`, so they
+survive renames. A dashboard can reference a guard's other entities straight from its status
+sensor instead of guessing names. (`auto_recovery_entity` / `revive_entity` /
+`recovery_event_entity` are `None` for a notify-only guard, which has none.)
 
 ### Recovery events — `event.<guard>_recovery`
 

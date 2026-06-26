@@ -46,3 +46,8 @@ class HealthBinarySensor(NecromancerEntity, BinarySensorEntity):
     def is_on(self) -> bool:
         """Return true if the device is healthy."""
         return self._engine.health.evaluate() == Health.OK
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose what the verdict is read from: a partner entity_id or a template."""
+        return {"health_source": self._engine.health.health_source}

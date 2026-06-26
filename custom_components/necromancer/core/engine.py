@@ -401,6 +401,10 @@ class DeviceEngine:
         for cb in list(self._listeners):
             cb()
 
+    def refresh_entities(self) -> None:
+        """Re-render subscribed entities — call once every platform is set up."""
+        self._emit()
+
     def add_event_listener(self, cb: Callable[[str, dict], None]) -> CALLBACK_TYPE:
         """Subscribe to typed lifecycle events (the event entity). Returns unsub."""
         self._event_listeners.append(cb)
