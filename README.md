@@ -3,7 +3,7 @@
 [![GitHub release](https://img.shields.io/github/release/MrTomRocker/homeassistant-necromancer?include_prereleases=&sort=semver&color=blue)](https://github.com/MrTomRocker/homeassistant-necromancer/releases/)
 [![License](https://img.shields.io/badge/License-MIT-blue)](#license)
 [![issues](https://img.shields.io/github/issues/MrTomRocker/homeassistant-necromancer)](https://github.com/MrTomRocker/homeassistant-necromancer/issues)
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5)](https://github.com/hacs/integration)
+[![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5)](https://github.com/hacs/default)
 [![Downloads](https://img.shields.io/github/downloads/MrTomRocker/homeassistant-necromancer/total)](https://github.com/MrTomRocker/homeassistant-necromancer/releases)
 
 <div align="center">
@@ -127,21 +127,19 @@ plug, a PoE camera or a cloud bridge — all guarded with the *same* model (heal
 
 ### HACS (Home Assistant Community Store)
 
-Necromancer is **not in the HACS default store yet**, so add it as a custom repository.
+Necromancer is in the **HACS default store** — no custom repository needed.
 
 <details open>
-<summary>Add as a custom repository</summary>
+<summary>Install via HACS</summary>
 
 1. Open **HACS** in Home Assistant.
-2. Click the `⋮` menu in the top right and choose **Custom repositories**.
-3. Add the URL `https://github.com/MrTomRocker/homeassistant-necromancer` and set the category to **Integration**.
-4. Search for **Necromancer** in HACS and click **Download**.
-5. Restart Home Assistant.
-6. Add the integration via **Settings → Devices & Services**.
+2. Search for **Necromancer** and click **Download**.
+3. Restart Home Assistant.
+4. Add the integration via **Settings → Devices & Services**.
 
 </details>
 
-You can also use this shortcut once the repository is known to HACS:
+Or use this shortcut:
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MrTomRocker&repository=homeassistant-necromancer&category=integration)
 
