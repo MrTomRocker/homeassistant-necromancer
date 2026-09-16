@@ -178,7 +178,7 @@
             "on_value": "e.g. `on`, `home`, `online`. Any value other than this or the faulty value counts as `unknown` and triggers nothing.",
             "off_value": "e.g. `off`, `unavailable`.",
             "template": "Return `true`, `on`, `1` or `yes` for OK; `false`, `off`, `0` or `no` for faulty — e.g. a comparison like CPU below 90, or `is_state(...)`. Anything else (`unavailable`, `unknown`, `none`, a blank result, or a render error) counts as `unknown` and triggers nothing (no false alarm). Re-checked when referenced entities change. Point it at the monitored device — not at this guard's own status/health entities, or you create a feedback loop.",
-            "device_id": "Optional. Adds this Necromancer guard's status entities to the chosen Home Assistant device, so they appear on its device page."
+            "device_id": "Optional. Links this Guard's own device to the chosen Home Assistant device, so the Guard is listed as connected via it. It also unlocks reloading that device's integration after a recovery."
           }
         },
         "strategy": {

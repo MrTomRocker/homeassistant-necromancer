@@ -178,7 +178,7 @@
             "on_value": "z. B. `on`, `home`, `online`. Andere Werte als dieser oder der „gestört“-Wert gelten als unbekannt und lösen nichts aus.",
             "off_value": "z. B. `off`, `unavailable`.",
             "template": "Gib `true`, `on`, `1` oder `yes` für „in Ordnung“ zurück; `false`, `off`, `0` oder `no` für „gestört“ – z. B. ein Vergleich wie „CPU < 90“ oder `is_state(...)`. Alles andere (`unavailable`, `unknown`, `none`, ein leeres Ergebnis oder ein Render-Fehler) gilt als `unknown` und löst nichts aus (kein Fehlalarm). Wird neu ausgewertet, sobald sich referenzierte Entitäten ändern. Richte es auf das überwachte Gerät – nicht auf die eigenen Status-/Health-Entitäten dieses Guards, sonst entsteht eine Rückkopplungsschleife.",
-            "device_id": "Optional. Hängt die Status-Entitäten dieses Guards an das gewählte Home-Assistant-Gerät, sodass sie auf dessen Geräteseite erscheinen."
+            "device_id": "Optional. Verknüpft das eigene Gerät dieses Guards mit dem gewählten Home-Assistant-Gerät, sodass der Guard dort als „verbunden über\" auftaucht. Schaltet außerdem frei, die Integration dieses Geräts nach einer Reparatur neu zu laden."
           }
         },
         "strategy": {
