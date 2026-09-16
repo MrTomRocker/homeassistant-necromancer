@@ -152,7 +152,9 @@ Or use this shortcut:
 
 </details>
 
-**Requires** Home Assistant **2025.7** or newer.
+**Requires** Home Assistant **2026.8** or newer — that release reworked the device registry
+(one device per config entry, `via_device_id` in `DeviceInfo`), which is what Necromancer builds
+its guard devices on.
 
 ## Getting started
 
@@ -326,8 +328,10 @@ A few consequences worth knowing:
 
 ## What you get per guarded device
 
-Pure-view entities (on their own device, or attached to the device you assign the guard to) —
-recover guards get all five, notify-only guards just the status sensor + health:
+Every guard gets its own device, named after the guard. Assign a device to the guard and that
+device becomes its *via device*, so Home Assistant nests the guard under the hardware it watches
+— without Necromancer ever claiming ownership of a device that belongs to another integration.
+Recover guards get all five entities, notify-only guards just the status sensor + health:
 
 | Entity | Purpose |
 |---|---|
@@ -344,8 +348,9 @@ recover guards get all five, notify-only guards just the status sensor + health:
 **Misconfigured? Check Repairs.** A guard or PoE port that can't do its job because of a *config*
 problem is surfaced in **Settings → Repairs** with the specific guard/port and how to fix it: a
 health entity that's missing or disabled (a *blind* guard), a health template that reads only gone
-entities, a recovery that references a missing service, or a PoE port with no device id or a missing
-actuator. Each clears itself once you correct the config (saving reloads the guard). Repairs flag
+entities, a recovery that references a missing service, an assigned device that no longer exists, or
+a PoE port with no device id or a missing actuator. Each clears itself once you correct the config
+(saving reloads the guard). Repairs flag
 config you can fix — a device that's simply *unreachable* isn't flagged here; the guard escalates
 for that.
 

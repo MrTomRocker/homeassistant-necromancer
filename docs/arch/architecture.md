@@ -457,13 +457,22 @@ is no separate "mode" field — the notify-vs-recover choice *is* the strategy c
 
 ## 9. Entities & platforms
 
-Per recover guard, five pure-view entities (one device per guard, or attached to a
-linked device): `sensor.*_status`, `binary_sensor.*_health`, `switch.*_auto_recovery`
+Per recover guard, five pure-view entities on **one device per guard**:
+`sensor.*_status`, `binary_sensor.*_health`, `switch.*_auto_recovery`
 (`entity_category: config`), `button.*_revive`, and `event.*_recovery` (event types
 `recovered` / `escalated` / `blocked`, fired from `_recover_success` / `_escalate` via
 the engine's `add_event_listener` hook). Notify-only guards omit the switch, button and
-event. Linking to an existing device uses the Battery-Notes pattern (`device_info=None` +
-`entity.device_entry`) so Necromancer never claims ownership of a foreign device.
+event.
+
+The guard's device is keyed by its subentry (`identifiers={(DOMAIN, subentry_id)}`) and
+named after the guard, whether or not a device is assigned. An assigned device that
+resolves is passed as `via_device_id`, which nests the guard under it without claiming
+ownership — since **HA 2026.8** a device belongs to exactly one config entry, so
+identifiers no longer merge across integrations and mirroring a target's identity would
+build a second, competing device. An assigned id that no longer resolves is deliberately
+*not* passed (a dangling `via_device_id` aborts the entity); it surfaces as a
+`link_device_missing` repair instead. `_reconcile_devices` drops any device of ours that
+no longer belongs to a live guard.
 
 The status sensor's attributes are intentionally lean — `attempt`, `recover_count`,
 `last_recover`, `fail_count`, `last_fail`, `recover_driver` (the resolved target),

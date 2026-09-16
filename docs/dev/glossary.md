@@ -41,11 +41,13 @@ word in the config flow and on the status sensor.
 | on-value meaning | OK | „in Ordnung" |
 | off-value meaning | faulty | „gestört" |
 
-Three `device` senses stay distinct: the **monitored device** (what a Guard watches — use
+Four `device` senses stay distinct: the **monitored device** (what a Guard watches — use
 this phrase, not bare „device"), the **assigned device** (`device_id`, the optional registry
-link), and a **PoE-port device**. The **Guard** is the proper-noun actor. When no device is
-assigned, the auto-created device is `manufacturer="Necromancer"`,
-`model="Necromancer guard monitored device"` (set in `entity.py`, not translated).
+link), the **guard device** (the one Necromancer creates per Guard), and a **PoE-port
+device**. The **Guard** is the proper-noun actor. Every Guard has a guard device, named
+after it, with `manufacturer="Necromancer"` and
+`model="Necromancer guard monitored device"` (set in `entity.py`, not translated); an
+assigned device that resolves becomes its *via device* / „verbunden über".
 
 ## 3. Localized display names (status / entities / services)
 

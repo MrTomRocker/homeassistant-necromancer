@@ -57,7 +57,7 @@ one of them:
 
 Fast, deterministic. Three runnable in-process modules cover this level today (run
 them with the dev venv, see §5): **`tests/test_units.py`** (33), **`tests/test_poe.py`**
-(20), **`tests/test_engine.py`** (47). On top sits a **pytest suite on HA's native test
+(22), **`tests/test_engine.py`** (50). On top sits a **pytest suite on HA's native test
 harness** (`tests/suite/`, run via `pytest tests/components/necromancer/`) that automates
 Level 2 in-process — see §3. Each row maps to an invariant:
 
@@ -143,8 +143,14 @@ exploratory and true end-to-end live checks. Drive the real flows and the engine
   raises) and `wait_for_health` (waits up to a timeout / the boot window for OK,
   `check_first` short-circuits when already healthy, reports `timed_out` + `waited_s`,
   uses its own waiter not the verify event) — both keyed by the guard's status entity.
+- **Device footprint** *(`tests/suite/test_init.py`)*: a guard owns exactly one device,
+  keyed by its subentry and named after the guard; an assigned device becomes its
+  `via_device_id` and keeps its own name and owner (we never adopt it); two guards on the
+  same target stay distinct devices; an assigned id that no longer resolves leaves the
+  guard fully working with `via_device_id=None` and raises `link_device_missing`.
 - **Repairs (config-health)**: each problem type (blind guard, blind template, invalid
-  action, port no-id, port entity missing) raises an issue in the registry with the right
+  action, dead assigned device, port no-id, port entity missing) raises an issue in the
+  registry with the right
   severity; assert the issue *appears* when the cause is introduced and *clears* when the
   entity reappears or the guard/port is removed — reconciled on the state-change listener
   (event-driven), not on a poll.
