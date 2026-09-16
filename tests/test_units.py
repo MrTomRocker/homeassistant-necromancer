@@ -13,6 +13,11 @@ from __future__ import annotations
 import asyncio
 import sys
 
+# Must precede the voluptuous import: importing `homeassistant` runs
+# `install_as_voluptuous()`, which swaps the voluptuous module for probatio's shim.
+# Import voluptuous first and `vol.Invalid` stays the real voluptuous one, which HA's
+# validators no longer raise — an `except vol.Invalid` here would then miss.
+import homeassistant  # noqa: F401
 import voluptuous as vol
 
 from tests.common import async_mock_service, async_test_home_assistant
