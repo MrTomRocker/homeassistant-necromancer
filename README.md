@@ -114,7 +114,7 @@ plug, a PoE camera or a cloud bridge — all guarded with the *same* model (heal
 
 - 🎛️ **Full operator surface** — per-guard status & health entities (with recover & fail counts and the recovery driver's own last result), a revive button, an arm/disarm switch, and recovery `event`s for dashboards and automations.
 - 🖥️ **Ready-made dashboard** — a generic, copy-paste fleet overview (status banner, live-incident list, and a per-guard pop-up with one-tap revive/snooze) that auto-discovers every guard via `guard_name` and is fully responsive — see **[docs/dashboard](docs/dashboard/)**.
-- 🩹 **Self-diagnosing config** — a guard pointed at a missing or disabled health entity, a health template that reads only missing entities (or silently defaults one), a broken recovery action, or a PoE port with no id or a missing actuator surfaces in **Settings → Repairs** — event-driven and self-clearing.
+- 🩹 **Self-diagnosing config** — a guard pointed at a missing or disabled health entity, a health template that reads only missing entities (or silently defaults one), a broken recovery action, an assigned device that no longer exists, or a PoE port with no id or a missing actuator surfaces in **Settings → Repairs** — event-driven and self-clearing.
 - 🤖 **Actions for your automations** — `necromancer.snooze` / `snooze_all` / `reset` / `repair_poe_port` / `notify_guard` / `check_health` / `wait_for_health`, callable from any automation or script (snooze everything before a mass reboot, cycle a PoE port on demand, or let a recovery script re-use a guard's Health Check).
 - 😴 **Maintenance mode** — `snooze` one guard or `snooze_all` before planned work; they go quiet and auto-resume.
 - 🧰 **Wizard-built & reconfigurable** — create and edit guards entirely in the UI; no YAML to hand-write.
@@ -328,10 +328,11 @@ A few consequences worth knowing:
 
 ## What you get per guarded device
 
-Every guard gets its own device, named after the guard. Assign a device to the guard and that
-device becomes its *via device*, so Home Assistant nests the guard under the hardware it watches
-— without Necromancer ever claiming ownership of a device that belongs to another integration.
-Recover guards get all five entities, notify-only guards just the status sensor + health:
+Every guard gets its own device, named after the guard. Assign a device to the guard and Home
+Assistant nests the guard under it — the guard's device page then shows *Connected via* that
+hardware — without Necromancer ever claiming ownership of a device that belongs to another
+integration. Recover guards get all five entities, notify-only guards just the status sensor
++ health:
 
 | Entity | Purpose |
 |---|---|
