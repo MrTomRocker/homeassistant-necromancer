@@ -659,6 +659,10 @@
       "title": "{name}: Reparatur kann nicht laufen",
       "description": "Die Reparatur von „{name}\" kann nicht laufen: {error}. Korrigiere die Reparatur des Guards — ein gültiger Service / eine gültige Aktion, oder (bei Auto-PoE) mindestens ein konfigurierter Port."
     },
+    "link_device_missing": {
+      "title": "{name}: zugewiesenes Gerät ist weg",
+      "description": "Das Gerät, das „{name}\" zugewiesen ist, existiert nicht mehr. Der Guard überwacht und repariert weiterhin, kann nach einer Reparatur aber die Integration des Geräts nicht neu laden. Konfiguriere den Guard neu und wähle das Gerät erneut, oder entferne die Zuweisung."
+    },
     "port_no_id": {
       "title": "PoE-Port „{label}\" hat keine Geräte-ID",
       "description": "Der PoE-Port „{label}\" hat weder ein Statisches Label noch eine id-Entity — er kann keinem Gerät zugeordnet werden, jeder Guard, der ihn erwartet, bleibt blockiert. Öffne die Integrations-Optionen, bearbeite Port „{label}\" und setze entweder ein Statisches Label oder eine id-Entity (ein State oder ein Attribut)."

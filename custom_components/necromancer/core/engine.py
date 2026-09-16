@@ -279,7 +279,8 @@ class DeviceEngine:
 
         Surfaces the same things `_check_config` logs, as structured records the
         issue reconciler turns into Repairs: a missing/disabled health entity, a
-        blind template (reads only gone entities), or an invalid recovery action.
+        blind template (reads only gone entities), an invalid recovery action, or
+        an assigned device that is gone.
         """
         ent_reg = er.async_get(self.hass)
 
@@ -319,6 +320,15 @@ class DeviceEngine:
                 )
         if errors := self.driver.config_errors():
             problems.append(self._problem("recovery_action_invalid", error=errors[0]))
+        # An assigned device whose id no longer resolves: the guard still detects and
+        # recovers, it just can't reload the device's integration afterwards. HA 2026.8
+        # re-issued device ids when it split devices shared between integrations, which
+        # leaves exactly this dangling id behind.
+        if (
+            self.link_device_id
+            and dr.async_get(self.hass).async_get(self.link_device_id) is None
+        ):
+            problems.append(self._problem("link_device_missing"))
         return problems
 
     def _problem(self, key: str, **extra: str) -> dict:
@@ -856,23 +866,19 @@ class DeviceEngine:
                 self.link_device_id,
             )
             return
-        entry_ids = (
-            [device.primary_config_entry]
-            if device.primary_config_entry
-            else list(device.config_entries)
+        # Since HA 2026.8 a device belongs to exactly one config entry.
+        entry_id = device.config_entry_id
+        LOGGER.info(
+            "%s: reloading the assigned device's integration (entry %s)",
+            self.name,
+            entry_id,
         )
-        for entry_id in entry_ids:
-            LOGGER.info(
-                "%s: reloading the assigned device's integration (entry %s)",
-                self.name,
-                entry_id,
+        try:
+            await self.hass.config_entries.async_reload(entry_id)
+        except Exception:
+            LOGGER.exception(
+                "%s: failed to reload config entry %s", self.name, entry_id
             )
-            try:
-                await self.hass.config_entries.async_reload(entry_id)
-            except Exception:
-                LOGGER.exception(
-                    "%s: failed to reload config entry %s", self.name, entry_id
-                )
 
     async def _wait_health_ok(self, timeout: int) -> bool:
         """Wait up to `timeout`s for health to read OK during VERIFY.

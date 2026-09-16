@@ -448,12 +448,6 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             LOGGER.debug("Creating guard subentry for %s", data[CONF_NAME])
             return self.async_create_entry(title=data[CONF_NAME], data=data)
         subentry = self._get_reconfigure_subentry()
-        # On unlink (had a device, now none): flag it so setup resets the device's
-        # display name to the guard name after the reload. A plain rename must not.
-        if subentry.data.get(CONF_DEVICE_ID) and not data.get(CONF_DEVICE_ID):
-            self.hass.data.setdefault(DOMAIN, {}).setdefault("name_reset", set()).add(
-                subentry.subentry_id
-            )
         self._apply_link_removals(subentry, data)
         LOGGER.debug("Reconfiguring guard subentry for %s", data[CONF_NAME])
         return self.async_update_and_abort(

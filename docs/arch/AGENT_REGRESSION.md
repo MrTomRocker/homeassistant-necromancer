@@ -956,25 +956,25 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
 > weil die Dev-Config `custom_components.necromancer: debug` setzt (verifiziert in
 > `config/configuration.yaml`). Bei abweichender Log-Stufe sind die Marker nicht sichtbar.
 
-- [ ] **DLN1 — Verknüpfen hängt 4 Entities ans Zielgerät** · `P0`
-  - **Prüft:** Ein Guard mit zugewiesenem Gerät (`device_id`) erzeugt KEIN eigenes Standalone-Gerät, sondern hängt seine 4 Entities unter dem Subentry an das gewählte Zielgerät; dessen Name bleibt unangetastet.
-  - **Files:** `__init__.py` → `_reconcile_devices` (`standalone`/`linked_targets`-Split, stale-device-Remove `"Removing stale guard device %s"`); `config_flow_helpers/schemas.py` → `_device_schema` (flaches Feld `CONF_DEVICE_ID="device_id"` als `DeviceSelector()`, KEINE Section `assigned_device` mehr).
-  - **Treiber:** Ziel-Device-id (`<tgt>`) aus `N.ws([{"type":"config/device_registry/list"}])` (irgendein Nicht-Necromancer-Gerät) holen. `N.create_guard` setzt kein Gerät → ein verlinkter Guard ist NICHT direkt über `create_guard` baubar; stattdessen Subentry-Flow manuell treiben: `N._post_flow(fid,{"source_type":"state_based"})` → Device-Step FLACH mit `{"name":"LinkTgtX","device_id":<tgt>,"entity_id":...,"on_value":[...],"off_value":[...]}` posten (kein `mode`-Feld, `device_id` top-level) → `N._post_flow(fid,{"strategy":"action_check"})` → Recover-Step **inkl. `"reload":{}`** posten (bei zugewiesenem Gerät ist die Reload-Section pflicht: `{"action":[...],"behavior":{...},"notification":{},"linked_guards":{},"reload":{}}`). Nach Reload (`POST .../entry/<hub>/reload`) Entity-Registry via WS lesen, nach `config_subentry_id==<sid>` filtern.
-  - **Assert:** Zielgerät-Name unverändert; ≥4 Entities mit `config_subentry_id==<sid>`, **alle** mit `device_id==<tgt>`; eine davon ist der Status-Sensor (`*_status`). **Hinweis:** Bei Geräte-Link übernehmen die View-Entities den **Zielgeräte-Namen** (z. B. `sensor.<zielgerät>_status`), NICHT den Guard-Namen — also nicht auf `sensor.linktgtx_status` prüfen, sondern über `config_subentry_id` filtern. KEIN zusätzliches Device mit identifier `(necromancer,<sid>)` im Registry; bei vorher existierendem Standalone erscheint `"Removing stale guard device"` in `N.log()`.
+- [ ] **DLN1 — Verknüpfen nistet das Guard-Gerät unter dem Zielgerät ein** · `P0`
+  - **Prüft:** Ein Guard mit zugewiesenem Gerät (`device_id`) besitzt ein EIGENES Gerät `(necromancer,<sid>)` mit dem Guard-Namen, das per `via_device_id` unter dem Zielgerät hängt. Das Zielgerät bleibt unangetastet — Name, Besitzer und Identifier gehören weiter seiner Integration. (Seit HA 2026.8 gehört ein Gerät zu genau einem Config Entry; Identifier-Spiegelung würde ein zweites, konkurrierendes Gerät bauen.)
+  - **Files:** `entity.py` → `NecromancerEntity.__init__` (`DeviceInfo(identifiers={(DOMAIN, subentry_id)}, …, via_device_id=linked.id)`); `__init__.py` → `_reconcile_devices` (entfernt nur noch Geräte ohne lebenden Guard, `"Removing stale guard device %s"`); `config_flow_helpers/schemas.py` → `_device_schema` (flaches Feld `CONF_DEVICE_ID="device_id"` als `DeviceSelector()`, KEINE Section `assigned_device` mehr).
+  - **Treiber:** Ziel-Device-id (`<tgt>`) aus `N.ws([{"type":"config/device_registry/list"}])` (irgendein Nicht-Necromancer-Gerät) holen. `N.create_guard` setzt kein Gerät → ein verlinkter Guard ist NICHT direkt über `create_guard` baubar; stattdessen Subentry-Flow manuell treiben: `N._post_flow(fid,{"source_type":"state_based"})` → Device-Step FLACH mit `{"name":"LinkTgtX","device_id":<tgt>,"entity_id":...,"on_value":[...],"off_value":[...]}` posten (kein `mode`-Feld, `device_id` top-level) → `N._post_flow(fid,{"strategy":"action_check"})` → Recover-Step **inkl. `"reload":{}`** posten (bei zugewiesenem Gerät ist die Reload-Section pflicht: `{"action":[...],"behavior":{...},"notification":{},"linked_guards":{},"reload":{}}`). Nach Reload (`POST .../entry/<hub>/reload`) Device- und Entity-Registry via WS lesen.
+  - **Assert:** Zielgerät unverändert (Name, `config_entry_id` weiterhin die Fremdintegration). Ein Gerät mit identifier `(necromancer,<sid>)`, `name=="LinkTgtX"`, `via_device_id==<tgt>`. ≥4 Entities mit `config_subentry_id==<sid>`, **alle** mit `device_id==<dieses Guard-Gerät>` (NICHT `<tgt>`), darunter der Status-Sensor `sensor.linktgtx_status` — der Entity-Name folgt jetzt dem Guard, nicht dem Zielgerät.
   - **Cleanup:** `N.delete_subentry(eid, sid)`
 
-- [ ] **DLN2 — Auflösen setzt Device-Namen auf Guard-Namen (kein name_by_user-Override)** · `P0`
-  - **Prüft:** Reconfigure von „Gerät zugewiesen" → „kein Gerät" flaggt `name_reset`; nach Reload trägt das wiederhergestellte Standalone-Device den Guard-Namen, `name_by_user=None`.
-  - **Files:** `config_flow.py` → `_finish` (`name_reset`-Set nur auf der Unlink-Transition); `__init__.py` → `_reconcile_devices` (`dev_reg.async_update_device(..., name=engine.name, name_by_user=None)`).
-  - **Treiber:** Guard mit zugewiesenem Gerät anlegen (s. DLN1), dann Reconfigure-Flow ohne Gerät (`device_id` leer) durchlaufen. `N.wait(3)`; `N.log()`.
-  - **Assert:** `N.log()` enthält `"Resetting device name to <name> after unlink"` (DEBUG, exakt: `"Resetting device name to %s after unlink"`); im `device_registry/list` hat das `(necromancer,<sid>)`-Device `name_by_user==None` und `name==<guard-name>`.
+- [ ] **DLN2 — Auflösen entfernt nur die via-Verknüpfung** · `P0`
+  - **Prüft:** Reconfigure von „Gerät zugewiesen" → „kein Gerät" lässt Gerät und Entities bestehen und setzt lediglich `via_device_id` auf `None`. Kein Geräte-Neuaufbau, keine Namensakrobatik — das Guard-Gerät gehörte immer uns.
+  - **Files:** `entity.py` → `NecromancerEntity.__init__` (`via_device_id` nur bei auflösbarem `linked`).
+  - **Treiber:** Guard mit zugewiesenem Gerät anlegen (s. DLN1), `device.id` merken, dann Reconfigure-Flow ohne Gerät (`device_id` leer) durchlaufen. `N.wait(3)`; `device_registry/list` + `entity_registry/list`.
+  - **Assert:** Dasselbe Gerät `(necromancer,<sid>)` mit **unveränderter `id`**, jetzt `via_device_id==None`, `name` weiterhin der Guard-Name; die 4–5 Entities hängen unverändert daran (gleiche `entity_id`s).
   - **Cleanup:** `N.delete_subentry(eid, sid)`
 
-- [ ] **DLN3 — Guard-Rename ändert Device-Namen NICHT (kein falsches name_reset)** · `P0`
-  - **Prüft:** Reine Umbenennung (Device blieb unverändert zugewiesen/standalone) löst KEIN `name_reset` aus — `_finish` flaggt nur, wenn vorher device_id gesetzt war und jetzt leer.
-  - **Files:** `config_flow.py` → `_finish` (`if subentry.data.get(CONF_DEVICE_ID) and not data.get(CONF_DEVICE_ID)`).
-  - **Treiber:** Standalone-Guard `eid,sid=N.create_guard({...,"name":"RenA",...})`. Reconfigure-Flow (Init: `POST .../subentries/flow` mit `{"handler":[hub,"device"],"subentry_id":sid}` → `step_id=="reconfigure"`) komplett re-driven, im Device-Step nur neuer Name `"RenB"`. `N.wait(3)`; `N.log()` + `device_registry/list`.
-  - **Assert:** Log enthält NICHT `"Resetting device name to"` für diesen Guard; das Standalone-Device `(necromancer,<sid>)` heißt jetzt `name=="RenB"` (Geräte-Name folgt dem Guard-Namen), `name_by_user==None`. **Hinweis:** Die `entity_id` bleibt sticky (`sensor.rena_status`) — HA benennt entity_ids beim Geräte-Rename NICHT um; daher NICHT auf `sensor.renb_status` prüfen, sondern den Device-Namen bzw. die Existenz eines `*_status`-Sensors unter `config_subentry_id==<sid>`.
+- [ ] **DLN3 — Guard-Rename zieht den Device-Namen nach** · `P0`
+  - **Prüft:** Eine reine Umbenennung ändert den Geräte-Namen mit, ohne ein neues Gerät zu bauen oder eine Nutzer-Umbenennung (`name_by_user`) zu überschreiben.
+  - **Files:** `entity.py` → `NecromancerEntity.__init__` (`name=engine.name` im `DeviceInfo`).
+  - **Treiber:** Standalone-Guard `eid,sid=N.create_guard({...,"name":"RenA",...})`. Reconfigure-Flow (Init: `POST .../subentries/flow` mit `{"handler":[hub,"device"],"subentry_id":sid}` → `step_id=="reconfigure"`) komplett re-driven, im Device-Step nur neuer Name `"RenB"`. `N.wait(3)`; `device_registry/list`.
+  - **Assert:** Das Gerät `(necromancer,<sid>)` heißt jetzt `name=="RenB"` bei unveränderter `id`. **Hinweis:** Die `entity_id` bleibt sticky (`sensor.rena_status`) — HA benennt entity_ids beim Geräte-Rename NICHT um; daher NICHT auf `sensor.renb_status` prüfen, sondern den Device-Namen bzw. die Existenz eines `*_status`-Sensors unter `config_subentry_id==<sid>`.
   - **Cleanup:** `N.delete_subentry(eid, sid)`
 
 - [ ] **DLN4 — Self-/Cross-Link blockiert (`no_self_link`)** · `P0`
@@ -986,9 +986,16 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
 
 - [ ] **DLN5 — device.id stabil über Link→Unlink→Rename** · `P1`
   - **Prüft:** Die Subentry-/Device-Identität `(necromancer,<sid>)` bleibt dieselbe über Link, Unlink und Rename hinweg (kein neues Device-Objekt).
-  - **Files:** `__init__.py` → `_reconcile_devices` (identifier `(DOMAIN, subentry_id)` bleibt Schlüssel; Device wird per `dev_reg.async_get_device(identifiers={(DOMAIN, subentry_id)})` gefunden).
-  - **Treiber:** Standalone-Guard anlegen → `<sid>` merken. Reconfigure mit zugewiesenem Gerät → reload. Reconfigure ohne → reload. Reconfigure Rename → reload. Jeweils `device_registry/list` nach `(necromancer,<sid>)` filtern.
-  - **Assert:** `<sid>` (Subentry-id) identisch über alle Schritte; das Standalone-Device nach dem finalen Unlink trägt wieder denselben identifier `(necromancer,<sid>)`.
+  - **Files:** `entity.py` → `NecromancerEntity.__init__` (identifier `(DOMAIN, subentry_id)` bleibt Schlüssel, egal ob verknüpft); Lookup per `dev_reg.async_get_device_by_identifier((DOMAIN, subentry_id), entry_id)`.
+  - **Treiber:** Standalone-Guard anlegen → `<sid>` und `device.id` merken. Reconfigure mit zugewiesenem Gerät → reload. Reconfigure ohne → reload. Reconfigure Rename → reload. Jeweils `device_registry/list` nach `(necromancer,<sid>)` filtern.
+  - **Assert:** `<sid>` UND `device.id` identisch über alle Schritte — nur `via_device_id` und `name` ändern sich. (Vor HA 2026.8 wurde das Gerät beim Verknüpfen gelöscht und neu gebaut; das ist jetzt nicht mehr so.)
+  - **Cleanup:** `N.delete_subentry(eid, sid)`
+
+- [ ] **DLN6 — Totes Zielgerät meldet sich als Reparatur** · `P0`
+  - **Prüft:** Zeigt `device_id` auf ein Gerät, das es nicht mehr gibt, läuft der Guard normal weiter (eigenes Gerät, alle Entities, `via_device_id==None`) und meldet `link_device_missing` in Reparaturen. Genau dieser Fall entstand massenhaft, als HA 2026.8 die zwischen Integrationen geteilten Geräte aufgetrennt und dabei neue Device-ids vergeben hat.
+  - **Files:** `core/engine.py` → `config_problems` (`link_device_missing`); `__init__.py` → `_ISSUE_SEVERITY` (WARNING); `translations/{en,de}.json` → `issues.link_device_missing`.
+  - **Treiber:** Guard mit zugewiesenem Gerät anlegen (s. DLN1), dann das Zielgerät löschen (`config/device_registry/remove_config_entry` bzw. dessen Integration entfernen) → `POST .../entry/<hub>/reload`. `N.ws([{"type":"repairs/list_issues"}])`.
+  - **Assert:** Issue `necromancer`/`<sid>_link_device_missing` vorhanden, `severity=="warning"`; Guard-Gerät `(necromancer,<sid>)` existiert weiter mit `via_device_id==None`; Status-Sensor liefert weiter einen State (kein `unavailable`).
   - **Cleanup:** `N.delete_subentry(eid, sid)`
 
 ### P1 — State-Machine

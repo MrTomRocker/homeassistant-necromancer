@@ -13,9 +13,15 @@ import pytest
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+    issue_registry as ir,
+)
 
-from .conftest import SetupGuards, entity_id_for, make_guard
+from .conftest import DOMAIN, SetupGuards, entity_id_for, make_guard
+
+from tests.common import MockConfigEntry
 
 
 async def test_setup_builds_one_engine_per_guard(
@@ -95,13 +101,100 @@ async def test_standalone_recover_guard_creates_device(
     """A standalone recover guard registers a Necromancer device."""
     hass.states.async_set("binary_sensor.guard_health", "on")
     hass.states.async_set("switch.guard_target", "on")
-    await setup_guards(make_guard("Phoenix"))
+    entry = await setup_guards(make_guard("Phoenix"))
 
     dev_reg = dr.async_get(hass)
-    device = dev_reg.async_get_device(identifiers={("necromancer", "guard0")})
+    device = dev_reg.async_get_device_by_identifier(
+        ("necromancer", "guard0"), entry.entry_id
+    )
     assert device is not None
     assert device.name == "Phoenix"
     assert device.manufacturer == "Necromancer"
+    assert device.via_device_id is None
+
+
+async def test_linked_guard_uses_target_as_via_device(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """A linked guard owns its own device, nested under the assigned one."""
+    dev_reg = dr.async_get(hass)
+    foreign = MockConfigEntry(domain="demo", title="Demo")
+    foreign.add_to_hass(hass)
+    target = dev_reg.async_get_or_create(
+        config_entry_id=foreign.entry_id,
+        identifiers={("demo", "plug-1")},
+        name="Shelly Plug X",
+    )
+
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    entry = await setup_guards(make_guard("Phoenix", device_id=target.id))
+
+    device = dev_reg.async_get_device_by_identifier(
+        ("necromancer", "guard0"), entry.entry_id
+    )
+    assert device is not None
+    assert device.name == "Phoenix"
+    assert device.via_device_id == target.id
+    # The target keeps its own identity and owner - we never adopt it.
+    assert dev_reg.async_get(target.id).config_entry_id == foreign.entry_id
+
+    status = entity_id_for(hass, "guard0", "sensor", "status")
+    assert er.async_get(hass).async_get(status).device_id == device.id
+
+
+async def test_two_linked_guards_stay_distinct(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """Two guards on one target device keep their own name and entities."""
+    dev_reg = dr.async_get(hass)
+    foreign = MockConfigEntry(domain="demo", title="Demo")
+    foreign.add_to_hass(hass)
+    target = dev_reg.async_get_or_create(
+        config_entry_id=foreign.entry_id,
+        identifiers={("demo", "inverter")},
+        name="FoxEss Smart",
+    )
+
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    entry = await setup_guards(
+        make_guard("Null trotz Sonne", device_id=target.id),
+        make_guard("Ping", device_id=target.id),
+    )
+
+    first = dev_reg.async_get_device_by_identifier(
+        ("necromancer", "guard0"), entry.entry_id
+    )
+    second = dev_reg.async_get_device_by_identifier(
+        ("necromancer", "guard1"), entry.entry_id
+    )
+    assert first.id != second.id
+    assert first.name == "Null trotz Sonne"
+    assert second.name == "Ping"
+    assert first.via_device_id == second.via_device_id == target.id
+
+
+async def test_dangling_link_survives_and_raises_repair(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    """A link target that no longer exists costs the guard nothing but a repair."""
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    entry = await setup_guards(make_guard("Orphan", device_id="gone-for-good"))
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        ("necromancer", "guard0"), entry.entry_id
+    )
+    assert device is not None
+    assert device.via_device_id is None
+    assert entity_id_for(hass, "guard0", "sensor", "status") is not None
+
+    issue = issue_registry.async_get_issue(DOMAIN, "guard0_link_device_missing")
+    assert issue is not None
+    assert issue.translation_key == "link_device_missing"
 
 
 async def test_unload_sets_not_loaded(

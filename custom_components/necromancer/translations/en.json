@@ -659,6 +659,10 @@
       "title": "{name}: recovery can't run",
       "description": "The recovery of \"{name}\" can't run: {error}. Reconfigure the guard's recovery — a valid service/action, or (for Auto-PoE) at least one configured port."
     },
+    "link_device_missing": {
+      "title": "{name}: assigned device is gone",
+      "description": "The device assigned to \"{name}\" no longer exists. The guard still watches and recovers, but it can't reload the device's integration after a recovery. Reconfigure the guard and pick the device again, or remove the assignment."
+    },
     "port_no_id": {
       "title": "PoE port \"{label}\" has no device id",
       "description": "The PoE port \"{label}\" has neither a static label nor an id-entity, so it can never be matched to a device — any guard expecting it stays blocked. Open the integration's options, edit port \"{label}\", and set either a static label or an id-entity (a state or an attribute)."

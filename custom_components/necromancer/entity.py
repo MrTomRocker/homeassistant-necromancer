@@ -3,13 +3,11 @@
 One guarded device = one config subentry. Entities are linked to the subentry
 via `config_subentry_id` at add time.
 
-Device association:
-- standalone (default): we spawn our own device via `device_info`.
-- linked: if the subentry points at an existing HA device, our `device_info`
-  reuses that device's identifiers/connections, so entity_platform attaches our
-  entities (and our subentry) to it — the guarded device then shows up under our
-  subentry in the UI. `_reconcile_devices` in __init__ detaches us again on
-  unlink, so this stays clean.
+Device association: one device per guard, always ours, named after the guard. A
+subentry pointing at an existing HA device adds that device as our `via_device`,
+which nests the guard under it in the UI. Borrowing the target's identifiers
+instead would build a second, competing device: since HA 2026.8 a device belongs
+to a single config entry, so identifiers no longer merge across integrations.
 """
 
 from __future__ import annotations
@@ -35,20 +33,15 @@ class NecromancerEntity(Entity):
         self._attr_unique_id = f"{subentry_id}_{key}"
 
         linked = self._linked_device(engine)
-        if linked is not None:
-            # Reuse the target device's identity -> attach to it (and surface our
-            # subentry on it) without overwriting its name/model.
-            self._attr_device_info = DeviceInfo(
-                identifiers=linked.identifiers,
-                connections=linked.connections,
-            )
-        else:
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, subentry_id)},
-                name=engine.name,
-                manufacturer="Necromancer",
-                model="Necromancer guard monitored device",
-            )
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, subentry_id)},
+            name=engine.name,
+            manufacturer="Necromancer",
+            model="Necromancer guard monitored device",
+            # A link target that no longer resolves is reported via Repairs, not
+            # forced here — a dangling via_device_id would abort the entity.
+            **({"via_device_id": linked.id} if linked is not None else {}),
+        )
 
     @staticmethod
     def _linked_device(engine: DeviceEngine) -> dr.DeviceEntry | None:

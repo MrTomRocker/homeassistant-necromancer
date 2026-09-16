@@ -251,8 +251,8 @@ async def test_no_self_link_rejected(
     hass.states.async_set("switch.guard_target", "on")
     entry = await setup_guards(make_guard("Self"))
 
-    own_device = dr.async_get(hass).async_get_device(
-        identifiers={("necromancer", "guard0")}
+    own_device = dr.async_get(hass).async_get_device_by_identifier(
+        ("necromancer", "guard0"), entry.entry_id
     )
     assert own_device is not None
 

@@ -85,9 +85,8 @@ class NecromancerData:
     """Typed per-entry runtime state (``entry.runtime_data``).
 
     One engine per guarded-device subentry, plus the Store + its serializer so
-    unload can flush without a side `hass.data` registry. The PoE fabric and the
-    `name_reset` signal stay in `hass.data[DOMAIN]` on purpose: they outlive a
-    single entry's reload.
+    unload can flush without a side `hass.data` registry. The PoE fabric stays in
+    `hass.data[DOMAIN]` on purpose: it outlives a single entry's reload.
     """
 
     engines: dict[str, DeviceEngine]
@@ -172,6 +171,7 @@ _ISSUE_SEVERITY = {
     "health_template_blind": ir.IssueSeverity.ERROR,
     "health_template_missing_entity": ir.IssueSeverity.WARNING,
     "recovery_action_invalid": ir.IssueSeverity.ERROR,
+    "link_device_missing": ir.IssueSeverity.WARNING,
     "port_no_id": ir.IssueSeverity.WARNING,
     "port_entity_missing": ir.IssueSeverity.ERROR,
 }
@@ -464,43 +464,21 @@ def _reconcile_devices(
     entry: NecromancerConfigEntry,
     engines: dict[str, DeviceEngine],
 ) -> None:
-    """Clean up our device registry footprint.
+    """Drop devices of ours that no longer belong to a live guard.
 
-    - Remove our standalone "Necromancer guard monitored device" devices for subentries that are
-      now linked to an existing device or no longer exist.
-    - Detach us from any foreign device that is no longer a current link target
-      (i.e. a device a subentry was unlinked from).
+    Every guard owns exactly one device, identified by its subentry. Anything else
+    under our entry is a leftover: the device of a deleted guard, or one carrying a
+    foreign integration's identifiers from before HA 2026.8 tied a device to a
+    single config entry. Entities have already moved to their guard's device by the
+    time this runs (platforms are set up first), so removing those is safe.
     """
     dev_reg = dr.async_get(hass)
-    standalone = {sid for sid, engine in engines.items() if not engine.link_device_id}
-    linked_targets = {
-        engine.link_device_id for engine in engines.values() if engine.link_device_id
-    }
-
     for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
         ours = {ident for domain, ident in device.identifiers if domain == DOMAIN}
-        if ours:
-            if not ours & standalone:
-                LOGGER.debug("Removing stale guard device %s", device.name or device.id)
-                dev_reg.async_remove_device(device.id)
-        elif device.id not in linked_targets:
-            LOGGER.debug("Detaching from foreign device %s", device.name or device.id)
-            dev_reg.async_update_device(
-                device.id, remove_config_entry_id=entry.entry_id
-            )
-
-    # A just-unlinked guard: reset the device name to the guard name. HA restores
-    # the previously-deleted standalone device WITH its name_by_user, so we clear
-    # that override here (only on the unlink transition, never on a plain rename).
-    pending = hass.data.get(DOMAIN, {}).get("name_reset", set())
-    for subentry_id, engine in engines.items():
-        if subentry_id not in pending or engine.link_device_id:
+        if ours & set(engines):
             continue
-        device = dev_reg.async_get_device(identifiers={(DOMAIN, subentry_id)})
-        if device is not None:
-            LOGGER.debug("Resetting device name to %s after unlink", engine.name)
-            dev_reg.async_update_device(device.id, name=engine.name, name_by_user=None)
-        pending.discard(subentry_id)
+        LOGGER.debug("Removing stale guard device %s", device.name or device.id)
+        dev_reg.async_remove_device(device.id)
 
 
 # ---------- HA lifecycle: reload / remove / unload ----------
