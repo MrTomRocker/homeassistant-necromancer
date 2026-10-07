@@ -39,7 +39,10 @@ from homeassistant.helpers import (
     entity_registry as er,
     issue_registry as ir,
 )
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_track_device_registry_updated_event,
+    async_track_state_change_event,
+)
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 
@@ -125,6 +128,49 @@ def _build_engine(
         linked_guards=linked_guards,
         engines=engines,
     )
+
+
+def _guard_device_ids(hass: HomeAssistant, entry: NecromancerConfigEntry) -> list[str]:
+    """Device ids of our guards, for the enable/disable watch.
+
+    Read after the platforms ran, so a guard added at runtime is included too.
+    """
+    dev_reg = dr.async_get(hass)
+    return [
+        device.id
+        for subentry_id in entry.subentries
+        if (
+            device := dev_reg.async_get_device_by_identifier(
+                (DOMAIN, subentry_id), entry.entry_id
+            )
+        )
+        is not None
+    ]
+
+
+def _dormant_guards(hass: HomeAssistant, entry: NecromancerConfigEntry) -> set[str]:
+    """Subentry ids whose guard device is disabled in the device registry.
+
+    Disabling a guard's device is the only UI gesture for "this guard off", and HA
+    core stops at the entity registry: it disables our view-entities but neither
+    unloads the subentry nor tells us, so without this the engine keeps detecting,
+    recovering and notifying headlessly — with its auto switch gone, so the operator
+    cannot even stop it. A brand-new guard has no device yet (the platforms create it
+    from DeviceInfo, after this runs), and an absent device is not a disabled one.
+    """
+    dev_reg = dr.async_get(hass)
+    return {
+        subentry_id
+        for subentry_id, subentry in entry.subentries.items()
+        if subentry.subentry_type == SUBENTRY_TYPE_DEVICE
+        and (
+            device := dev_reg.async_get_device_by_identifier(
+                (DOMAIN, subentry_id), entry.entry_id
+            )
+        )
+        is not None
+        and device.disabled
+    }
 
 
 def _rename_handler(
@@ -218,6 +264,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
     stored = await store.async_load() or {}
     engines: dict[str, DeviceEngine] = {}
 
+    # A guard whose own device the user disabled is dormant: no engine is built, so
+    # it detects nothing, recovers nothing, notifies nothing and raises no Repairs.
+    # Resolved up here because _serialize below has to carry its stored state.
+    dormant = _dormant_guards(hass, entry)
+
     # PoE fabric: shared id->port resolver + per-port status/lock, driving the
     # necromancer.repair_poe_port service. A domain-level singleton so it survives
     # reloads (and the service handler keeps a stable reference).
@@ -228,6 +279,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
     @callback
     def _serialize() -> dict:
         data: dict = {sid: engine.snapshot() for sid, engine in engines.items()}
+        # A dormant guard has no engine to snapshot, so carry its stored state over
+        # verbatim — otherwise disabling a device would silently reset its counters
+        # and its ESCALATED verdict, handing it a clean slate when re-enabled.
+        for subentry_id in dormant:
+            if (persisted := stored.get(subentry_id)) is not None:
+                data[subentry_id] = persisted
         data["_poe_cache"] = fabric.cache
         return data
 
@@ -328,22 +385,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
     # links. Only **recover** guards can link (matching the config flow's options),
     # so notify-only guards are excluded from the closure — a guard reconfigured to
     # notify-only therefore drops out of every group instead of lingering inertly.
+    # Dormant guards drop out the same way: no leading, no following, no re-verify.
     def _is_recover(se) -> bool:
         return (
             se.subentry_type == SUBENTRY_TYPE_DEVICE
             and se.data.get(CONF_POLICY, {}).get(CONF_TYPE) != MODE_NOTIFY
         )
 
-    device_ids = {sid for sid, se in entry.subentries.items() if _is_recover(se)}
+    device_ids = {
+        sid
+        for sid, se in entry.subentries.items()
+        if _is_recover(se) and sid not in dormant
+    }
     declared_links = {
         sid: set(se.data.get(CONF_LINKED_GUARDS, []) or [])
         for sid, se in entry.subentries.items()
-        if _is_recover(se)
+        if _is_recover(se) and sid not in dormant
     }
     groups = link_components(declared_links, device_ids)
 
     for subentry_id, subentry in entry.subentries.items():
         if subentry.subentry_type != SUBENTRY_TYPE_DEVICE:
+            continue
+        if subentry_id in dormant:
+            LOGGER.info(
+                "Guard %r is dormant — its device is disabled, so it is not loaded",
+                subentry.data.get(CONF_NAME, subentry.title),
+            )
             continue
         cfg = dict(subentry.data)
         name = cfg.get(CONF_NAME, subentry.title)
@@ -390,7 +458,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
 
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    _reconcile_devices(hass, entry, engines)
+    _reconcile_devices(hass, entry, engines, dormant)
     _reconcile_entities(hass, entry, engines)
 
     # Status sensors resolve their sibling entity_ids from the registry, which is
@@ -430,6 +498,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
         entry.async_on_unload(
             async_track_state_change_event(hass, list(watched), _on_watched_change)
         )
+
+    # Enabling/disabling a guard's device must take effect now, not at the next
+    # restart. HA core only cascades the disable into the entity registry, so we
+    # watch our own devices and reload: setup then builds (or skips) their engines.
+    # Scheduled, not awaited — this is a registry callback, and reloading the entry
+    # it fires from would re-enter the very setup that registered this listener.
+    if guard_device_ids := _guard_device_ids(hass, entry):
+
+        @callback
+        def _on_guard_device_change(event: Event) -> None:
+            if event.data["action"] == "update" and "disabled_by" in event.data.get(
+                "changes", {}
+            ):
+                LOGGER.debug(
+                    "Guard device %s toggled — reloading", event.data["device_id"]
+                )
+                hass.config_entries.async_schedule_reload(entry.entry_id)
+
+        entry.async_on_unload(
+            async_track_device_registry_updated_event(
+                hass, guard_device_ids, _on_guard_device_change
+            )
+        )
     return True
 
 
@@ -463,6 +554,7 @@ def _reconcile_devices(
     hass: HomeAssistant,
     entry: NecromancerConfigEntry,
     engines: dict[str, DeviceEngine],
+    dormant: set[str],
 ) -> None:
     """Drop devices of ours that no longer belong to a live guard.
 
@@ -471,11 +563,17 @@ def _reconcile_devices(
     foreign integration's identifiers from before HA 2026.8 tied a device to a
     single config entry. Entities have already moved to their guard's device by the
     time this runs (platforms are set up first), so removing those is safe.
+
+    A dormant guard has no engine but must keep its device: the registry lists
+    disabled devices like any other, so removing it here would delete the very
+    device carrying the user's disable — and the next reload would recreate a fresh,
+    *enabled* one, turning the guard back on by itself.
     """
     dev_reg = dr.async_get(hass)
+    live = set(engines) | dormant
     for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
         ours = {ident for domain, ident in device.identifiers if domain == DOMAIN}
-        if ours & set(engines):
+        if ours & live:
             continue
         LOGGER.debug("Removing stale guard device %s", device.name or device.id)
         dev_reg.async_remove_device(device.id)
