@@ -3,17 +3,36 @@ name: Release Drafter
 on:
   push:
     branches: [main]
+  # `edited` too: the autolabeler matches on the PR title, so a retitle has to
+  # re-evaluate the labels.
   pull_request:
-    types: [opened, reopened, synchronize]
+    types: [opened, reopened, synchronize, edited]
 
 permissions:
   contents: read
 
 jobs:
+  # Labels drive both the changelog category and the semver increment, so they have
+  # to land on the PR before it is merged. This needs the separate `autolabeler`
+  # action: the drafter action cannot label, and on a `pull_request` event it is
+  # handed `refs/pull/<n>/merge`, an ephemeral merge commit, which forces it into
+  # dry-run mode — so running it here did nothing but log a warning.
+  autolabel:
+    name: Autolabel pull request
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: release-drafter/release-drafter/autolabeler@v7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   update_release_draft:
+    name: Update release draft
+    if: github.event_name == 'push'
     permissions:
       contents: write
-      pull-requests: write
     runs-on: ubuntu-latest
     steps:
       - uses: release-drafter/release-drafter@v7
