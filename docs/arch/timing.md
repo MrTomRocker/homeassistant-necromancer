@@ -297,6 +297,13 @@ clears the moment the cause is fixed or the guard/port is removed.
 - **Disabling an entity ≠ making it `unavailable`.** Registry-disable yields `unknown`;
   a template watching `unavailable` won't trigger. Simulate outages by cutting power or
   overriding state, not by disabling.
+- **Disabling the guard's own device stops the clocks entirely.** No engine is built, so
+  no debounce, boot_window, cooldown or snooze timer exists to elapse — the guard is
+  dormant, not paused. A snooze does **not** tick down while dormant. Re-enabling is the
+  same path as a restart: `_apply_persisted` restores the stats, `auto`, and a terminal
+  ESCALATED or a SNOOZED (whose remaining time is re-armed, or resumes at once if it
+  elapsed meanwhile); every transient state is re-derived by the first `_evaluate()` in
+  `async_start`.
 - **Notify action runs detached.** A user `delay` in the notify action never stalls the
   engine — but it also means a notify is not awaited; failures only show in the log.
 - **Cooldown is post-success, not a retry gap.** Retries are back-to-back (only the

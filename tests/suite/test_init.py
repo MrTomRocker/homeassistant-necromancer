@@ -257,3 +257,138 @@ async def test_blind_template_warning(
 
     assert "guard is blind" in caplog.text
     assert "binary_sensor.ghost_xyz" in caplog.text
+
+
+# ---------- dormant guards (device disabled by the user) ----------
+async def _disable_guard_device(
+    hass: HomeAssistant, entry_id: str, subentry_id: str
+) -> str:
+    """Disable a guard's own device as the UI would; return the device id."""
+    dev_reg = dr.async_get(hass)
+    device = dev_reg.async_get_device_by_identifier((DOMAIN, subentry_id), entry_id)
+    assert device is not None
+    dev_reg.async_update_device(device.id, disabled_by=dr.DeviceEntryDisabler.USER)
+    await hass.async_block_till_done()
+    return device.id
+
+
+async def test_dormant_guard_builds_no_engine(
+    hass: HomeAssistant, setup_guards: SetupGuards, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A guard whose device the user disabled is not loaded at all."""
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    entry = await setup_guards(make_guard("Dormant"), make_guard("Awake"))
+    await _disable_guard_device(hass, entry.entry_id, "guard0")
+
+    with caplog.at_level(logging.INFO):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert set(entry.runtime_data.engines) == {"guard1"}
+    assert "is dormant" in caplog.text
+
+
+async def test_dormant_guard_keeps_its_device(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """Reconciliation must not reap the device carrying the user's disable.
+
+    Removing it would drop the disable *and* let the next reload recreate a fresh,
+    enabled device — the guard would silently turn itself back on.
+    """
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    entry = await setup_guards(make_guard("Dormant"))
+    device_id = await _disable_guard_device(hass, entry.entry_id, "guard0")
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    device = dr.async_get(hass).async_get(device_id)
+    assert device is not None
+    assert device.disabled_by is dr.DeviceEntryDisabler.USER
+
+
+async def test_dormant_guard_raises_no_repairs(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    """Dormant means silent: a pre-existing repair is cleared, none are raised."""
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    entry = await setup_guards(make_guard("Orphan", device_id="gone-for-good"))
+    assert (
+        issue_registry.async_get_issue(DOMAIN, "guard0_link_device_missing") is not None
+    )
+
+    await _disable_guard_device(hass, entry.entry_id, "guard0")
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert issue_registry.async_get_issue(DOMAIN, "guard0_link_device_missing") is None
+
+
+async def test_dormant_guard_drops_out_of_link_group(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """A dormant guard neither leads nor follows a group repair."""
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    entry = await setup_guards(
+        make_guard("A", linked_guards=["guard1"]),
+        make_guard("B", linked_guards=["guard0"]),
+    )
+    assert entry.runtime_data.engines["guard1"].links._linked == ["guard0"]
+
+    await _disable_guard_device(hass, entry.entry_id, "guard0")
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.runtime_data.engines["guard1"].links._linked == []
+
+
+async def test_dormant_guard_keeps_its_persisted_state(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """Going dormant must not reset the guard's counters or its verdict."""
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    entry = await setup_guards(make_guard("Dormant"), make_guard("Awake"))
+    engine = entry.runtime_data.engines["guard0"]
+    engine.recover_count = 27
+    engine.fail_count = 21
+
+    await _disable_guard_device(hass, entry.entry_id, "guard0")
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    # Dormant now, so the serializer has no engine to snapshot — it must carry the
+    # stored blob over instead of dropping the key.
+    assert entry.runtime_data.serialize()["guard0"]["recover_count"] == 27
+
+    dev_reg = dr.async_get(hass)
+    device = dev_reg.async_get_device_by_identifier((DOMAIN, "guard0"), entry.entry_id)
+    dev_reg.async_update_device(device.id, disabled_by=None)
+    await hass.async_block_till_done()
+
+    revived = entry.runtime_data.engines["guard0"]
+    assert revived.recover_count == 27
+    assert revived.fail_count == 21
+
+
+async def test_toggling_guard_device_reloads_live(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """Disabling and re-enabling takes effect at once, with no restart."""
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    entry = await setup_guards(make_guard("Toggle"))
+    assert set(entry.runtime_data.engines) == {"guard0"}
+
+    device_id = await _disable_guard_device(hass, entry.entry_id, "guard0")
+    assert entry.runtime_data.engines == {}
+
+    dr.async_get(hass).async_update_device(device_id, disabled_by=None)
+    await hass.async_block_till_done()
+    assert set(entry.runtime_data.engines) == {"guard0"}

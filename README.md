@@ -326,6 +326,21 @@ A few consequences worth knowing:
 - The **manual recover button** forces a cycle right now, bypassing both the debounce and the
   auto-recovery switch. An active `snooze` is lifted too — an explicit press overrides it.
 
+### Turning a guard off — three levels
+
+| You want | Do this | Result |
+|---|---|---|
+| Quiet for planned work | `necromancer.snooze` (or `snooze_all`) | Health ignored, no alerts, **auto-resumes** when the time elapses. |
+| Never act, but still alarm | Turn off `switch.<guard>_auto_recovery` | Still detects and **escalates** — it just never touches anything. |
+| Gone entirely | **Disable the guard's device** (Settings → Devices) | Dormant: no detection, no recovery, no notification, no Repairs, and out of every link group. |
+
+Disabling the device is the full stop, and it is reversible — re-enable it and the guard comes
+back immediately, with its recovery counters and its last verdict intact. No restart needed in
+either direction. Deleting the guard instead removes its configuration for good.
+
+> Disabling individual *entities* of a guard is not a way to turn it off — that only hides the
+> view. Disable the **device** (which disables its entities as a side effect) or use `snooze`.
+
 ## What you get per guarded device
 
 Every guard gets its own device, named after the guard. Assign a device to the guard and Home
@@ -408,7 +423,8 @@ vs "the device is dead").
   fault — no false alarm).
 - `switch.<guard>_auto_recovery` — arm/disarm automatic recovery (a configuration entity).
   **Off ≠ snooze:** with auto off the guard still *detects and escalates* (alarms) but
-  won't act; `snooze` goes fully quiet.
+  won't act; `snooze` goes fully quiet. To stop a guard completely, disable its device
+  (see *Turning a guard off*).
 - `button.<guard>_revive` — force a recovery cycle right now, bypassing the debounce and
   the auto-off gate, and lifting an active `snooze`.
 
@@ -458,6 +474,8 @@ alone they'd both power-cycle the same port. Link them into a **group** instead 
   recover always notifies (`linked_repair_failed`).
 - A follower with **auto-recovery off** doesn't follow — if its device is affected it escalates,
   same as any auto-off guard. Off stays off.
+- A guard whose **device is disabled** is not in the group at all: it neither leads nor follows
+  nor re-verifies, and the remaining members form the group without it.
 
 Linking is **mutual and transitive**: link A to B, and if B already links to C the whole
 `{A, B, C}` becomes one group, shown in full on the next edit. To leave a group, clear *all* of its
