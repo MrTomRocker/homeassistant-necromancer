@@ -18,6 +18,9 @@ Diese Checkliste ist dafür gemacht, von einem **Agenten** ausgeführt zu werden
   resolve/cycle/coalescing/Platzhalter/Stale-Cache, Engine-State-Machine + Linking/Lifecycle +
   Persistenz-Kernpfade, Health-Registry-Events, PoE-Pre-Flight. Die `[ ]`-Punkte hier sind der
   Live-Smoke-Test obendrauf.
+- **pytest-Suite** (wie CI in ha-core eingehängt): `cd <ha-core> && python -m pytest tests/necromancer/ -q`
+  — **90 grün**. Deckt Setup/Lifecycle, alle vier Platform-Entities, Config-/Options-/Subentry-Flows,
+  Operator-Services und die Dormanz von Guards mit deaktiviertem Gerät ab (DLN7–DLN9).
 - **Test-Helfer-Entities** (Dev-Setup): `input_boolean.test_1..6`, `sim_poe_port`, `sim_device_power`,
   `input_select.test_state`, `input_text.test_note`, `switch.test_template_switch`,
   `binary_sensor.test_reachable`, `sensor.test_device_info`.
@@ -49,10 +52,12 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
 > `off_value` (state-based) bzw. `template` (template-based) sowie `device_id` liegen alle auf **Top-Level**
 > (Helper `_health_fields`, `_device_schema`). Es gibt **keine** Sections `state_check`/`template_check`/
 > `assigned_device` mehr (die Konstanten `SECTION_STATE`/`SECTION_TEMPLATE`/`SECTION_DEVICE` wurden entfernt).
-> Das Testkit (`create_guard`) postet aus Altgründen noch verschachtelt (`{"state_check":{...}}` etc.); der Flow
-> zieht das via `_flatten_sections` hoch, daher funktioniert es weiter — manuelle Treiber dürfen aber genauso gut
-> flach posten (`{"name":..., "entity_id":..., "on_value":[...], "off_value":[...]}` bzw.
-> `{"name":..., "template":"..."}`; `device_id` top-level).
+> Das Testkit (`create_guard`) postet den Device-Step seit 2026-10-07 **flach**. Die frühere Notiz, es poste
+> noch verschachtelt und der Flow ziehe das via `_flatten_sections` hoch, war falsch: `_flatten_sections` kennt
+> diese Sections nicht mehr, ein verschachtelter Post scheitert mit
+> `not a valid option at 'assigned_device'` + `entity_id: required key not provided`.
+> Manuelle Treiber posten ebenso flach (`{"name":..., "entity_id":..., "on_value":[...], "off_value":[...]}`
+> bzw. `{"name":..., "template":"..."}`; `device_id` top-level).
 > Ist im Device-Step ein Gerät (`device_id`) gesetzt, ist im Recover-Step zusätzlich die Section `"reload":{}`
 > **pflicht** (sonst `required key not provided`). (Der Recover-Step behält seine Sections
 > `recovery_action`/`behavior`/`notification`/`linked_guards`/`reload` — nur der Device-Step ist flach.)
@@ -309,13 +314,13 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
 
 ### Automatisiert statt manuell
 
-- [ ] **AUTO-1 — Automatisierte Suiten laufen grün (29/16/34/7)** · `P0`
+- [ ] **AUTO-1 — Automatisierte Suiten laufen grün (33/22/50/12)** · `P0`
   - **Prüft:** Die vier Real-HA-core-Suiten (`tests.common.async_test_home_assistant`) sind grün und decken PoE resolve/cycle/coalescing/Platzhalter, Engine-State-Machine + Persistenz, Health-Registry-Events inkl. Template-Blind-Erkennung (B3), Linking-Koordination ab.
-  - **Files:** `tests/test_units.py` (33), `test_poe.py` (20), `test_engine.py` (47), `test_integration.py` (7 Test-Funktionen / 12 `ok(...)`-Checks). Health-Tests u. a. `test_health_self_reference_warns`, `test_health_template_all_missing_is_blind`, `test_health_template_partial_missing_warns_only`. Linking-Tests u. a. `test_engine.py::test_linked_follower_recovers_with_leader`, `test_linked_follower_escalates_when_leader_fails`, `test_linked_auto_off_follower_escalates`, `test_leader_stop_does_not_escalate_follower`, `test_debounce_arbitration_second_follows`.
+  - **Files:** `tests/test_units.py` (33), `test_poe.py` (22), `test_engine.py` (50), `test_integration.py` (7 Test-Funktionen / 12 `ok(...)`-Checks). Health-Tests u. a. `test_health_self_reference_warns`, `test_health_template_all_missing_is_blind`, `test_health_template_partial_missing_warns_only`. Linking-Tests u. a. `test_engine.py::test_linked_follower_recovers_with_leader`, `test_linked_follower_escalates_when_leader_fails`, `test_linked_auto_off_follower_escalates`, `test_leader_stop_does_not_escalate_follower`, `test_debounce_arbitration_second_follows`.
   - **Treiber:** Aus `<ha-core>`: `PYTHONPATH=<ha-core>:<ha-core>/config python -m pytest tests -q` (in-process, kein laufender Server nötig).
-  - **Assert:** `test_units` 33, `test_poe` 20, `test_engine` 47 passed; `test_integration` grün (7 Test-Funktionen → `12/12 checks passed`). Gesamt **kein** FAIL/ERROR.
+  - **Assert:** `test_units` 33, `test_poe` 22, `test_engine` 50 passed; `test_integration` grün (7 Test-Funktionen → `12/12 checks passed`). Gesamt **kein** FAIL/ERROR.
   - **Cleanup:** —
-  - *Hinweis: Doc-Zähler 18/16/30/„7" sind STALE → korrigiert auf 29/16/34/7.*
+  - *Hinweis: Zähler am 2026-10-07 nachgemessen → 33/22/50/12. Die pytest-Suite (90) wird separat in den Voraussetzungen geführt.*
 
 - [ ] **AUTO-2 — Gates grün (ruff/format)** · `P1`
   - **Prüft:** Lint-/Format-Gates bestehen für das Necromancer-Paket.
@@ -959,7 +964,7 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
 - [ ] **DLN1 — Verknüpfen nistet das Guard-Gerät unter dem Zielgerät ein** · `P0`
   - **Prüft:** Ein Guard mit zugewiesenem Gerät (`device_id`) besitzt ein EIGENES Gerät `(necromancer,<sid>)` mit dem Guard-Namen, das per `via_device_id` unter dem Zielgerät hängt. Das Zielgerät bleibt unangetastet — Name, Besitzer und Identifier gehören weiter seiner Integration. (Seit HA 2026.8 gehört ein Gerät zu genau einem Config Entry; Identifier-Spiegelung würde ein zweites, konkurrierendes Gerät bauen.)
   - **Files:** `entity.py` → `NecromancerEntity.__init__` (`DeviceInfo(identifiers={(DOMAIN, subentry_id)}, …, via_device_id=linked.id)`); `__init__.py` → `_reconcile_devices` (entfernt nur noch Geräte ohne lebenden Guard, `"Removing stale guard device %s"`); `config_flow_helpers/schemas.py` → `_device_schema` (flaches Feld `CONF_DEVICE_ID="device_id"` als `DeviceSelector()`, KEINE Section `assigned_device` mehr).
-  - **Treiber:** Ziel-Device-id (`<tgt>`) aus `N.ws([{"type":"config/device_registry/list"}])` (irgendein Nicht-Necromancer-Gerät) holen. `N.create_guard` setzt kein Gerät → ein verlinkter Guard ist NICHT direkt über `create_guard` baubar; stattdessen Subentry-Flow manuell treiben: `N._post_flow(fid,{"source_type":"state_based"})` → Device-Step FLACH mit `{"name":"LinkTgtX","device_id":<tgt>,"entity_id":...,"on_value":[...],"off_value":[...]}` posten (kein `mode`-Feld, `device_id` top-level) → `N._post_flow(fid,{"strategy":"action_check"})` → Recover-Step **inkl. `"reload":{}`** posten (bei zugewiesenem Gerät ist die Reload-Section pflicht: `{"action":[...],"behavior":{...},"notification":{},"linked_guards":{},"reload":{}}`). Nach Reload (`POST .../entry/<hub>/reload`) Device- und Entity-Registry via WS lesen.
+  - **Treiber:** Ziel-Device-id (`<tgt>`) aus `N.ws([{"type":"config/device_registry/list"}])` (irgendein Nicht-Necromancer-Gerät) holen. Seit 2026-10-07 geht das direkt: `N.create_guard({..., "device_id": <tgt>})` — das Testkit postet `device_id` flach und hängt die dann pflichtige `"reload":{}`-Section selbst an (es liest sie aus dem angebotenen Schema). Alternativ den Subentry-Flow manuell treiben: `N._post_flow(fid,{"source_type":"state_based"})` → Device-Step FLACH mit `{"name":"LinkTgtX","device_id":<tgt>,"entity_id":...,"on_value":[...],"off_value":[...]}` posten (kein `mode`-Feld, `device_id` top-level) → `N._post_flow(fid,{"strategy":"action_check"})` → Recover-Step **inkl. `"reload":{}`** posten (bei zugewiesenem Gerät ist die Reload-Section pflicht: `{"action":[...],"behavior":{...},"notification":{},"linked_guards":{},"reload":{}}`). Nach Reload (`POST .../entry/<hub>/reload`) Device- und Entity-Registry via WS lesen.
   - **Assert:** Zielgerät unverändert (Name, `config_entry_id` weiterhin die Fremdintegration). Ein Gerät mit identifier `(necromancer,<sid>)`, `name=="LinkTgtX"`, `via_device_id==<tgt>`. ≥4 Entities mit `config_subentry_id==<sid>`, **alle** mit `device_id==<dieses Guard-Gerät>` (NICHT `<tgt>`), darunter der Status-Sensor `sensor.linktgtx_status` — der Entity-Name folgt jetzt dem Guard, nicht dem Zielgerät.
   - **Cleanup:** `N.delete_subentry(eid, sid)`
 
@@ -996,6 +1001,27 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
   - **Files:** `core/engine.py` → `config_problems` (`link_device_missing`); `__init__.py` → `_ISSUE_SEVERITY` (WARNING); `translations/{en,de}.json` → `issues.link_device_missing`.
   - **Treiber:** Guard mit zugewiesenem Gerät anlegen (s. DLN1), dann das Zielgerät löschen (`config/device_registry/remove_config_entry` bzw. dessen Integration entfernen) → `POST .../entry/<hub>/reload`. `N.ws([{"type":"repairs/list_issues"}])`.
   - **Assert:** Issue `necromancer`/`<sid>_link_device_missing` vorhanden, `severity=="warning"`; Guard-Gerät `(necromancer,<sid>)` existiert weiter mit `via_device_id==None`; Status-Sensor liefert weiter einen State (kein `unavailable`).
+  - **Cleanup:** `N.delete_subentry(eid, sid)`
+
+- [ ] **DLN7 — Deaktiviertes Guard-Gerät → Guard ist dormant (komplett still)** · `P0`
+  - **Prüft:** Deaktiviert der Nutzer das Guard-EIGENE Gerät, wird KEINE Engine gebaut: kein Detect, kein Recover, kein Notify, keine Repairs, nicht in Link-Gruppen. HA Core kaskadiert ein Device-Disable nur in die Entity-Registry — es entlädt die Subentry nicht und sagt uns nichts. Ohne diese Behandlung lief die Engine kopflos weiter und schaltete echte Hardware, während Auto-Switch und Recover-Button deaktiviert (= unerreichbar) waren.
+  - **Files:** `__init__.py` → `_dormant_guards` (Lookup per `async_get_device_by_identifier`, `device.disabled`) + Skip in der Subentry-Schleife (`"%s is dormant — its device is disabled"`) + Ausschluss aus `device_ids`/`declared_links` vor `link_components`.
+  - **Treiber:** Standalone-Guard anlegen, Guard-Device-id aus `N.ws([{"type":"config/device_registry/list"}])` per identifier `(necromancer,<sid>)` holen → `N.ws([{"type":"config/device_registry/update","device_id":"<gid>","disabled_by":"user"}])` → `N.wait(3)` → `N.log()` + `N.guard("<name>")`.
+  - **Assert:** `N.log()` enthält `"<Name> is dormant — its device is disabled, so it is not loaded"`; der Status-Sensor existiert NICHT mehr in `hass.states` (Entities sind `disabled_by: device`); `"Service set up with N guarded device(s)"` zählt den Guard nicht mit.
+  - **Cleanup:** Gerät re-enablen (`disabled_by:null`) + `N.delete_subentry(eid, sid)`
+
+- [ ] **DLN8 — Dormant: Gerät UND Store-Zustand überleben** · `P0`
+  - **Prüft:** Zwei Fallen auf dem Fix-Pfad. (a) `_reconcile_devices` reapt Geräte ohne lebende Engine — die Registry listet deaktivierte Geräte wie alle anderen, also würde genau das Gerät gelöscht, das das Disable des Nutzers TRÄGT; der nächste Reload baute ein frisches, AKTIVIERTES → der Guard schaltet sich selbst wieder ein. (b) `_serialize` snapshottet nur Engines — ohne Durchreichen verliert ein dormanter Guard `recover_count`/`fail_count` und ein terminales `ESCALATED` und startet beim Re-Enable mit leerer Weste.
+  - **Files:** `__init__.py` → `_reconcile_devices(…, dormant)` (`live = set(engines) | dormant`) + `_serialize` (trägt `stored[sid]` für dormante Guards vor).
+  - **Treiber:** Guard mit Zähler-Historie erzeugen (Recover-Zyklen fahren oder `fail_count` hochtreiben) → `recover_count` aus `N.guard()` notieren → Gerät deaktivieren (s. DLN7) → `POST .../entry/<hub>/reload` → `device_registry/list` → Gerät re-enablen → `N.wait(3)` → `N.guard()`.
+  - **Assert:** Nach Reload existiert `(necromancer,<sid>)` weiter mit `disabled_by=="user"` (NICHT gelöscht). Nach dem Re-Enable trägt der Guard denselben `recover_count`/`fail_count` wie vor dem Deaktivieren.
+  - **Cleanup:** `N.delete_subentry(eid, sid)`
+
+- [ ] **DLN9 — Enable/Disable greift live, ohne Neustart** · `P0`
+  - **Prüft:** Ein `disabled_by`-Wechsel in BEIDE Richtungen lädt den Entry sofort neu — Dormanz tritt nicht erst beim nächsten Neustart ein, und Re-Enable weckt den Guard sofort. Core-Präzedenz: `netatmo/coordinator.py` `_handle_home_device_update`.
+  - **Files:** `__init__.py` → `async_track_device_registry_updated_event(hass, _guard_device_ids(...), _on_guard_device_change)` an `entry.async_on_unload`; Handler prüft `action=="update"` + `"disabled_by" in changes` → `async_schedule_reload`. **`async_schedule_reload`, NICHT `async_reload`** — der Handler ist ein `@callback` aus einem Registry-Event; ein awaitender Reload würde das Setup re-entern, das diesen Listener registriert hat.
+  - **Treiber:** Guard anlegen → Gerät deaktivieren (s. DLN7) → `N.wait(3)` → `N.guard()`; dann `N.ws([{"type":"config/device_registry/update","device_id":"<gid>","disabled_by":None}])` → `N.wait(3)` → `N.guard()` + `N.log()`. KEIN Reload-POST und KEIN Restart dazwischen.
+  - **Assert:** Ohne manuellen Reload: nach dem Disable ist der Status-Sensor weg und `"is dormant"` steht im Log; nach dem Enable liefert `N.guard("<name>")` wieder einen State und `"Guard '<Name>' loaded"` erscheint erneut.
   - **Cleanup:** `N.delete_subentry(eid, sid)`
 
 ### P1 — State-Machine

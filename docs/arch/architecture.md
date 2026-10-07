@@ -88,6 +88,48 @@ engine/link/port graph depends on the config, and at Necromancer's scale (a hand
 of guards) the cost is irrelevant. The `entry_id` is stable across reloads and
 restarts; only `subentry_id`s tell you *which* guard changed.
 
+### Dormant guards — the device-disable switch
+
+Disabling a guard's **own device** in the HA UI is the one gesture that means *this
+guard off*, and it is the strongest of the three "off" levels:
+
+| Level | Detects | Recovers | Notifies | Repairs | In link groups |
+|---|---|---|---|---|---|
+| **Snooze** (`necromancer.snooze`, timed) | no | no | no | yes | yes, inert |
+| **Auto-off** (`switch.…_auto_recovery`) | yes | **no** | **yes** (escalates) | yes | yes, escalates |
+| **Dormant** (device disabled) | no | no | no | no | **no** |
+
+Auto-off is deliberately loud — it escalates so a real outage still reaches someone
+(§6). Dormant is **completely silent**: no engine is built at all, so there is
+nothing to detect, recover, notify, escalate or reconcile.
+
+HA core makes this our job. Disabling a device cascades **only into the entity
+registry** (our five view-entities get `disabled_by: device`); core neither unloads
+the subentry nor signals the integration, and the developer docs define no mechanism
+for it. Without the handling below an engine keeps running headlessly — still
+power-cycling real hardware, while its `auto` switch and recover button are gone, so
+the operator cannot even stop it. We therefore follow core's own precedent
+(`netatmo`): read the device registry at setup, and watch it at runtime.
+
+- **Setup** (`_dormant_guards`): a subentry whose device resolves to
+  `device.disabled` is skipped before the link closure is computed — no engine, and
+  out of every group. A brand-new guard has no device yet (the platforms create it
+  from `DeviceInfo`, *after* this runs); an absent device is not a disabled one.
+- **Runtime** (`async_track_device_registry_updated_event` on our guard devices): a
+  `disabled_by` change in either direction calls `async_schedule_reload`, so
+  enabling and disabling take effect at once. **Scheduled, not awaited** — it fires
+  from a registry callback, and awaiting a reload there would re-enter the setup that
+  registered the listener.
+- **The device survives.** `_reconcile_devices` reaps devices with no live guard, and
+  the registry lists disabled devices like any other — so dormant ids are passed in
+  and spared. Removing one would delete the very device carrying the user's disable,
+  and the next reload would recreate a fresh, *enabled* device: the guard would turn
+  itself back on.
+- **The state survives.** `_serialize` snapshots engines, and a dormant guard has
+  none — so its stored blob is carried over verbatim. Otherwise disabling would
+  silently reset `recover_count` / `fail_count` and a terminal `ESCALATED` verdict,
+  handing the guard a clean slate on re-enable.
+
 ### Runtime updates — entities are push-only
 
 Entities never poll. On any change the engine calls `_emit()`, which invokes each
@@ -352,6 +394,8 @@ follow — e.g. a *ping* guard and a *lamps-unavailable* guard on the same Hue b
 - **Auto-off means off.** A guard whose `auto` switch is disabled never participates
   in a group repair: instead of following, if its own device is affected it
   **escalates** (`no_auto_recovery`). It is never silently fixed by a partner.
+- **A dormant guard is not in the group at all.** Its device being disabled takes it
+  out of the link closure, so it neither leads, follows nor re-verifies (§2).
 
 ---
 
