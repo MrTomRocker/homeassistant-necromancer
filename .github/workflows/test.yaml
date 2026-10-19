@@ -59,9 +59,13 @@ jobs:
       - name: In-process unit scripts
         working-directory: integration
         run: |
+          # core's tests/__init__.py imports pytest_homeassistant, which lives in
+          # core/packages/pytest-home-assistant and is only put on sys.path by
+          # pytest's `pythonpath` ini option -- plain `python` needs it spelled out.
+          # A missing dir (older HA_CORE_REF) is harmless on PYTHONPATH.
           for f in test_units test_poe test_engine test_integration; do
             echo "::group::$f"
-            PYTHONPATH="$GITHUB_WORKSPACE/core:$GITHUB_WORKSPACE/integration" \
+            PYTHONPATH="$GITHUB_WORKSPACE/core:$GITHUB_WORKSPACE/core/packages/pytest-home-assistant:$GITHUB_WORKSPACE/integration" \
               python "tests/$f.py"
             echo "::endgroup::"
           done
