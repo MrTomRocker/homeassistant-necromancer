@@ -6,12 +6,6 @@ on:
   schedule:
     - cron: "0 3 * * *"
 
-env:
-  # Home Assistant core version the tests run against. The suite uses the core
-  # test harness (tests.common, enable_custom_integrations), so it needs a core
-  # checkout rather than pytest-homeassistant-custom-component. Bump as needed.
-  HA_CORE_REF: dev
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -21,11 +15,24 @@ jobs:
         with:
           path: integration
 
-      - name: Checkout Home Assistant core (${{ env.HA_CORE_REF }})
+      # Home Assistant core version the tests run against: the latest stable
+      # release (what users actually run; betas are skipped), resolved at run
+      # time so there is nothing to bump. core@dev is deliberately not used -- its
+      # test-harness refactors broke this pipeline without any change here. The
+      # suite uses the core test harness (enable_custom_integrations, ...), so it
+      # needs a core checkout rather than pytest-homeassistant-custom-component.
+      - name: Resolve latest Home Assistant core release
+        id: core
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "ref=$(gh api repos/home-assistant/core/releases/latest --jq .tag_name)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout Home Assistant core (${{ steps.core.outputs.ref }})
         uses: actions/checkout@v7
         with:
           repository: home-assistant/core
-          ref: ${{ env.HA_CORE_REF }}
+          ref: ${{ steps.core.outputs.ref }}
           path: core
 
       - name: Set up Python
@@ -41,8 +48,13 @@ jobs:
           # but it ships via the mqtt integration, not requirements_test.txt.
           # pytest-homeassistant: since core#187095 it is no longer on pytest's
           # `pythonpath` -- core's tests/__init__.py imports it, so it must be
-          # installed (same as core's own script/bootstrap does).
-          pip install -e . -e packages/pytest-homeassistant -r requirements_test.txt paho-mqtt
+          # installed (same as core's own script/bootstrap does). Releases from
+          # before that change don't ship it (helpers still in tests/common.py).
+          extra=()
+          for d in packages/pytest-home*assistant; do
+            if [ -d "$d" ]; then extra+=(-e "$d"); fi
+          done
+          pip install -e . "${extra[@]}" -r requirements_test.txt paho-mqtt
 
       - name: Link Necromancer into the core test tree
         run: |
@@ -62,10 +74,11 @@ jobs:
       - name: In-process unit scripts
         working-directory: integration
         run: |
-          # core's tests/__init__.py imports pytest_homeassistant, which lives in
-          # core/packages/pytest-home-assistant and is only put on sys.path by
-          # pytest's `pythonpath` ini option -- plain `python` needs it spelled out.
-          # A missing dir (older HA_CORE_REF) is harmless on PYTHONPATH.
+          # Some core snapshots (2026-10-17..19) put pytest_homeassistant on
+          # sys.path only via pytest's `pythonpath` ini option, which plain
+          # `python` doesn't honour, so it is spelled out here. Releases either
+          # don't need it or install the package (see above); a missing dir is
+          # harmless on PYTHONPATH.
           for f in test_units test_poe test_engine test_integration; do
             echo "::group::$f"
             PYTHONPATH="$GITHUB_WORKSPACE/core:$GITHUB_WORKSPACE/core/packages/pytest-home-assistant:$GITHUB_WORKSPACE/integration" \
