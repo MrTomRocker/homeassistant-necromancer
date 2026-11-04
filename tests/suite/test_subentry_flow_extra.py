@@ -15,9 +15,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr
 
+from ._compat import MockConfigEntry
 from .conftest import SetupGuards, make_guard
-
-from tests.common import MockConfigEntry
 
 STATE_HEALTH = {
     "entity_id": "binary_sensor.guard_health",

@@ -6,9 +6,8 @@ import pytest
 
 from homeassistant.core import HomeAssistant
 
+from ._compat import async_mock_service
 from .conftest import SetupGuards, entity_id_for, make_guard
-
-from tests.common import async_mock_service
 
 
 @pytest.fixture

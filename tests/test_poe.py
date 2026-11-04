@@ -4,9 +4,10 @@ Runs with a real `hass` (state machine, event bus, state tracking, service
 registry, asyncio locks) so the fabric's event-driven resolution, staged cycle,
 per-port lock and status events are exercised for real — not against a fake.
 
-Run from a checkout that can import both ``tests.common`` (the ha-core test
-helpers) and ``custom_components.necromancer`` — e.g. inside an HA-core dev
-container with the component on the path:
+Run from a checkout that can import both the ha-core test helpers
+(``pytest_homeassistant.common``, or ``tests.common`` on older cores) and
+``custom_components.necromancer`` — e.g. inside an HA-core dev container with
+the component on the path:
 
     PYTHONPATH=<ha-core>:<ha-core>/config python tests/test_poe.py
 
@@ -22,7 +23,10 @@ import sys
 
 from homeassistant.helpers import entity_registry as er
 
-from tests.common import async_test_home_assistant  # ha-core test helper
+try:
+    from pytest_homeassistant.common import async_test_home_assistant
+except ImportError:  # core checkouts older than home-assistant/core#187095
+    from tests.common import async_test_home_assistant
 
 from custom_components.necromancer.const import (
     CONF_ACTUATOR,
