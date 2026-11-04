@@ -21,7 +21,7 @@ from homeassistant.config_entries import ConfigEntryState, ConfigSubentryData
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
-from tests.common import MockConfigEntry
+from ._compat import MockConfigEntry
 
 DOMAIN = "necromancer"
 

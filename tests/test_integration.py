@@ -19,7 +19,13 @@ from datetime import timedelta
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
-from tests.common import async_fire_time_changed, async_test_home_assistant
+try:
+    from pytest_homeassistant.common import (
+        async_fire_time_changed,
+        async_test_home_assistant,
+    )
+except ImportError:  # core checkouts older than home-assistant/core#187095
+    from tests.common import async_fire_time_changed, async_test_home_assistant
 
 from custom_components.necromancer.const import DOMAIN
 from custom_components.necromancer.core.drivers.poe_port import PoePortDriver

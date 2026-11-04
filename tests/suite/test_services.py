@@ -10,8 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.util import dt as dt_util
 
-from tests.common import async_fire_time_changed
-
+from ._compat import async_fire_time_changed
 from .conftest import SetupGuards, entity_id_for, make_guard
 
 DOMAIN = "necromancer"

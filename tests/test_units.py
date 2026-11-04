@@ -20,7 +20,13 @@ import sys
 import homeassistant  # noqa: F401
 import voluptuous as vol
 
-from tests.common import async_mock_service, async_test_home_assistant
+try:
+    from pytest_homeassistant.common import (
+        async_mock_service,
+        async_test_home_assistant,
+    )
+except ImportError:  # core checkouts older than home-assistant/core#187095
+    from tests.common import async_mock_service, async_test_home_assistant
 
 from custom_components.necromancer.config_flow import (
     DeviceSubentryFlow,

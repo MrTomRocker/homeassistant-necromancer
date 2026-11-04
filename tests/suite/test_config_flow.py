@@ -12,9 +12,8 @@ from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
+from ._compat import MockConfigEntry
 from .conftest import DOMAIN, SetupGuards
-
-from tests.common import MockConfigEntry
 
 
 async def test_user_step_creates_blank_entry(hass: HomeAssistant) -> None:

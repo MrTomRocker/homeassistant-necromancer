@@ -18,7 +18,18 @@ from datetime import timedelta
 import homeassistant.helpers.issue_registry as ir
 from homeassistant.util import dt as dt_util
 
-from tests.common import async_fire_time_changed, async_test_home_assistant
+try:
+    from pytest_homeassistant.common import (
+        MockConfigEntry,
+        async_fire_time_changed,
+        async_test_home_assistant,
+    )
+except ImportError:  # core checkouts older than home-assistant/core#187095
+    from tests.common import (
+        MockConfigEntry,
+        async_fire_time_changed,
+        async_test_home_assistant,
+    )
 
 from custom_components.necromancer import _reconcile_issues, async_remove_entry
 from custom_components.necromancer.core.drivers.base import RecoveryDriver
@@ -773,8 +784,6 @@ async def test_snapshot_roundtrip(hass, _):
 
 async def test_reload_device_entry_on_repair(hass, _):
     from homeassistant.helpers import device_registry as dr
-
-    from tests.common import MockConfigEntry
 
     entry = MockConfigEntry(domain="demo")
     entry.add_to_hass(hass)

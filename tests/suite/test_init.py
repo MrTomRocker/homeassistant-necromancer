@@ -19,9 +19,8 @@ from homeassistant.helpers import (
     issue_registry as ir,
 )
 
+from ._compat import MockConfigEntry
 from .conftest import DOMAIN, SetupGuards, entity_id_for, make_guard
-
-from tests.common import MockConfigEntry
 
 
 async def test_setup_builds_one_engine_per_guard(
