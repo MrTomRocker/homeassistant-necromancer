@@ -39,7 +39,10 @@ jobs:
           pip install --upgrade pip
           # paho-mqtt: core's tests/common.py imports paho.mqtt at module level,
           # but it ships via the mqtt integration, not requirements_test.txt.
-          pip install -e . -r requirements_test.txt paho-mqtt
+          # pytest-homeassistant: since core#187095 it is no longer on pytest's
+          # `pythonpath` -- core's tests/__init__.py imports it, so it must be
+          # installed (same as core's own script/bootstrap does).
+          pip install -e . -e packages/pytest-homeassistant -r requirements_test.txt paho-mqtt
 
       - name: Link Necromancer into the core test tree
         run: |
