@@ -31,6 +31,12 @@ ignore = [
     "D417",    # missing arg descriptions — document only non-obvious params
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# The in-process dev scripts (tests/test_*.py, run directly with python) are not
+# part of HA core's pytest tree; their test names say what they check. The HA
+# harness suite under tests/suite/ keeps the full docstring rules like core.
+"tests/test_*.py" = ["D100", "D101", "D102", "D103", "D107"]
+
 [tool.ruff.lint.isort]
 force-sort-within-sections = true
 combine-as-imports = true

@@ -12,9 +12,14 @@ sources so the *engine* logic is what's under test.
 from __future__ import annotations
 
 import asyncio
-import sys
 from datetime import timedelta
+import sys
+from types import SimpleNamespace
+from unittest.mock import patch
 
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import CoreState
+from homeassistant.helpers.event import async_track_point_in_utc_time
 import homeassistant.helpers.issue_registry as ir
 from homeassistant.util import dt as dt_util
 
@@ -33,10 +38,16 @@ except ImportError:  # core checkouts older than home-assistant/core#187095
 
 from custom_components.necromancer import _reconcile_issues, async_remove_entry
 from custom_components.necromancer.core.drivers.base import RecoveryDriver
-from custom_components.necromancer.core.engine import DeviceEngine, GState
+from custom_components.necromancer.core.engine import (
+    DeviceEngine,
+    GState,
+    reset_engine_verdict,
+)
+from custom_components.necromancer.core.health import heartbeat as hb
 from custom_components.necromancer.core.health.base import Health, HealthSource
 from custom_components.necromancer.core.health.entity_state import EntityStateHealth
 from custom_components.necromancer.core.health.template import TemplateHealth
+import custom_components.necromancer.core.notify as notify_mod
 from custom_components.necromancer.core.poe import PoeFabric
 from custom_components.necromancer.core.policies.notify import NotifyPolicy
 from custom_components.necromancer.core.policies.standard import StandardPolicy
@@ -229,6 +240,7 @@ async def test_new_fields_persist(hass, _):
     eng2._apply_persisted(snap)
     assert eng2.fail_count == 1 and eng2.last_fail is not None
     assert eng2.last_recover_driver_result == "good"
+    assert eng2.last_cycle_start == eng.last_cycle_start is not None
     await eng.async_stop()
 
 
@@ -618,6 +630,75 @@ async def test_validate_follower_still_down_does_own_recovery(hass, _):
     assert e2.state is GState.SUSPECT, e2.state
     await _advance(hass, 1)  # own debounce -> recover -> verify ok -> cooldown
     assert d2.calls == 1 and e2.state is GState.COOLDOWN
+    await e1.async_stop()
+    await e2.async_stop()
+
+
+class ConfirmedFakeHealth(FakeHealth):
+    """A fake whose fault is confirmed (like a heartbeat's failure ping)."""
+
+    def confirmed(self):
+        return self.verdict == Health.UNHEALTHY
+
+
+async def test_validate_follower_confirmed_fault_starts_own_recovery(hass, _):
+    # A follower whose fault is confirmed (a failure ping arrived while it held for
+    # the leader) skips the debounce, so _evaluate starts its own cycle from inside
+    # validate_after_repair. That must not be swallowed by the validate task still
+    # holding the cycle slot (stuck in SUSPECT with no timer, no repair, no alarm).
+    h2 = ConfirmedFakeHealth(hass, Health.OK)
+    d2 = StubDriver(hass, on_recover=lambda: setattr(h2, "verdict", Health.OK))
+    e1, e2 = make_pair(
+        hass,
+        FakeHealth(hass, Health.OK),
+        StubDriver(hass),
+        h2,
+        d2,
+        boot_window=0,
+        debounce=3600,
+    )
+    await e2.async_start()
+    e2._on_partner_repair_start("g1")
+    h2.verdict = Health.UNHEALTHY  # failure ping while following: only stored
+    e2._evaluate()
+    assert e2.state is GState.RECOVERING and d2.calls == 0
+    e2._on_partner_repair_done("g1", True)  # leader ok, but h2 still failed
+    await hass.async_block_till_done()  # validate -> OK -> own cycle at once
+    assert d2.calls == 1, (d2.calls, e2.state)
+    assert e2.state is GState.COOLDOWN, e2.state
+    assert not e2._busy()  # the cycle finished and released its slot
+    await e1.async_stop()
+    await e2.async_stop()
+
+
+async def test_validate_follower_confirmed_fault_escalates_and_notifies(hass, _):
+    # Same handoff, but the follower's own repair cannot fix it: the fallback cycle
+    # must still run to its end and raise the alarm instead of idling in SUSPECT.
+    h2 = ConfirmedFakeHealth(hass, Health.OK)
+    d2 = StubDriver(hass)
+    e1, e2 = make_pair(
+        hass,
+        FakeHealth(hass, Health.OK),
+        StubDriver(hass),
+        h2,
+        d2,
+        boot_window=0,
+        debounce=3600,
+        max_attempts=1,
+        notify_action=[{"action": "test.sink"}],
+    )
+    with _NotifySink() as sent:
+        await e2.async_start()
+        e2._on_partner_repair_start("g1")
+        h2.verdict = Health.UNHEALTHY
+        e2._on_partner_repair_done("g1", True)
+        await hass.async_block_till_done()
+        assert d2.calls == 1, (d2.calls, e2.state)
+        assert e2.state is GState.ESCALATED, e2.state
+        assert [v["event"] for v in sent] == [
+            "recovery_attempt",
+            "recovery_failed",
+        ], sent
     await e1.async_stop()
     await e2.async_stop()
 
@@ -1045,8 +1126,890 @@ async def test_remove_entry_clears_issues(hass, _):
     eng = make(hass, health, StubDriver(hass))
     _reconcile_issues(hass, {"g": eng}, PoeFabric(hass))
     assert ("necromancer", "g_health_entity_missing") in ir.async_get(hass).issues
-    await async_remove_entry(hass, None)  # entry unused by the cleanup
+    # Only entry_id is read (to drop the entry's heartbeat tokens).
+    await async_remove_entry(hass, SimpleNamespace(entry_id="e"))
     assert ("necromancer", "g_health_entity_missing") not in ir.async_get(hass).issues
+
+
+# ---------------- heartbeat source (real HeartbeatHealth, patched clock) ----------------
+
+# period 1 h -> deadline 3600 s after the last success; the grace after a missed
+# ping is the engine's debounce (10 min here), not part of the source's verdict.
+_HB_PERIOD, _HB_GRACE = 3600, 600
+
+
+class _HbClock:
+    """Time travel for the heartbeat source.
+
+    The source judges with dt_util.utcnow(), which async_fire_time_changed does not
+    move, so patch it to a clock that advances together with the fired timers.
+
+    The engine's own timers (debounce = the heartbeat's grace, cooldown, snooze)
+    use async_call_later, which counts on the loop clock: async_fire_time_changed
+    compares its delay with the whole distance travelled so far, so a 10-minute
+    debounce armed after an hour of travel would fire on the next tick. Inside
+    the clock they run as a point in (patched) UTC time instead, which fires
+    exactly when this clock passes it.
+    """
+
+    def __init__(self):
+        self.now = dt_util.utcnow()
+        self._patches = [
+            patch("homeassistant.util.dt.utcnow", side_effect=lambda: self.now),
+            patch(
+                "custom_components.necromancer.core.engine.async_call_later",
+                side_effect=self._call_later,
+            ),
+        ]
+
+    def _call_later(self, hass, delay, action):
+        if isinstance(delay, timedelta):
+            delay = delay.total_seconds()
+        return async_track_point_in_utc_time(
+            hass, action, self.now + timedelta(seconds=delay)
+        )
+
+    def __enter__(self):
+        for p in self._patches:
+            p.start()
+        return self
+
+    def __exit__(self, *exc):
+        for p in reversed(self._patches):
+            p.stop()
+
+    async def advance(self, hass, seconds):
+        self.now += timedelta(seconds=seconds)
+        async_fire_time_changed(hass, self.now)
+        await hass.async_block_till_done()
+
+
+class _NotifySink:
+    """Capture the variables every notify action would receive."""
+
+    def __init__(self):
+        self.sent: list[dict] = []
+        self._orig = None
+
+    def __enter__(self):
+        async def _cap(_hass, _action, _name, variables=None):
+            self.sent.append(dict(variables or {}))
+            return {}
+
+        self._orig = notify_mod.async_run
+        notify_mod.async_run = _cap
+        return self.sent
+
+    def __exit__(self, *exc):
+        notify_mod.async_run = self._orig
+
+
+class BlockedDriver(StubDriver):
+    """A driver whose pre-flight check refuses (recovery_blocked)."""
+
+    async def can_recover(self):
+        """Refuse: the recovery action is missing."""
+        return False, "no action"
+
+
+def _hb_source(hass, pair):
+    token = pair * 32
+    return hb.HeartbeatHealth(
+        hass, {"type": "heartbeat", "token": token, "period": _HB_PERIOD}
+    )
+
+
+def _hb_engine(hass, health, policy=None, driver=None, persisted=None, save=None, **b):
+    behavior = {
+        "debounce": _HB_GRACE,
+        "boot_window": 0,
+        "cooldown": 30,
+        "max_attempts": 2,
+        "health_check": True,
+        "notify_action": [{"action": "test.sink"}],
+    }
+    behavior.update(b)
+    return DeviceEngine(
+        hass,
+        "G",
+        health,
+        driver or StubDriver(hass),
+        policy or NotifyPolicy({}),
+        behavior,
+        subentry_id="hb",
+        engines={},
+        persisted=persisted,
+        save=save,
+    )
+
+
+async def test_hb_deadline_problem_detected_with_detail(hass, _):
+    """Deadline passes -> SUSPECT -> debounce (the grace) -> problem_detected."""
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "a1")
+        eng = _hb_engine(hass, src)
+        await eng.async_start()
+        # a new guard starts grey, waiting for its first success
+        assert eng.state is GState.BLIND
+        assert eng.health_detail == "Waiting for the first heartbeat."
+        await src.async_handle_ping(True, None)
+        assert eng.state is GState.OK and eng.health_detail is None
+        await clock.advance(hass, _HB_PERIOD)  # exactly on the deadline
+        assert eng.state is GState.OK
+        await clock.advance(hass, 1)  # the source's own timer -> SUSPECT
+        assert eng.state is GState.SUSPECT and sent == []
+        # The grace counts from the deadline, not from the timer's margin second.
+        await clock.advance(hass, _HB_GRACE - 2)  # grace not over yet
+        assert eng.state is GState.SUSPECT and sent == []
+        await clock.advance(hass, 1)  # deadline + debounce -> notify-only -> ESCALATED
+        assert eng.state is GState.ESCALATED
+        assert [v["event"] for v in sent] == ["problem_detected"], sent
+        detail = "No heartbeat for 70 minutes, expected every 60 minutes."
+        assert sent[0]["health_detail"] == detail, sent[0]
+        assert sent[0]["event_text"] == f"Problem detected. {detail}", sent[0]
+        assert sent[0]["message"] == f"G: Problem detected. {detail}", sent[0]
+        # the text is the one at the finding: it does not drift as time passes
+        await clock.advance(hass, 5 * 3600)
+        assert eng.health_detail == detail and len(sent) == 1
+        await eng.async_stop()
+
+
+async def test_hb_ping_within_grace_back_to_ok_silently(hass, _):
+    """Overdue -> SUSPECT; the late ping arrives within the debounce -> OK, no alarm."""
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "c1")
+        eng = _hb_engine(hass, src)
+        await eng.async_start()
+        await src.async_handle_ping(True, None)
+        await clock.advance(hass, _HB_PERIOD + 1)
+        assert eng.state is GState.SUSPECT
+        await clock.advance(hass, _HB_GRACE - 60)
+        await src.async_handle_ping(True, None)
+        assert eng.state is GState.OK
+        # the debounce timer is gone: nothing fires once the grace would be over
+        await clock.advance(hass, 120)
+        assert eng.state is GState.OK and sent == []
+        await eng.async_stop()
+
+
+async def test_hb_failure_ping_from_ok_reacts_at_once(hass, _):
+    """OK -> failure ping -> ESCALATED + problem_detected without the debounce."""
+    with _HbClock(), _NotifySink() as sent:
+        src = _hb_source(hass, "c2")
+        eng = _hb_engine(hass, src)
+        await eng.async_start()
+        await src.async_handle_ping(True, None)
+        assert eng.state is GState.OK
+        await src.async_handle_ping(False, "3")
+        assert eng.state is GState.ESCALATED
+        await hass.async_block_till_done()
+        assert [(v["event"], v["health_detail"]) for v in sent] == [
+            ("problem_detected", "Failure reported, exit code 3.")
+        ], sent
+        # a success afterwards makes the guard OK again
+        await src.async_handle_ping(True, None)
+        assert eng.state is GState.OK
+        await eng.async_stop()
+
+
+async def test_hb_failure_ping_while_suspect_cuts_the_grace(hass, _):
+    """Overdue (SUSPECT, debounce running) + failure ping -> ESCALATED at once."""
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "c3")
+        eng = _hb_engine(hass, src)
+        await eng.async_start()
+        await src.async_handle_ping(True, None)
+        await clock.advance(hass, _HB_PERIOD + 1)
+        assert eng.state is GState.SUSPECT
+        await src.async_handle_ping(False, "TERM")
+        assert eng.state is GState.ESCALATED
+        await hass.async_block_till_done()
+        assert [(v["event"], v["health_detail"]) for v in sent] == [
+            ("problem_detected", "Failure reported, code TERM.")
+        ], sent
+        # the cancelled debounce timer does not fire a second alarm later
+        await clock.advance(hass, _HB_GRACE + 5)
+        assert eng.state is GState.ESCALATED and len(sent) == 1
+        await eng.async_stop()
+
+
+async def test_hb_never_succeeded_waits_then_alarms(hass, _):
+    """No success ever: BLIND until armed_at + period, then SUSPECT, then alarm."""
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "c4")
+        eng = _hb_engine(hass, src)
+        await eng.async_start()
+        assert eng.state is GState.BLIND
+        await clock.advance(hass, _HB_PERIOD)  # exactly on the deadline
+        assert eng.state is GState.BLIND
+        await clock.advance(hass, 1)
+        assert eng.state is GState.SUSPECT and sent == []
+        await clock.advance(hass, _HB_GRACE)
+        assert eng.state is GState.ESCALATED
+        assert [(v["event"], v["health_detail"]) for v in sent] == [
+            ("problem_detected", "Never reported success, set up 70 minutes ago.")
+        ], sent
+        await eng.async_stop()
+
+
+def _hb_stored(src, last_ok, state="ok"):
+    """Persisted guard data whose last success was at `last_ok`."""
+    source = hb.apply_ping(
+        hb.reconcile_token({}, src.token, last_ok)[0], True, None, last_ok
+    )
+    return {"state": state, "source": source}
+
+
+async def _hb_reload(hass, eng, pair, **kw):
+    """Stop the engine and start a fresh one from its snapshot (entry reload)."""
+    stored = eng.snapshot()
+    await eng.async_stop()
+    src = _hb_source(hass, pair)
+    eng = _hb_engine(hass, src, persisted=stored, **kw)
+    await eng.async_start()
+    return src, eng
+
+
+async def test_hb_restart_overdue_reenters_suspect(hass, _):
+    """Restart with an overdue guard (not escalated) -> SUSPECT, the rest of the grace.
+
+    The grace counts from the deadline, not from the start: a sender retry inside
+    what is left of it makes the guard OK again without an alarm; without one the
+    alarm comes at deadline + debounce, not a full debounce after the start.
+    """
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "c5")
+        before = clock.now - timedelta(seconds=_HB_PERIOD + 300)
+        eng = _hb_engine(hass, src, persisted=_hb_stored(src, before))
+        await eng.async_start()
+        assert eng.state is GState.SUSPECT and sent == []
+        await clock.advance(hass, 60)
+        await src.async_handle_ping(True, None)  # the sender's retry
+        assert eng.state is GState.OK
+        await clock.advance(hass, _HB_GRACE)
+        assert eng.state is GState.OK and sent == []
+        await eng.async_stop()
+        # Without a retry only the remaining 300 s of the grace are waited out.
+        src2 = _hb_source(hass, "c6")
+        before = clock.now - timedelta(seconds=_HB_PERIOD + 300)
+        eng2 = _hb_engine(hass, src2, persisted=_hb_stored(src2, before))
+        await eng2.async_start()
+        assert eng2.state is GState.SUSPECT
+        await clock.advance(hass, 299)
+        assert eng2.state is GState.SUSPECT and sent == []
+        await clock.advance(hass, 1)  # deadline + debounce
+        assert eng2.state is GState.ESCALATED
+        assert [v["event"] for v in sent] == ["problem_detected"], sent
+        await eng2.async_stop()
+
+
+async def test_hb_reload_in_grace_keeps_the_alarm_time(hass, _):
+    """Reloads during the grace do not postpone the alarm past deadline + debounce."""
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "d1")
+        eng = _hb_engine(hass, src)
+        await eng.async_start()
+        await src.async_handle_ping(True, None)
+        alarm_at = clock.now + timedelta(seconds=_HB_PERIOD + _HB_GRACE)
+        await clock.advance(hass, _HB_PERIOD + 1)
+        assert eng.state is GState.SUSPECT
+        for _i in range(2):  # every reload used to restart the full debounce
+            await clock.advance(hass, 250)
+            src, eng = await _hb_reload(hass, eng, "d1")
+            assert eng.state is GState.SUSPECT and sent == []
+        await clock.advance(hass, (alarm_at - clock.now).total_seconds() - 1)
+        assert eng.state is GState.SUSPECT and sent == []
+        await clock.advance(hass, 1)
+        assert eng.state is GState.ESCALATED
+        assert [v["event"] for v in sent] == ["problem_detected"], sent
+        await eng.async_stop()
+
+
+async def test_hb_reload_in_grace_late_ping_still_silent(hass, _):
+    """After a reload in the grace, a ping within what is left of it -> OK, silent."""
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "d2")
+        eng = _hb_engine(hass, src)
+        await eng.async_start()
+        await src.async_handle_ping(True, None)
+        await clock.advance(hass, _HB_PERIOD + 1)
+        await clock.advance(hass, 300)
+        src, eng = await _hb_reload(hass, eng, "d2")
+        assert eng.state is GState.SUSPECT
+        await clock.advance(hass, _HB_GRACE - 302)  # one second of grace left
+        await src.async_handle_ping(True, None)
+        assert eng.state is GState.OK
+        await clock.advance(hass, _HB_GRACE)
+        assert eng.state is GState.OK and sent == []
+        await eng.async_stop()
+
+
+async def test_hb_restart_after_grace_reacts_at_once(hass, _):
+    """A long outage used up the grace: the alarm comes right after the start.
+
+    "A deadline is a deadline": a sender retry a moment later turns the guard OK
+    again, but the alarm is already out.
+    """
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "d3")
+        before = clock.now - timedelta(seconds=_HB_PERIOD + _HB_GRACE + 3600)
+        eng = _hb_engine(hass, src, persisted=_hb_stored(src, before))
+        await eng.async_start()
+        assert eng.state is GState.ESCALATED  # no time passed at all
+        await hass.async_block_till_done()
+        assert [v["event"] for v in sent] == ["problem_detected"], sent
+        await clock.advance(hass, 1)
+        await src.async_handle_ping(True, None)  # the retry, one second too late
+        assert eng.state is GState.OK and len(sent) == 1
+        await eng.async_stop()
+        # Exactly at deadline + debounce counts as used up too.
+        src2 = _hb_source(hass, "d4")
+        before = clock.now - timedelta(seconds=_HB_PERIOD + _HB_GRACE)
+        eng2 = _hb_engine(hass, src2, persisted=_hb_stored(src2, before))
+        await eng2.async_start()
+        assert eng2.state is GState.ESCALATED
+        await eng2.async_stop()
+
+
+async def test_hb_restart_after_grace_starts_recovery_at_once(hass, _):
+    """With a repair action the cycle starts right after the start, too."""
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "d5")
+        driver = StubDriver(
+            hass,
+            on_recover=lambda: hass.async_create_task(
+                src.async_handle_ping(True, None)
+            ),
+        )
+        before = clock.now - timedelta(seconds=_HB_PERIOD + _HB_GRACE + 60)
+        eng = _hb_engine(
+            hass,
+            src,
+            StandardPolicy({}),
+            driver,
+            persisted=_hb_stored(src, before),
+            boot_window=30,
+        )
+        await eng.async_start()
+        await clock.advance(hass, 1)
+        assert driver.calls == 1 and eng.state is GState.COOLDOWN, eng.state
+        assert [v["event"] for v in sent] == [
+            "recovery_attempt",
+            "recovery_success",
+        ], sent
+        await eng.async_stop()
+
+
+async def test_hb_bootstrap_waits_only_the_remaining_grace(hass, _):
+    """Overdue at boot: nothing until HA started, then only what is left of the grace.
+
+    The time spent in bootstrap counts: the deadline is the same with or without
+    the restart.
+    """
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "d6")
+        before = clock.now - timedelta(seconds=_HB_PERIOD + 300)
+        hass.set_state(CoreState.starting)
+        try:
+            eng = _hb_engine(hass, src, persisted=_hb_stored(src, before))
+            await eng.async_start()
+            assert eng.state is GState.SUSPECT
+            await clock.advance(hass, 100)  # a slow bootstrap
+            assert eng.state is GState.SUSPECT and sent == []
+        finally:
+            hass.set_state(CoreState.running)
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        await hass.async_block_till_done()
+        assert eng.state is GState.SUSPECT
+        await clock.advance(hass, _HB_GRACE - 400 - 1)
+        assert eng.state is GState.SUSPECT and sent == []
+        await clock.advance(hass, 1)
+        assert eng.state is GState.ESCALATED
+        assert [v["event"] for v in sent] == ["problem_detected"], sent
+        await eng.async_stop()
+        # A bootstrap longer than what was left of the grace: react once started.
+        src2 = _hb_source(hass, "d7")
+        before = clock.now - timedelta(seconds=_HB_PERIOD + 300)
+        hass.set_state(CoreState.starting)
+        try:
+            eng2 = _hb_engine(hass, src2, persisted=_hb_stored(src2, before))
+            await eng2.async_start()
+            await clock.advance(hass, 400)
+            assert eng2.state is GState.SUSPECT and len(sent) == 1
+        finally:
+            hass.set_state(CoreState.running)
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        await hass.async_block_till_done()
+        assert eng2.state is GState.ESCALATED and len(sent) == 2
+        await eng2.async_stop()
+
+
+def _hb_repair_engine(hass, src, driver, **b):
+    """A repairing heartbeat guard; no health check unless given (an action)."""
+    b.setdefault("health_check", False)
+    return _hb_engine(hass, src, StandardPolicy({}), driver, **b)
+
+
+async def _hb_first_repair(hass, clock, src, eng):
+    """Ping, let the deadline and the whole grace pass: the first cycle runs."""
+    await eng.async_start()
+    await src.async_handle_ping(True, None)
+    await clock.advance(hass, _HB_PERIOD + 1)
+    assert eng.state is GState.SUSPECT
+    await clock.advance(hass, _HB_GRACE - 1)  # deadline + debounce
+
+
+async def test_hb_still_overdue_after_repair_waits_cooldown_and_grace(hass, _):
+    """A repair without check while the sender stays silent: no repair loop.
+
+    The grace counts again from the end of the cooldown, as for any source: the
+    next cycle comes a full debounce after it, not right at the cooldown end
+    (the deadline's grace is long used up by then).
+    """
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "e1")
+        driver = StubDriver(hass)
+        eng = _hb_repair_engine(hass, src, driver, cooldown=300)
+        await _hb_first_repair(hass, clock, src, eng)
+        assert driver.calls == 1 and eng.state is GState.COOLDOWN, eng.state
+        await clock.advance(hass, 300)  # cooldown over, still overdue
+        assert eng.state is GState.SUSPECT and driver.calls == 1
+        await clock.advance(hass, _HB_GRACE - 1)
+        assert eng.state is GState.SUSPECT and driver.calls == 1
+        await clock.advance(hass, 1)
+        assert driver.calls == 2, eng.state
+        assert [v["event"] for v in sent] == [
+            "recovery_attempt",
+            "recovery_success",
+        ] * 2, sent
+        await eng.async_stop()
+
+
+async def test_hb_reload_in_cooldown_does_not_repair_at_once(hass, _):
+    """COOLDOWN is not persisted: a reload in it comes back OK, then SUSPECT.
+
+    The fault is older than the debounce, yet the repair just made earns the
+    full debounce again — from the reload, since the cooldown end lies ahead.
+    """
+    with _HbClock() as clock, _NotifySink():
+        src = _hb_source(hass, "e2")
+        eng = _hb_repair_engine(hass, src, StubDriver(hass), cooldown=300)
+        await _hb_first_repair(hass, clock, src, eng)
+        assert eng.state is GState.COOLDOWN
+        await clock.advance(hass, 100)
+        driver = StubDriver(hass)
+        src, eng = await _hb_reload(
+            hass,
+            eng,
+            "e2",
+            policy=StandardPolicy({}),
+            driver=driver,
+            health_check=False,
+            cooldown=300,
+        )
+        assert eng.state is GState.SUSPECT and driver.calls == 0
+        await clock.advance(hass, _HB_GRACE - 1)
+        assert eng.state is GState.SUSPECT and driver.calls == 0
+        await clock.advance(hass, 1)
+        assert driver.calls == 1, eng.state
+        await eng.async_stop()
+
+
+async def test_hb_restart_mid_cycle_waits_the_grace_from_the_cycle(hass, _):
+    """The recovery restarts HA (the cycle is lost): no boot loop at boot speed.
+
+    RECOVERING/VERIFY are not persisted, but the cycle start is: after the
+    restart the debounce counts from it, also on the deferred bootstrap path.
+    """
+    with _HbClock() as clock, _NotifySink():
+        src = _hb_source(hass, "e3")
+        # The action restarts HA: the final write happens while it runs.
+        written: list[dict] = []
+        eng = None
+        eng = _hb_repair_engine(
+            hass,
+            src,
+            StubDriver(hass, on_recover=lambda: written.append(eng.snapshot())),
+        )
+        await _hb_first_repair(hass, clock, src, eng)
+        stored = written[0]
+        assert stored["state"] == "recovering"
+        assert stored["last_cycle_start"] == clock.now.isoformat()
+        await eng.async_stop()
+        await clock.advance(hass, 200)
+        driver = StubDriver(hass)
+        src = _hb_source(hass, "e3")
+        hass.set_state(CoreState.starting)
+        try:
+            eng = _hb_repair_engine(hass, src, driver, persisted=stored)
+            await eng.async_start()
+            assert eng.state is GState.SUSPECT
+            await clock.advance(hass, 100)  # bootstrap
+        finally:
+            hass.set_state(CoreState.running)
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        await hass.async_block_till_done()
+        assert eng.state is GState.SUSPECT and driver.calls == 0
+        await clock.advance(hass, _HB_GRACE - 300 - 1)
+        assert eng.state is GState.SUSPECT and driver.calls == 0
+        await clock.advance(hass, 1)  # cycle start + debounce
+        assert driver.calls == 1, eng.state
+        await eng.async_stop()
+
+
+class FaultSinceFakeHealth(FakeHealth):
+    """A fake that knows when its fault began (like an overdue heartbeat)."""
+
+    def __init__(self, hass, verdict=Health.OK, since=None):
+        super().__init__(hass, verdict)
+        self.since = since
+
+    def fault_since(self):
+        return self.since
+
+
+async def test_fault_since_shortens_the_debounce(hass, _):
+    """The debounce runs only for its rest: debounce - (now - fault_since).
+
+    A start in the future counts as no time elapsed (full debounce), and one
+    further back than the debounce reacts at once.
+    """
+    with _HbClock() as clock:
+        health = FaultSinceFakeHealth(hass, Health.OK)
+        driver = StubDriver(hass)
+        driver.on_recover = lambda: setattr(health, "verdict", Health.OK)
+        eng = make(hass, health, driver, boot_window=0)
+        await eng.async_start()
+        health.since = clock.now - timedelta(seconds=20)
+        health.verdict = Health.UNHEALTHY
+        eng._evaluate()
+        assert eng.state is GState.SUSPECT
+        await clock.advance(hass, 9)
+        assert eng.state is GState.SUSPECT and driver.calls == 0
+        await clock.advance(hass, 1)  # 30 - 20 = 10 s
+        assert driver.calls == 1, eng.state
+        await eng.async_stop()
+
+        health = FaultSinceFakeHealth(hass, Health.OK)
+        driver = StubDriver(hass)
+        driver.on_recover = lambda: setattr(health, "verdict", Health.OK)
+        eng = make(hass, health, driver, boot_window=0)
+        await eng.async_start()
+        health.since = clock.now + timedelta(seconds=100)  # clock skew
+        health.verdict = Health.UNHEALTHY
+        eng._evaluate()
+        await clock.advance(hass, 29)
+        assert eng.state is GState.SUSPECT and driver.calls == 0
+        await clock.advance(hass, 1)
+        assert driver.calls == 1, eng.state
+        await eng.async_stop()
+
+        health = FaultSinceFakeHealth(hass, Health.OK)
+        driver = StubDriver(hass)
+        driver.on_recover = lambda: setattr(health, "verdict", Health.OK)
+        eng = make(hass, health, driver, boot_window=0)
+        await eng.async_start()
+        health.since = clock.now - timedelta(hours=1)
+        health.verdict = Health.UNHEALTHY
+        eng._evaluate()  # used up: the cycle starts without any time passing
+        await hass.async_block_till_done()
+        assert driver.calls == 1 and eng.state is GState.COOLDOWN, eng.state
+        await eng.async_stop()
+
+
+async def test_no_fault_since_keeps_the_full_debounce(hass, _):
+    """A source without fault_since (the default None) waits the whole debounce."""
+    hass.states.async_set("binary_sensor.fs_probe", "on")
+    health = EntityStateHealth(hass, {"entity_id": "binary_sensor.fs_probe"})
+    tpl = TemplateHealth(hass, {"type": "template", "template": "{{ false }}"})
+    assert health.fault_since() is None and tpl.fault_since() is None
+    with _HbClock() as clock, _NotifySink() as sent:
+        eng = _hb_engine(hass, health, debounce=60)
+        await eng.async_start()
+        await clock.advance(hass, 3600)  # long healthy: nothing to count from
+        hass.states.async_set("binary_sensor.fs_probe", "off")
+        await hass.async_block_till_done()
+        assert eng.state is GState.SUSPECT
+        await clock.advance(hass, 59)
+        assert eng.state is GState.SUSPECT and sent == []
+        await clock.advance(hass, 1)
+        assert eng.state is GState.ESCALATED
+        # Nor do our own reaction marks give such a source a start to count from.
+        eng.last_cycle_start = eng.last_recover = clock.now
+        assert eng._debounce_anchor() is None
+        await eng.async_stop()
+
+
+async def test_entity_state_guard_ignores_confirmed(hass, _):
+    """Sources without a confirmed verdict keep waiting out the debounce."""
+    hass.states.async_set("binary_sensor.conf_probe", "on")
+    health = EntityStateHealth(hass, {"entity_id": "binary_sensor.conf_probe"})
+    assert health.confirmed() is False
+    with _NotifySink() as sent:
+        eng = _hb_engine(hass, health, debounce=60)
+        await eng.async_start()
+        assert eng.state is GState.OK
+        hass.states.async_set("binary_sensor.conf_probe", "off")
+        await hass.async_block_till_done()
+        assert eng.state is GState.SUSPECT
+        # another unhealthy update while SUSPECT does not cut the debounce short
+        hass.states.async_set("binary_sensor.conf_probe", "off", {"x": 1})
+        await _advance(hass, 59)
+        assert eng.state is GState.SUSPECT and sent == []
+        await _advance(hass, 61)  # _advance counts from now, not cumulative
+        assert eng.state is GState.ESCALATED
+        assert [v["event"] for v in sent] == ["problem_detected"], sent
+        await eng.async_stop()
+
+
+async def test_hb_no_detail_source_unchanged_texts(hass, _):
+    """A source without detail(): health_detail "" and the plain event text."""
+    with _NotifySink() as sent:
+        eng = _hb_engine(hass, FakeHealth(hass, Health.UNHEALTHY), debounce=1)
+        await eng.async_start()
+        await _advance(hass, 1)
+        assert eng.state is GState.ESCALATED and eng.health_detail is None
+        assert [v["event"] for v in sent] == ["problem_detected"], sent
+        assert sent[0]["health_detail"] == "", sent[0]
+        assert sent[0]["event_text"] == "Problem detected.", sent[0]
+        await eng.async_stop()
+
+
+async def test_hb_recovery_detail_first_attempt_only(hass, _):
+    """A failing job (failure pings, no success) -> max_attempts -> ESCALATED.
+
+    The detail rides on attempt 1 and on recovery_failed, not on attempt 2.
+    """
+    hass.config.language = "de"
+    try:
+        with _HbClock() as clock, _NotifySink() as sent:
+            src = _hb_source(hass, "a2")
+            driver = StubDriver(
+                hass,
+                on_recover=lambda: hass.async_create_task(
+                    src.async_handle_ping(False, "3")
+                ),
+            )
+            eng = _hb_engine(hass, src, StandardPolicy({}), driver)
+            await eng.async_start()
+            await src.async_handle_ping(False, "3")  # job reports exit code 3
+            # A reported failure needs no confirmation: the repair starts at once,
+            # before any time passes.
+            assert driver.calls >= 1
+            await clock.advance(hass, 1)  # 2 attempts -> ESCALATED
+            assert eng.state is GState.ESCALATED and driver.calls == 2
+            detail = "Fehler gemeldet, Exit-Code 3."
+            got = {(v["event"], v["attempt"], v["health_detail"]) for v in sent}
+            assert got == {
+                ("recovery_attempt", 1, detail),
+                ("recovery_attempt", 2, ""),
+                ("recovery_failed", 2, detail),
+            }, got
+            for v in sent:
+                assert v["message"] == f"G: {v['event_text']}", v
+                assert v["event_text"].endswith(f". {detail}") == bool(
+                    v["health_detail"]
+                ), v
+            await eng.async_stop()
+    finally:
+        hass.config.language = "en"
+
+
+async def test_hb_auto_off_no_auto_recovery_with_detail(hass, _):
+    """Auto off -> no_auto_recovery carries the detail, no repair runs."""
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "a3")
+        driver = StubDriver(hass)
+        eng = _hb_engine(hass, src, StandardPolicy({}), driver)
+        eng.auto = False
+        await eng.async_start()
+        await src.async_handle_ping(False, "TERM")
+        assert eng.state is GState.ESCALATED  # no debounce wait
+        await clock.advance(hass, 1)
+        assert eng.state is GState.ESCALATED and driver.calls == 0
+        assert [(v["event"], v["health_detail"]) for v in sent] == [
+            ("no_auto_recovery", "Failure reported, code TERM.")
+        ], sent
+        await eng.async_stop()
+
+
+async def test_hb_ping_in_boot_window_cooldown_no_detail_on_success(hass, _):
+    """Action + health check: the restarted job pings within boot_window -> COOLDOWN."""
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "a4")
+        driver = StubDriver(
+            hass,
+            on_recover=lambda: hass.async_create_task(
+                src.async_handle_ping(True, None)
+            ),
+        )
+        eng = _hb_engine(hass, src, StandardPolicy({}), driver, boot_window=30)
+        await eng.async_start()
+        await src.async_handle_ping(False, None)
+        await clock.advance(hass, 1)  # no debounce: recover -> ping -> VERIFY ok
+        assert eng.state is GState.COOLDOWN and driver.calls == 1, eng.state
+        got = [(v["event"], v["health_detail"]) for v in sent]
+        assert got == [
+            ("recovery_attempt", "Failure reported."),
+            ("recovery_success", ""),
+        ], got
+        await eng.async_stop()
+
+
+async def test_hb_recovery_blocked_without_detail(hass, _):
+    """recovery_blocked has its own reason and carries no detail."""
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "a5")
+        eng = _hb_engine(hass, src, StandardPolicy({}), BlockedDriver(hass))
+        await eng.async_start()
+        await src.async_handle_ping(False, "3")
+        await clock.advance(hass, 1)
+        assert eng.state is GState.ESCALATED
+        got = {v["event"]: v["health_detail"] for v in sent}
+        assert got == {
+            "recovery_attempt": "Failure reported, exit code 3.",
+            "recovery_blocked": "",
+        }, got
+        await eng.async_stop()
+
+
+async def test_hb_snooze_keeps_pings(hass, _):
+    """Snooze holds; a ping meanwhile is stored and saved; right state afterwards."""
+    saves = []
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "a6")
+        eng = _hb_engine(hass, src, save=lambda: saves.append(1))
+        assert saves == [1]  # bind_persist flushed the fresh (armed) state
+        await eng.async_start()
+        await src.async_handle_ping(True, None)
+        eng.snooze(timedelta(hours=10))
+        await clock.advance(hass, _HB_PERIOD + _HB_GRACE + 5)  # overdue, but snoozed
+        assert eng.state is GState.SNOOZED and src.evaluate() is Health.UNHEALTHY
+        before = len(saves)
+        await src.async_handle_ping(True, None)
+        assert eng.state is GState.SNOOZED and len(saves) == before + 1
+        assert eng.snapshot()["source"]["last_ok"] == clock.now.isoformat()
+        eng.unsnooze()
+        assert eng.state is GState.OK and sent == []
+        await eng.async_stop()
+
+
+async def test_hb_grace_ran_out_during_snooze_alarms_on_unsnooze(hass, _):
+    """Decision 22: the grace ran out while snoozed -> alarm right after the snooze.
+
+    The grace counts from the deadline, a snooze does not stop it: still broken
+    afterwards is broken (no fresh debounce). Both ways out of a snooze: lifted
+    early by unsnooze, and elapsed on its own while the grace was running.
+    """
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "a8")
+        eng = _hb_engine(hass, src)
+        await eng.async_start()
+        await src.async_handle_ping(True, None)
+        eng.snooze(timedelta(hours=10))
+        await clock.advance(hass, _HB_PERIOD + _HB_GRACE + 5)  # grace used up
+        assert eng.state is GState.SNOOZED and sent == []
+        eng.unsnooze()
+        assert eng.state is GState.ESCALATED
+        await hass.async_block_till_done()
+        assert [(v["event"], v["health_detail"]) for v in sent] == [
+            (
+                "problem_detected",
+                "No heartbeat for 70 minutes, expected every 60 minutes.",
+            )
+        ], sent
+        await eng.async_stop()
+
+        # Snoozed in the middle of the grace; the snooze outlasts it and elapses.
+        sent.clear()
+        src2 = _hb_source(hass, "a9")
+        eng2 = _hb_engine(hass, src2)
+        await eng2.async_start()
+        await src2.async_handle_ping(True, None)
+        await clock.advance(hass, _HB_PERIOD + 1)
+        assert eng2.state is GState.SUSPECT
+        eng2.snooze(timedelta(seconds=_HB_GRACE + 60))
+        await clock.advance(hass, _HB_GRACE + 59)
+        assert eng2.state is GState.SNOOZED and sent == []
+        await clock.advance(hass, 1)  # the snooze ends -> no fresh debounce
+        assert eng2.state is GState.ESCALATED
+        await hass.async_block_till_done()
+        assert [v["event"] for v in sent] == ["problem_detected"], sent
+        await eng2.async_stop()
+
+
+async def test_hb_persistence_overdue_escalated_stays(hass, _):
+    """Same token: a stored ESCALATED survives a restart without a new alarm."""
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "a7")
+        long_ago = clock.now - timedelta(days=2)
+        state = hb.apply_ping(
+            hb.reconcile_token({}, src.token, long_ago)[0], True, None, long_ago
+        )
+        stored = {"state": "escalated", "attempt": 2, "source": state}
+        eng = _hb_engine(hass, src, persisted=stored)
+        assert eng.state is GState.ESCALATED and eng.attempt == 2
+        await eng.async_start()
+        await hass.async_block_till_done()
+        assert eng.state is GState.ESCALATED and sent == []
+        assert eng.health_detail == (
+            "No heartbeat for 2 days, expected every 60 minutes."
+        )
+        assert eng.snapshot()["source"] == state
+        await eng.async_stop()
+
+
+async def test_hb_persistence_new_token_drops_escalated(hass, _):
+    """Another token's state drops a stored ESCALATED (not a snooze).
+
+    Regenerated token or type switch: the verdict judged the old token -> OK,
+    attempt 0, then grey (waiting); the reset is saved right away.
+    """
+    with _HbClock(), _NotifySink() as sent:
+        old = _hb_source(hass, "b1")
+        stale = hb.apply_ping(old.snapshot(), False, "3", dt_util.utcnow())
+        stored = {"state": "escalated", "attempt": 2, "fail_count": 4, "source": stale}
+        saves = []
+        src = _hb_source(hass, "b2")
+        eng = _hb_engine(hass, src, persisted=stored, save=lambda: saves.append(1))
+        assert eng.state is GState.OK and eng.attempt == 0 and eng.fail_count == 4
+        assert saves == [1]  # the reset reached the Store at once
+        assert eng.snapshot()["source"]["token_fp"] == hb.token_fp(src.token)
+        await eng.async_start()
+        assert eng.state is GState.BLIND and sent == []
+        await eng.async_stop()
+        # A deliberate snooze survives the token change.
+        snoozed = {
+            "state": "snoozed",
+            "snooze_until": (dt_util.utcnow() + timedelta(hours=1)).isoformat(),
+            "source": stale,
+        }
+        eng2 = _hb_engine(hass, _hb_source(hass, "b3"), persisted=snoozed)
+        assert eng2.state is GState.SNOOZED
+        await eng2.async_stop()
+
+
+async def test_reset_engine_verdict(hass, _):
+    """The dormant-path helper resets state/attempt, keeps snooze, stats, source."""
+    stored = {
+        "state": "escalated",
+        "attempt": 2,
+        "recover_count": 3,
+        "source": {"x": 1},
+    }
+    new = reset_engine_verdict(stored)
+    assert new == {"state": "ok", "attempt": 0, "recover_count": 3, "source": {"x": 1}}
+    assert stored["state"] == "escalated"  # input left alone
+    snoozed = {"state": "snoozed", "attempt": 0, "snooze_until": "x"}
+    assert reset_engine_verdict(snoozed) == snoozed
+    assert reset_engine_verdict({}) == {"state": "ok", "attempt": 0}
+
+
+async def test_snapshot_has_source_key(hass, _):
+    """Sources without own state store {} (additive key, same STORAGE_VERSION)."""
+    eng = make(hass, FakeHealth(hass), StubDriver(hass))
+    assert eng.snapshot()["source"] == {}
+    await eng.async_stop()
 
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

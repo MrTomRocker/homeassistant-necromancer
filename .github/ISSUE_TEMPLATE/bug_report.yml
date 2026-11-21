@@ -11,7 +11,7 @@ body:
     id: version
     attributes:
       label: Necromancer version
-      description: See the release badge, HACS, or `manifest.json`.
+      description: See Settings → Devices & Services → Necromancer, the release badge, or `manifest.json`.
       placeholder: v0.1.0
     validations:
       required: true
@@ -19,7 +19,7 @@ body:
     id: ha_version
     attributes:
       label: Home Assistant version
-      placeholder: "2025.6.0"
+      placeholder: "2026.11.0"
     validations:
       required: true
   - type: textarea
@@ -34,11 +34,19 @@ body:
     attributes:
       label: Guard configuration
       description: >
-        Health source (state-based / template-based), the chosen strategy, and the
-        current value of `sensor.<guard>_status`.
+        Health Source (state-based / template-based / heartbeat), the chosen strategy, and the
+        current value of `sensor.<guard>_status`. For a heartbeat guard, never paste the URL —
+        replace the token with `<token>`.
       render: text
     validations:
       required: true
+  - type: input
+    id: heartbeat_status
+    attributes:
+      label: HTTP status your sender received (heartbeat guards only)
+      description: e.g. `200`, `403`, `404`, `429`, `503` — or "no connection".
+    validations:
+      required: false
   - type: textarea
     id: logs
     attributes:

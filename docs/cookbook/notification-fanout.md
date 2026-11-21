@@ -32,13 +32,17 @@ shared script. The guard stays "dumb"; it knows nothing about phones or rooms.
     max: "{{ max | default('') }}"
     attempts: "{{ attempts | default('') }}"
     reason: "{{ reason | default('') }}"
+    health_detail: "{{ health_detail | default('') }}"
 ```
 
 `message` is the full `"Name: text"` line, `name`/`event_text` are its parts (handy when a channel
 takes a separate title), `event` is the key you can branch on (`problem_detected`, `recovery_attempt`,
 `recovery_success`, `recovery_failed`, `recovery_blocked`, `no_auto_recovery`,
-`linked_repair_failed`), and `attempt`/`max`/`attempts`/`reason` fill in where applicable. The
-`default('')` keeps the script's fields tidy when a variable isn't set for a given event.
+`linked_repair_failed`), and `attempt`/`max`/`attempts`/`reason` fill in where applicable.
+`health_detail` is the Health Source's reason as a sentence (e.g. *"No heartbeat for 25 hours,
+expected every 24 hours."*) — it is **already appended** to `message` and `event_text`, so forward it
+only if a channel wants the reason on its own. The `default('')` keeps the script's fields tidy when
+a variable isn't set for a given event.
 
 ## The shared script   (skeleton with routing)
 
@@ -54,12 +58,13 @@ necromancer_notify:
   fields:
     name: { description: Guard name }
     event_text: { description: Event text without the name }
-    message: { description: Full "Name: text" line }
+    message: { description: 'Full "Name: text" line' }
     event: { description: Event key }
     attempt: { description: Recovery attempt number }
     max: { description: Max attempts }
     attempts: { description: Plural-correct attempts phrase }
     reason: { description: Why a recovery was blocked / skipped }
+    health_detail: { description: The Health Source's reason (already in message / event_text) }
   sequence:
     - variables:
         _name: "{{ name | default('') }}"
@@ -134,8 +139,8 @@ naturally on Alexa and the tablet with no extra formatting.
 - **The notify action runs detached.** Necromancer doesn't wait for your script, so a slow TTS or a
   deliberate `delay:` inside it never stalls the engine — but it also means ordering across guards is
   best-effort, which is exactly what the queue is for.
-- **Don't rely on a variable that wasn't sent.** `attempt` / `max` / `attempts` / `reason` only apply
-  to some events; the `default('')` in both the guard action and the script `fields` keeps them
+- **Don't rely on a variable that wasn't sent.** `attempt` / `max` / `attempts` / `reason` /
+  `health_detail` only apply to some events; the `default('')` in both the guard action and the script `fields` keeps them
   blank rather than erroring. If you print them, guard with `{% if attempt %}…{% endif %}`.
 - **Add channels by event severity, not by guard.** When you want a pager or a critical-alert push
   only for escalations, add it inside an `event`-based `if` in the script — never as a special-case

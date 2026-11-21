@@ -1,6 +1,13 @@
-# Alert when a Node-RED flow (or any data source) silently stalls
+# Freshness watchdog (Node-RED)
 
 > A heartbeat sensor keeps existing with a stale value when the flow behind it dies, so a plain state check never notices — watch *when it last wrote* instead.
+
+**Which one do I need?** This recipe watches something that **has an entity in Home Assistant** — a
+Node-RED value, an MQTT feed, a scrape sensor — and asks *"has it stopped updating?"*. For a job
+that runs **outside** Home Assistant and has no entity (a backup, a cron or systemd job, a NAS
+task), use the [Heartbeat (ping URL)](https://github.com/MrTomRocker/homeassistant-necromancer#heartbeat)
+health source instead — see
+[Know when a nightly backup didn't run](job-heartbeat.md).
 
 **Concepts shown:** template guard · freshness watchdog (`last_reported`) · history/timestamp access · notify-only (or run an action + Health Check) · flow redeploy
 **Use it for:** Node-RED flows, scrape / MQTT feeds, integration polls — any source that should keep updating.

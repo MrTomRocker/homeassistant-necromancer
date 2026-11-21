@@ -27,6 +27,9 @@ DOMAIN = "necromancer"
 
 _CHECK_STRATEGIES = {"switch_check", "action_check", "actions_check", "poe_port"}
 
+# A fixed 64-hex heartbeat token for tests (secrets.token_hex(32) in the flow).
+HEARTBEAT_TOKEN = "ab" * 32
+
 
 @pytest.fixture(autouse=True)
 def _enable_custom(enable_custom_integrations: None) -> None:
@@ -57,13 +60,24 @@ def make_guard(
     on_value: Sequence[str] = ("on",),
     off_value: Sequence[str] = ("off",),
     attribute: str | None = None,
+    period: int = 86400,
+    token: str = HEARTBEAT_TOKEN,
+    local_only: bool = True,
 ) -> dict[str, Any]:
     """Build one guard subentry `data` dict matching `_build_data`'s output."""
     notify_only = strategy == "notify"
     check = strategy in _CHECK_STRATEGIES
 
+    heartbeat = source == "heartbeat_based"
     if source == "template_based":
         health: dict[str, Any] = {"type": "template", "template": template}
+    elif heartbeat:
+        health = {
+            "type": "heartbeat",
+            "token": token,
+            "period": period,
+            "local_only": local_only,
+        }
     else:
         health = {
             "type": "entity_state",
@@ -111,7 +125,8 @@ def make_guard(
 
     if device_id:
         data["device_id"] = device_id
-    if linked_guards and not notify_only:
+    # Heartbeat guards never link, so the flow stores no linked_guards for them.
+    if linked_guards and not notify_only and not heartbeat:
         data["linked_guards"] = sorted(linked_guards)
     return data
 
@@ -166,7 +181,11 @@ def setup_guards(hass: HomeAssistant) -> SetupGuards:
 def entity_id_for(
     hass: HomeAssistant, subentry_id: str, domain: str, key: str
 ) -> str | None:
-    """Resolve a guard's view-entity id via the registry (unique_id = `<sid>_<key>`)."""
+    """Resolve a guard's view-entity id via the registry (unique_id = `<sid>_<key>`).
+
+    Keys: `status`, `health`, `auto_restart`, `recover`, `recovery_event` and,
+    for heartbeat guards only, `last_heartbeat`.
+    """
     return er.async_get(hass).async_get_entity_id(
         domain, DOMAIN, f"{subentry_id}_{key}"
     )

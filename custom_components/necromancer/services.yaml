@@ -11,12 +11,14 @@ reset:
     entity:
       integration: necromancer
       domain: sensor
+      device_class: enum
 
 snooze:
   target:
     entity:
       integration: necromancer
       domain: sensor
+      device_class: enum
   fields:
     duration:
       required: true
@@ -29,12 +31,14 @@ unsnooze:
     entity:
       integration: necromancer
       domain: sensor
+      device_class: enum
 
 notify_guard:
   target:
     entity:
       integration: necromancer
       domain: sensor
+      device_class: enum
   fields:
     message:
       required: true
@@ -61,6 +65,13 @@ notify_guard:
         number:
           min: 0
           mode: box
+
+heartbeat_ping:
+  target:
+    entity:
+      integration: necromancer
+      domain: sensor
+      device_class: enum
 
 snooze_all:
   fields:
@@ -103,3 +114,13 @@ wait_for_health:
       default: true
       selector:
         boolean:
+
+heartbeat_url:
+  fields:
+    guard:
+      required: true
+      example: sensor.backup_job_status
+      selector:
+        entity:
+          integration: necromancer
+          domain: sensor

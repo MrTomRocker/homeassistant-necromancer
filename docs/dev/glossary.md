@@ -40,6 +40,20 @@ word in the config flow and on the status sensor.
 | healthy *(adjective)* | healthy | gesund |
 | on-value meaning | OK | „in Ordnung" |
 | off-value meaning | faulty | „gestört" |
+| the third health source *(concept)* | heartbeat | **Lebenszeichen** |
+| its source-type option | Heartbeat (ping URL) | Lebenszeichen (Ping-URL) |
+| the guard's secret URL | ping URL / heartbeat URL | Ping-URL / Lebenszeichen-URL |
+| one report from the job | ping (a success / failure ping) | Ping (Erfolgs- / Fehler-Ping) |
+| how often a job must succeed (`period`) | Period | Takt |
+| the wait after a missed ping (= `debounce`) | Wait before reacting — „grace" in prose | Wartezeit vor Reaktion — „Kulanz" im Fließtext |
+| `local_only` | Local network only | Nur lokales Netz |
+| `regenerate_token` | Generate a new token | Token neu erzeugen |
+
+**Heartbeat vs. freshness.** „Heartbeat" / „Lebenszeichen" means only the health source above: a
+job **outside** HA that pings the URL. The template check on `last_reported` of an entity (cookbook
+`nodered-heartbeat.md`) is a **freshness watchdog** / „Frische-Prüfung" — never call it heartbeat in
+new text. Never „Webhook" for the heartbeat: it is not HA's webhook trigger. The UI name is
+„Heartbeat (ping URL)" (de „Lebenszeichen (Ping-URL)"), not „Heartbeat (webhook)".
 
 Four `device` senses stay distinct: the **monitored device** (what a Guard watches — use
 this phrase, not bare „device"), the **assigned device** (`device_id`, the optional registry
@@ -60,6 +74,9 @@ Translated like any HA entity/state (German users expect German names). Descript
 | switch (auto-recovery) | Auto-recovery | Auto-Reparatur |
 | button (manual) | Revive | Reparieren |
 | event (recovered) | Recovery | Wiederbelebung |
+| timestamp sensor (`last_heartbeat`) | Last heartbeat | Letztes Lebenszeichen |
+| service `heartbeat_ping` | Heartbeat ping | Lebenszeichen setzen |
+| service `heartbeat_url` / info step | Heartbeat URL / New heartbeat URL | Lebenszeichen-URL / Neue Lebenszeichen-URL |
 
 The **button + event** carry the Necromancer „revive" flavour (EN „Revive" / DE
 „Wiederbelebung") — kept on purpose, distinct from the neutral process word „Reparatur".
@@ -78,12 +95,23 @@ The **button + event** carry the Necromancer „revive" flavour (EN „Revive" /
    `unknown`, `unavailable`, `none`), Jinja (`true`, `false`, `is_state(...)`), variable names.
    The on/off value *meanings* (OK, faulty) stay prose.
 5. **Action variables** — notify: `message, name, event_text, event, attempt, max, attempts,
-   reason`; recovery: `attempt, max, name, guard_entity_id` (+ off→on: off-action vars
-   readable in the on-action).
+   reason, health_detail`; recovery: `attempt, max, name, guard_entity_id` (+ off→on: off-action
+   vars readable in the on-action). `health_detail` is the source's reason as a sentence (from
+   `DETAIL_MESSAGES` in `const.py`, e.g. „Kein Lebenszeichen seit 25 Stunden, erwartet alle 24
+   Stunden.") — `""` when there is none; it is also appended to `message`/`event_text` as a second
+   sentence and shown as the status sensor's `health_detail` attribute. Its placeholders (`since`,
+   `period`, `code`) are resolved by the engine and are **not** action variables.
+6. **Health Source stays the proper noun in running text too** — „whose Health Source is the
+   heartbeat" / „als Health Source", never „health source" / „Health-Quelle" in UI strings.
+7. **Installation wording.** Public docs describe installing only via the Home Assistant
+   Marketplace (Home Assistant 2026.11+): „Install via the Marketplace" (never „new"), plus the
+   manual copy into `custom_components/` (Home Assistant 2026.8+). No third-party stores and no
+   third-party monitoring services by name.
 
 ## Quick check
 
 ```
-grep -nE "Wächter|Gesundheitszustand|Zustands-Template|Health-Prüfung|fixed id" translations/*.json   # → empty
+grep -nE "Wächter|Gesundheitszustand|Zustands-Template|Health-Prüfung|Health-Quelle|fixed id" translations/*.json   # → empty
 grep -nE "Recovery|Cooldown" translations/de.json   # → only in §3 display names, not in descriptions
+grep -niE "heartbeat \(webhook\)|Lebenszeichen \(Webhook\)" translations/*.json   # → empty
 ```

@@ -139,7 +139,8 @@
       "error": {
         "no_self_link": "Necromancer-eigene Geräte können nicht verknüpft werden. Wähle ein anderes Gerät.",
         "duplicate_name": "Ein Guard mit diesem Namen existiert bereits. Wähle einen eindeutigen Namen, damit die Status-Entitäten eindeutig bleiben.",
-        "action_required": "Diese Reparatur braucht eine Aktion — ein Guard ohne Aktion kann nur eskalieren."
+        "action_required": "Diese Reparatur braucht eine Aktion — ein Guard ohne Aktion kann nur eskalieren.",
+        "period_too_short": "Der Takt muss mindestens 1 Minute betragen."
       },
       "abort": {
         "reconfigure_successful": "Neukonfiguration erfolgreich."
@@ -147,16 +148,19 @@
       "step": {
         "user": {
           "title": "Health Source",
-          "description": "Du legst einen Necromancer Guard an. Woran soll Necromancer den Health State des überwachten Geräts erkennen — am Zustand einer Entität oder über ein Jinja-Template?",
+          "description": "Du legst einen Necromancer Guard an. Woran soll Necromancer den Health State des überwachten Geräts erkennen — am Zustand einer Entität, über ein Jinja-Template oder an Lebenszeichen, die ein Job außerhalb von Home Assistant an eine URL schickt?",
           "data": {
             "source_type": "Quellentyp"
           }
         },
         "reconfigure": {
           "title": "Health Source",
-          "description": "Woran soll Necromancer den Health State des überwachten Geräts erkennen — am Zustand einer Entität oder über ein Jinja-Template?",
+          "description": "Woran soll Necromancer den Health State des überwachten Geräts erkennen — am Zustand einer Entität, über ein Jinja-Template oder an Lebenszeichen, die ein Job außerhalb von Home Assistant an eine URL schickt?",
           "data": {
             "source_type": "Quellentyp"
+          },
+          "data_description": {
+            "source_type": "Wechselt ein Lebenszeichen-Guard auf einen anderen Typ, wird seine URL ungültig; Absender bekommen dann 404."
           }
         },
         "device": {
@@ -169,6 +173,9 @@
             "on_value": "Wert für „in Ordnung“",
             "off_value": "Wert für „gestört“",
             "template": "Health Template",
+            "period": "Takt",
+            "local_only": "Nur lokales Netz",
+            "regenerate_token": "Token neu erzeugen",
             "device_id": "Zugewiesenes Home-Assistant-Gerät (optional)"
           },
           "data_description": {
@@ -178,6 +185,9 @@
             "on_value": "z. B. `on`, `home`, `online`. Andere Werte als dieser oder der „gestört“-Wert gelten als unbekannt und lösen nichts aus.",
             "off_value": "z. B. `off`, `unavailable`.",
             "template": "Gib `true`, `on`, `1` oder `yes` für „in Ordnung“ zurück; `false`, `off`, `0` oder `no` für „gestört“ – z. B. ein Vergleich wie „CPU < 90“ oder `is_state(...)`. Alles andere (`unavailable`, `unknown`, `none`, ein leeres Ergebnis oder ein Render-Fehler) gilt als `unknown` und löst nichts aus (kein Fehlalarm). Wird neu ausgewertet, sobald sich referenzierte Entitäten ändern. Richte es auf das überwachte Gerät – nicht auf die eigenen Status-/Health-Entitäten dieses Guards, sonst entsteht eine Rückkopplungsschleife.",
+            "period": "Wie oft der Job Erfolg meldet, z. B. 1 Tag für eine nächtliche Sicherung. Mindestens 1 Minute.",
+            "local_only": "An (Standard): Nur Absender aus privaten Netzen (LAN, VPNs mit privaten Adressen, dieser Rechner; nicht Tailscales 100.64.x) werden angenommen, andere bekommen 403. Nur ausschalten, wenn ein Absender außerhalb deines Netzes melden muss.",
+            "regenerate_token": "Erzeugt eine neue geheime URL. Die alte URL wird mit dem Speichern ungültig (404) — sinnvoll, wenn die URL in falsche Hände geraten ist.",
             "device_id": "Optional. Verknüpft das eigene Gerät dieses Guards mit dem gewählten Home-Assistant-Gerät, sodass der Guard dort als „verbunden über\" auftaucht. Schaltet außerdem frei, die Integration dieses Geräts nach einer Reparatur neu zu laden."
           }
         },
@@ -211,7 +221,7 @@
                 "max_attempts": "Max. Versuche"
               },
               "data_description": {
-                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen und lösen keine Reparatur aus.",
+                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen. Beim Lebenszeichen ist das die Kulanz nach einem ausgebliebenen Ping; ein gemeldeter Fehler wirkt sofort.",
                 "health_check": "An (Standard): die Reparatur wird gegen den Health State des überwachten Geräts verifiziert, bevor der Guard wieder ruhig wird. Aus: die Aktion gilt als erfolgreich und geht direkt in die Abkühlphase.",
                 "boot_window": "Mit Health Check an: wie lange nach der Aktion auf „gesund“ des überwachten Geräts gewartet wird.",
                 "cooldown": "Ruhephase nach erfolgreicher Reparatur, bevor der Guard wieder überwacht.",
@@ -220,7 +230,7 @@
             },
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
                 "notify_action": "Aktion"
               }
@@ -273,7 +283,7 @@
                 "max_attempts": "Max. Versuche"
               },
               "data_description": {
-                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen und lösen keine Reparatur aus.",
+                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen. Beim Lebenszeichen ist das die Kulanz nach einem ausgebliebenen Ping; ein gemeldeter Fehler wirkt sofort.",
                 "health_check": "An (Standard): die Reparatur wird gegen den Health State des überwachten Geräts verifiziert, bevor der Guard wieder ruhig wird. Aus: die Aktion gilt als erfolgreich und geht direkt in die Abkühlphase.",
                 "boot_window": "Mit Health Check an: wie lange nach der Aktion auf „gesund“ des überwachten Geräts gewartet wird.",
                 "cooldown": "Ruhephase nach erfolgreicher Reparatur, bevor der Guard wieder überwacht.",
@@ -282,7 +292,7 @@
             },
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
                 "notify_action": "Aktion"
               }
@@ -340,7 +350,7 @@
                 "max_attempts": "Max. Versuche"
               },
               "data_description": {
-                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen und lösen keine Reparatur aus.",
+                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen. Beim Lebenszeichen ist das die Kulanz nach einem ausgebliebenen Ping; ein gemeldeter Fehler wirkt sofort.",
                 "health_check": "An (Standard): die Reparatur wird gegen den Health State des überwachten Geräts verifiziert, bevor der Guard wieder ruhig wird. Aus: die Aktion gilt als erfolgreich und geht direkt in die Abkühlphase.",
                 "boot_window": "Mit Health Check an: wie lange nach der Aktion auf „gesund“ des überwachten Geräts gewartet wird.",
                 "cooldown": "Ruhephase nach erfolgreicher Reparatur, bevor der Guard wieder überwacht.",
@@ -349,7 +359,7 @@
             },
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
                 "notify_action": "Aktion"
               }
@@ -401,7 +411,7 @@
                 "max_attempts": "Max. Versuche"
               },
               "data_description": {
-                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen und lösen keine Reparatur aus.",
+                "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen. Beim Lebenszeichen ist das die Kulanz nach einem ausgebliebenen Ping; ein gemeldeter Fehler wirkt sofort.",
                 "health_check": "An (Standard): die Reparatur wird gegen den Health State des überwachten Geräts verifiziert, bevor der Guard wieder ruhig wird. Aus: die Aktion gilt als erfolgreich und geht direkt in die Abkühlphase.",
                 "boot_window": "Mit Health Check an: wie lange nach der Aktion auf „gesund“ des überwachten Geräts gewartet wird.",
                 "cooldown": "Ruhephase nach erfolgreicher Reparatur, bevor der Guard wieder überwacht.",
@@ -410,7 +420,7 @@
             },
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
                 "notify_action": "Aktion"
               }
@@ -448,17 +458,25 @@
             "debounce": "Wartezeit vor Reaktion"
           },
           "data_description": {
-            "debounce": "Wie lange ein Ausfall anhalten muss, bevor die Benachrichtigung auslöst — kurze Aussetzer werden abgefangen."
+            "debounce": "Wie lange ein Ausfall anhalten muss, bevor Necromancer reagiert — kurze Aussetzer werden abgefangen. Beim Lebenszeichen ist das die Kulanz nach einem ausgebliebenen Ping; ein gemeldeter Fehler wirkt sofort."
           },
           "sections": {
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
                 "notify_action": "Aktion"
               }
             }
           }
+        },
+        "heartbeat_url": {
+          "title": "Lebenszeichen-URL",
+          "description": "An diese URL meldet dein Job sein Lebenszeichen. Gespeichert wird erst mit dem Absenden; schließt du den Dialog beim Anlegen hier, wird der Guard nicht angelegt und die URL funktioniert nicht.\n\n```\n{url}\n```\n\nErfolg melden:\n\n```\n{example_ok}\n```\n\nFehler melden:\n\n```\n{example_fail}\n```\n\nExit-Code des Jobs mitschicken (`0` ist Erfolg, alles andere ein Fehler):\n\n```\n{example}\n```\n\nMit „Nur lokales Netz“ sollten Absender die IPv4-Adresse von Home Assistant nehmen; ein Hostname kann auf IPv6 auflösen und abgewiesen werden (403). Beginnt die URL mit `/api`, kennt Home Assistant keine eigene URL: Setze `http://HA-ADRESSE:8123` davor. Die URL siehst du jederzeit wieder, wenn du den Guard neu konfigurierst."
+        },
+        "heartbeat_url_new": {
+          "title": "Neue Lebenszeichen-URL",
+          "description": "Ein neues Token wurde erzeugt. Mit dem Absenden wird die alte URL ungültig (Absender bekommen 404), stelle also alle Absender auf diese URL um. Schließt du den Dialog, ändert sich nichts und die alte URL gilt weiter.\n\n```\n{url}\n```\n\nErfolg melden:\n\n```\n{example_ok}\n```\n\nFehler melden:\n\n```\n{example_fail}\n```\n\nExit-Code des Jobs mitschicken (`0` ist Erfolg, alles andere ein Fehler):\n\n```\n{example}\n```\n\nMit „Nur lokales Netz“ sollten Absender die IPv4-Adresse von Home Assistant nehmen; ein Hostname kann auf IPv6 auflösen und abgewiesen werden (403). Beginnt die URL mit `/api`, kennt Home Assistant keine eigene URL: Setze `http://HA-ADRESSE:8123` davor. Die URL siehst du jederzeit wieder, wenn du den Guard neu konfigurierst."
         }
       }
     }
@@ -477,6 +495,9 @@
           "escalated": "Eskaliert",
           "snoozed": "Schlummert"
         }
+      },
+      "last_heartbeat": {
+        "name": "Letztes Lebenszeichen"
       }
     },
     "binary_sensor": {
@@ -513,7 +534,8 @@
     "source_type": {
       "options": {
         "state_based": "Zustand einer Entität",
-        "template_based": "Jinja-Template"
+        "template_based": "Jinja-Template",
+        "heartbeat_based": "Lebenszeichen (Ping-URL)"
       }
     },
     "strategy": {
@@ -628,6 +650,20 @@
           "description": "Vor dem Warten einmal auswerten und sofort zurückkehren, wenn schon gesund (Default: `an`)."
         }
       }
+    },
+    "heartbeat_ping": {
+      "name": "Lebenszeichen setzen",
+      "description": "Setzt für einen Lebenszeichen-Guard von Hand ein erfolgreiches Lebenszeichen, als hätte sein Job gepingt — für einen verlorenen Ping (z. B. während Home Assistant nicht lief), obwohl der Job lief. Die Frist läuft ab jetzt neu, ein überfälliger Guard wird wieder OK. Wird mit dem auslösenden Benutzer protokolliert."
+    },
+    "heartbeat_url": {
+      "name": "Lebenszeichen-URL",
+      "description": "Gibt die Ping-URL eines Lebenszeichen-Guards zurück (`url`, null, wenn Home Assistant keine eigene URL kennt) und ihren Pfad (`path`). Nur für Administratoren: Die URL enthält das geheime Token des Guards.",
+      "fields": {
+        "guard": {
+          "name": "Guard",
+          "description": "Die Status-Entity des Lebenszeichen-Guards."
+        }
+      }
     }
   },
   "exceptions": {
@@ -636,6 +672,12 @@
     },
     "unknown_guard": {
       "message": "{entity_id} ist keine Necromancer-Guard-Status-Entity — übergib den Status-Sensor des Guards, das guard_entity_id, das eine Reparatur-Aktion erhält."
+    },
+    "not_a_heartbeat_guard": {
+      "message": "{entity_id} ist kein Lebenszeichen-Guard — diese Aktion braucht einen Guard mit dem Lebenszeichen als Health Source."
+    },
+    "heartbeat_not_running": {
+      "message": "Das Lebenszeichen von {name} läuft gerade nicht (Necromancer lädt neu) — versuche es gleich noch einmal."
     }
   },
   "issues": {

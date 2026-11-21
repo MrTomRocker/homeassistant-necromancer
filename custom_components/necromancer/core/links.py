@@ -11,6 +11,7 @@ splits it.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 import logging
 from typing import TYPE_CHECKING
@@ -159,7 +160,11 @@ class LinkCoordinator:
                 eng._cancel_timer()
                 eng._set_state(GState.ESCALATED)
                 eng.hass.async_create_task(
-                    eng._notify("no_auto_recovery", reason="auto_off")
+                    eng._notify(
+                        "no_auto_recovery",
+                        reason="auto_off",
+                        health_detail=eng.health_detail or "",
+                    )
                 )
             return
         LOGGER.info(
@@ -210,6 +215,12 @@ class LinkCoordinator:
                 LOGGER.info(
                     "%s: still unhealthy after linked repair — own recovery", eng.name
                 )
+                # Release the cycle slot before re-deriving: a confirmed verdict
+                # (heartbeat failure ping) skips the debounce, so _evaluate starts
+                # our cycle (or follows a partner) right here. With this task still
+                # in the slot, _start_cycle / the busy-guard would see a cycle
+                # running and drop it, leaving us in SUSPECT with no timer.
+                eng._cycle_task = None
                 eng._set_state(GState.OK)
                 eng._evaluate()
             else:
@@ -219,9 +230,17 @@ class LinkCoordinator:
                 )
                 eng._record_failure()
                 eng._set_state(GState.ESCALATED)
-                eng.hass.async_create_task(eng._notify("linked_repair_failed"))
+                # The reason the transition just captured (see engine._set_state).
+                eng.hass.async_create_task(
+                    eng._notify(
+                        "linked_repair_failed", health_detail=eng.health_detail or ""
+                    )
+                )
         finally:
             # Clear the cycle slot like _run_recovery_cycle does, so a later
             # suspect/manual recover can start a fresh cycle (a cancelled verify
-            # unwinds here too, leaving no work on a torn-down engine).
-            eng._cycle_task = None
+            # unwinds here too, leaving no work on a torn-down engine). Only if
+            # the slot is still ours: the fallback above may have just handed it
+            # to a fresh recovery cycle, which must not be orphaned.
+            if eng._cycle_task is asyncio.current_task():
+                eng._cycle_task = None

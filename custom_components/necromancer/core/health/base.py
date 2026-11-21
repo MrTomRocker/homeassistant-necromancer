@@ -9,6 +9,8 @@ layer on top later.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
+from datetime import datetime
 from enum import StrEnum
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
@@ -56,6 +58,64 @@ class HealthSource(ABC):
 
     async def async_setup(self, on_change: CALLBACK_TYPE) -> CALLBACK_TYPE | None:
         """Register own listeners (e.g. a template tracker). Returns an unsub."""
+        return None
+
+    # ---- optional hooks (no-op defaults, so existing sources are unaffected) ----
+    def snapshot(self) -> dict:
+        """Source-owned state to persist (stored under the guard's `source` key).
+
+        Only sources with state of their own (a heartbeat's last ping) need this;
+        entity/template sources re-read live state and keep nothing.
+        """
+        return {}
+
+    def restore(self, data: dict) -> bool:
+        """Seed source state from a stored `snapshot()` before `async_setup`.
+
+        Returns True when the stored state belongs to a different identity (e.g.
+        a regenerated heartbeat token): the engine then discards a persisted
+        ESCALATED verdict, since it judged something that no longer exists.
+        """
+        return False
+
+    def bind_persist(self, save: Callable[[], None]) -> None:
+        """Receive the engine's save callback.
+
+        The engine only saves on state transitions; a source whose own state
+        changes without one (an OK->OK heartbeat ping) calls `save` itself.
+        Sources without own state ignore it.
+        """
+        return
+
+    def detail(self) -> tuple[str, dict] | None:
+        """Why the current verdict is what it is: (DETAIL_MESSAGES key, params).
+
+        Read synchronously by the engine at a transition and rendered as a
+        second sentence of the alarm. None = no detail, behaviour unchanged.
+        """
+        return None
+
+    def confirmed(self) -> bool:
+        """True when the current UNHEALTHY verdict needs no debounce.
+
+        The debounce exists to absorb blips of a signal that can flap. A source
+        that was told outright about a fault (a heartbeat's reported failure)
+        returns True, and the engine reacts at once instead of waiting it out —
+        also cutting short a debounce already running. Default False keeps every
+        other source on the normal debounce.
+        """
+        return False
+
+    def fault_since(self) -> datetime | None:
+        """When the current fault began, if the source knows it across restarts.
+
+        The engine counts the debounce from here instead of from the moment it
+        noticed the fault, so a reload or an HA restart inside the debounce does
+        not start it over: only the rest is waited out, or none if it is used up.
+        Only a source whose start lives in its own stored state may answer (a
+        heartbeat's passed deadline). Default None: the debounce starts when the
+        engine sees the fault, as before.
+        """
         return None
 
     def describe(self) -> str:

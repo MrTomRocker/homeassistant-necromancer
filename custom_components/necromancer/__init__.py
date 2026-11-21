@@ -43,8 +43,10 @@ from homeassistant.helpers.event import (
     async_track_device_registry_updated_event,
     async_track_state_change_event,
 )
+from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from .const import (
     ATTR_CHECK_FIRST,
@@ -58,14 +60,19 @@ from .const import (
     CONF_ENTITY_ID,
     CONF_HEALTH,
     CONF_LINKED_GUARDS,
+    CONF_LOCAL_ONLY,
     CONF_POLICY,
     CONF_PORTS,
+    CONF_TOKEN,
     CONF_TYPE,
+    DEFAULT_LOCAL_ONLY,
     DOMAIN,
+    HEALTH_TYPE_HEARTBEAT,
     MODE_NOTIFY,
     PLATFORMS,
     SAVE_DELAY,
     SERVICE_CHECK_HEALTH,
+    SERVICE_HEARTBEAT_URL,
     SERVICE_REPAIR_POE_PORT,
     SERVICE_SNOOZE_ALL,
     SERVICE_UNSNOOZE_ALL,
@@ -74,11 +81,20 @@ from .const import (
     SUBENTRY_TYPE_DEVICE,
 )
 from .core.drivers import create_driver
-from .core.engine import DeviceEngine
+from .core.engine import DeviceEngine, reset_engine_verdict
 from .core.health import create_health
+from .core.health.heartbeat import (
+    apply_ping,
+    ping_path,
+    ping_url,
+    reconcile_token,
+    require_heartbeat,
+)
+from .core.heartbeat_registry import DormantApply, HeartbeatRegistry, HeartbeatSpec
 from .core.links import link_components
 from .core.poe import PoeFabric
 from .core.policies import create_policy
+from .heartbeat_view import async_register_view
 
 LOGGER = logging.getLogger(__name__)
 
@@ -191,6 +207,72 @@ def _rename_handler(
     return _renamed
 
 
+def _is_heartbeat(subentry) -> bool:
+    """A guard whose health source is the heartbeat endpoint."""
+    return (
+        subentry.subentry_type == SUBENTRY_TYPE_DEVICE
+        and subentry.data.get(CONF_HEALTH, {}).get(CONF_TYPE) == HEALTH_TYPE_HEARTBEAT
+    )
+
+
+def _dormant_apply(
+    stored: dict, subentry_id: str, token: str, save: Callable[[], None]
+) -> DormantApply:
+    """Store (not evaluate) a ping for a dormant heartbeat guard.
+
+    A dormant guard has no engine, but its job keeps running: without this its
+    `last_ok` would stay at the last ping before the disable, and re-enabling a
+    guard that was off longer than its period would alarm `heartbeat_overdue`
+    at once although the job ran all along. The same pure `apply_ping` as the live
+    source writes into the stored blob that `_serialize` carries over verbatim.
+    """
+
+    @callback
+    def _apply(ok: bool, code: str | None) -> None:
+        now = dt_util.utcnow()
+        guard = dict(stored.get(subentry_id) or {})
+        source, changed = reconcile_token(guard.get("source") or {}, token, now)
+        # Created asleep or token regenerated in its sleep: the stored verdict was
+        # judged under another token. Drop it here — on wake-up restore() sees a
+        # matching fingerprint and would keep a stale ESCALATED otherwise.
+        if changed and guard:
+            guard = reset_engine_verdict(guard)
+        guard["source"] = apply_ping(source, ok, code, now)
+        stored[subentry_id] = guard
+        save()
+
+    return _apply
+
+
+def _heartbeat_specs(
+    entry: NecromancerConfigEntry,
+    dormant: set[str],
+    stored: dict,
+    save: Callable[[], None],
+) -> list[HeartbeatSpec]:
+    """One token-table spec per configured heartbeat guard (from subentry data)."""
+    specs: list[HeartbeatSpec] = []
+    for subentry_id, subentry in entry.subentries.items():
+        if not _is_heartbeat(subentry):
+            continue
+        health = subentry.data[CONF_HEALTH]
+        if not (token := health.get(CONF_TOKEN)):
+            continue
+        asleep = subentry_id in dormant
+        specs.append(
+            HeartbeatSpec(
+                token=token,
+                subentry_id=subentry_id,
+                local_only=bool(health.get(CONF_LOCAL_ONLY, DEFAULT_LOCAL_ONLY)),
+                dormant=asleep,
+                dormant_apply=_dormant_apply(stored, subentry_id, token, save)
+                if asleep
+                else None,
+            )
+        )
+    return specs
+
+
 # ---------- HA lifecycle: setup ----------
 def _engine_for_guard(
     hass: HomeAssistant, entry: NecromancerConfigEntry, guard_entity_id: str
@@ -276,13 +358,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
     fabric: PoeFabric = domain_data.get("fabric") or PoeFabric(hass)
     domain_data["fabric"] = fabric
 
+    configured = {
+        sid
+        for sid, se in entry.subentries.items()
+        if se.subentry_type == SUBENTRY_TYPE_DEVICE
+    }
+
     @callback
     def _serialize() -> dict:
         data: dict = {sid: engine.snapshot() for sid, engine in engines.items()}
-        # A dormant guard has no engine to snapshot, so carry its stored state over
-        # verbatim — otherwise disabling a device would silently reset its counters
-        # and its ESCALATED verdict, handing it a clean slate when re-enabled.
-        for subentry_id in dormant:
+        # A configured guard without a running engine — dormant, or its setup
+        # failed — has nothing to snapshot, so carry its stored state over verbatim.
+        # Otherwise disabling a device would silently reset its counters and its
+        # ESCALATED verdict, and the next save (another guard's ping) would wipe a
+        # failed heartbeat guard's last_ok/armed_at/token_fp. Removed guards are not
+        # configured any more and drop out here.
+        for subentry_id in configured - engines.keys():
             if (persisted := stored.get(subentry_id)) is not None:
                 data[subentry_id] = persisted
         data["_poe_cache"] = fabric.cache
@@ -290,6 +381,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
 
     def _save() -> None:
         store.async_delay_save(_serialize, SAVE_DELAY)
+
+    # Heartbeat endpoint: the view once per HA run, the token table rebuilt from
+    # the subentry data *before* any engine starts — every token is `waiting`
+    # (503) or `dormant` until its source's async_setup makes it `active`.
+    async_register_view(hass)
+    HeartbeatRegistry.get(hass).rebuild(
+        entry.entry_id, _heartbeat_specs(entry, dormant, stored, _save)
+    )
 
     # PoE ports are a flat list in the entry's options; every poe_port guard
     # searches the whole list, so inject it into each such driver at setup. An
@@ -381,15 +480,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
         supports_response=SupportsResponse.ONLY,
     )
 
+    # The heartbeat URL contains the guard's secret token, so it is admin-only,
+    # like reading it from the subentry would be. HA's admin wrapper checks the
+    # caller before the handler runs; calls without a user (automations, scripts)
+    # are trusted as for every admin service.
+    async def _heartbeat_url(call: ServiceCall) -> ServiceResponse:
+        guard = call.data[ATTR_GUARD]
+        engine = _engine_for_guard(hass, entry, guard)
+        source = require_heartbeat(engine.health, guard)
+        return {
+            # None when HA knows no own URL: the caller adds its address to `path`.
+            "url": ping_url(hass, engine.name, source.config),
+            "path": ping_path(engine.name, source.token),
+        }
+
+    async_register_admin_service(
+        hass,
+        DOMAIN,
+        SERVICE_HEARTBEAT_URL,
+        _heartbeat_url,
+        schema=vol.Schema({vol.Required(ATTR_GUARD): cv.entity_id}),
+        supports_response=SupportsResponse.ONLY,
+    )
+
     # Guard linking: resolve each guard's group (clique-closed) from the declared
     # links. Only **recover** guards can link (matching the config flow's options),
     # so notify-only guards are excluded from the closure — a guard reconfigured to
     # notify-only therefore drops out of every group instead of lingering inertly.
     # Dormant guards drop out the same way: no leading, no following, no re-verify.
+    # Heartbeat guards never link: as a leader with a job restart they would hold
+    # every auto partner for up to max_attempts * boot_window, during which a real
+    # partner outage goes unnoticed — and a job restart rarely fixes a shared cause.
     def _is_recover(se) -> bool:
         return (
             se.subentry_type == SUBENTRY_TYPE_DEVICE
             and se.data.get(CONF_POLICY, {}).get(CONF_TYPE) != MODE_NOTIFY
+            and not _is_heartbeat(se)
         )
 
     device_ids = {
@@ -530,23 +656,27 @@ def _reconcile_entities(
     entry: NecromancerConfigEntry,
     engines: dict[str, DeviceEngine],
 ) -> None:
-    """Drop control entities (switch/button) of notify-only guards.
+    """Drop entities a guard no longer has after a reconfigure.
 
     A guard reconfigured recover -> notify-only would otherwise leave its
-    auto-restart switch and recover button behind as orphans.
+    auto-restart switch and recover button behind as orphans, and one switched
+    away from the heartbeat source its last-heartbeat sensor.
     """
     ent_reg = er.async_get(hass)
     for subentry_id, engine in engines.items():
-        if engine.allows_recovery:
-            continue
-        for domain, key in (
-            ("switch", "auto_restart"),
-            ("button", "recover"),
-            ("event", "recovery_event"),
-        ):
+        stale: list[tuple[str, str, str]] = []
+        if not engine.allows_recovery:
+            stale += [
+                ("switch", "auto_restart", "notify-only"),
+                ("button", "recover", "notify-only"),
+                ("event", "recovery_event", "notify-only"),
+            ]
+        if engine.health.config.get(CONF_TYPE) != HEALTH_TYPE_HEARTBEAT:
+            stale.append(("sensor", "last_heartbeat", "no heartbeat source"))
+        for domain, key, why in stale:
             eid = ent_reg.async_get_entity_id(domain, DOMAIN, f"{subentry_id}_{key}")
             if eid is not None:
-                LOGGER.debug("Removing %s (notify-only guard %s)", eid, engine.name)
+                LOGGER.debug("Removing %s of guard %s (%s)", eid, engine.name, why)
                 ent_reg.async_remove(eid)
 
 
@@ -601,23 +731,27 @@ async def async_unload_entry(
 ) -> bool:
     """Unload the service and stop all engines."""
     data = entry.runtime_data
-    # Flush runtime state before tearing down (engines still hold it), so a reload
-    # (rename/reconfigure) does not read a stale store.
-    await data.store.async_save(data.serialize())
-
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        # Stop first, flush second. Stopping sets every heartbeat token `waiting`,
+        # so a ping from here on gets 503 (and is retried into the next source)
+        # instead of landing in a source whose state was already written — and no
+        # late delayed save can overwrite the flush with older data.
         for engine in data.engines.values():
             await engine.async_stop()
+        HeartbeatRegistry.get(hass).set_entry_waiting(entry.entry_id)
         if (fabric := hass.data.get(DOMAIN, {}).get("fabric")) is not None:
             fabric.shutdown()
+    # Flush the final runtime state (stopped engines still hold it), so a reload
+    # (rename/reconfigure) does not read a stale store.
+    await data.store.async_save(data.serialize())
     return unload_ok
 
 
 async def async_remove_entry(
     hass: HomeAssistant, entry: NecromancerConfigEntry
 ) -> None:
-    """Drop our config-health repair issues when the integration is removed.
+    """Drop our config-health repair issues and heartbeat tokens on removal.
 
     Without this they would linger in Settings → Repairs until the next restart
     (they are non-persistent), even though the guards they referred to are gone.
@@ -630,3 +764,5 @@ async def async_remove_entry(
     ]
     for iid in stale:
         ir.async_delete_issue(hass, DOMAIN, iid)
+    # The integration is gone: its heartbeat URLs are unknown from now on (404).
+    HeartbeatRegistry.get(hass).remove_entry(entry.entry_id)

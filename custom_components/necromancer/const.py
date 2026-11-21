@@ -49,6 +49,9 @@ EVENT_GUARD_REPAIR = f"{DOMAIN}_guard_repair"
 CONF_SOURCE_TYPE = "source_type"
 SOURCE_STATE = "state_based"
 SOURCE_TEMPLATE = "template_based"
+# A job outside HA pings a secret URL; the verdict is "was there a success within
+# the period", so it stays continuous and checkable like the other two.
+SOURCE_HEARTBEAT = "heartbeat_based"
 
 # health (entity_state)
 CONF_ENTITY_ID = "entity_id"
@@ -56,6 +59,25 @@ CONF_HEALTHY_STATE = "healthy_state"
 
 # health (template)
 CONF_TEMPLATE = "template"
+
+# health (heartbeat): `token` is the only secret in the ping URL (64 hex chars) and
+# must never be logged/exposed in full; `period` is seconds. `local_only` rejects
+# pings from non-private addresses (403). There is no grace of its own: the wait
+# after a missed ping is the guard's normal debounce (`DEFAULT_HEARTBEAT_DEBOUNCE`),
+# so a late ping during it ends SUSPECT silently. A `grace` key still found in
+# stored dev data is simply never read.
+HEALTH_TYPE_HEARTBEAT = "heartbeat"
+CONF_TOKEN = "token"
+CONF_PERIOD = "period"
+CONF_LOCAL_ONLY = "local_only"
+DEFAULT_PERIOD = 86400
+DEFAULT_LOCAL_ONLY = True
+# A shorter period would turn every scheduling hiccup of the sender into an alarm.
+MIN_PERIOD = 60
+# Reconfigure-only flow field (never stored): issue a new token, the old URL 404s.
+CONF_REGENERATE_TOKEN = "regenerate_token"
+# The endpoint's path prefix; the last segment is `<slug(name)>_<token>`.
+HEARTBEAT_PATH = "/api/necromancer/heartbeat/"
 
 # recovery strategy (recover mode → which driver). Whether recovery is verified
 # against the device's health entity (the engine's VERIFY step) is a separate
@@ -106,6 +128,8 @@ SERVICE_RESET = "reset"
 SERVICE_SNOOZE = "snooze"
 SERVICE_UNSNOOZE = "unsnooze"
 SERVICE_NOTIFY_GUARD = "notify_guard"
+# Manual success ping for a heartbeat guard (e.g. a ping lost while HA was down).
+SERVICE_HEARTBEAT_PING = "heartbeat_ping"
 ATTR_DURATION = "duration"
 ATTR_MESSAGE = "message"
 ATTR_EVENT = "event"
@@ -119,6 +143,9 @@ SERVICE_WAIT_FOR_HEALTH = "wait_for_health"
 ATTR_GUARD = "guard"
 ATTR_TIMEOUT = "timeout"
 ATTR_CHECK_FIRST = "check_first"
+# Admin-only response service: a heartbeat guard's ping URL (it holds the token),
+# so deploy scripts need not read it from .storage.
+SERVICE_HEARTBEAT_URL = "heartbeat_url"
 # Domain-level bulk services (no target — act on every guard; "maintenance mode").
 SERVICE_SNOOZE_ALL = "snooze_all"
 SERVICE_UNSNOOZE_ALL = "unsnooze_all"
@@ -160,6 +187,12 @@ CONF_NOTIFY_FOLLOWER_SUCCESS = "notify_follower_success"
 
 # defaults (seconds, except counts/bools)
 DEFAULT_DEBOUNCE = 120
+# A heartbeat's debounce is its grace after a missed ping (1 h by default):
+# a job's runtime varies, and a sender's retries bridge short HA outages.
+DEFAULT_HEARTBEAT_DEBOUNCE = 3600
+# Upper bound of the debounce box for every guard: a day covers a weekly job's
+# grace; anything longer is no longer "confirming a fault".
+MAX_DEBOUNCE = 86400
 DEFAULT_BOOT_WINDOW = 180
 DEFAULT_COOLDOWN = 600
 DEFAULT_MAX_ATTEMPTS = 2
@@ -171,7 +204,8 @@ DEFAULT_RELOAD_DELAY = 10
 # User-facing notification texts = the `event_text` (no name prefix; core/notify.py
 # prepends "<name>: " to build `message`). Phrased for TTS: numbers as words
 # ("1 von 2", not "1/2"), no slashes/parentheses, plural-correct via `{attempts}`
-# (computed in core/notify.py). str.format vars: {attempt}, {max}, {attempts}.
+# (computed in core/notify.py). str.format vars: {attempt}, {max}, {attempts},
+# {attempts_dative} (German "nach 2 Versuchen"; template-only, not an action variable).
 # Kept in code rather than the translation files because Home Assistant's translation
 # schema has no "notify" category; core/notify.py picks the language with an English fallback.
 NOTIFY_MESSAGES: dict[str, dict[str, str]] = {
@@ -187,11 +221,41 @@ NOTIFY_MESSAGES: dict[str, dict[str, str]] = {
     "de": {
         "recovery_attempt": "Reparaturversuch {attempt} von {max}.",
         "recovery_success": "Reparatur erfolgreich.",
-        "recovery_failed": "Reparatur fehlgeschlagen nach {attempts}.",
+        "recovery_failed": "Reparatur fehlgeschlagen nach {attempts_dative}.",
         "recovery_blocked": "Reparatur blockiert, die Reparatur-Aktion fehlt oder ist nicht aufrufbar.",
         "no_auto_recovery": "Problem erkannt, Auto-Reparatur ist deaktiviert.",
         "problem_detected": "Problem erkannt.",
         # linked_repair_failed: a follower escalates when the group repair failed.
         "linked_repair_failed": "Gruppen-Reparatur fehlgeschlagen, weiterhin gestört.",
     },
+}
+
+# Detail texts: the *reason* behind a finding, appended as a second sentence to an
+# alarm notification (and shown as the `health_detail` attribute). A separate table
+# from NOTIFY_MESSAGES because they are not events: `event` stays unchanged, so
+# automations branching on it are unaffected. Keys come from HealthSource.detail().
+# Same TTS rules as above (no parentheses). Placeholders are resolved by the
+# renderer, not passed through raw:
+#   {since}, {period}: seconds -> a spoken duration; in German `{since}` follows
+#                      "seit"/"vor" (dative) and `{period}` follows "alle" (accusative).
+#   {code}:            the raw `last_code` -> a clause from DETAIL_CODE_PHRASES
+#                      ("exit" for digits, "word" otherwise, "" when there is none).
+DETAIL_MESSAGES: dict[str, dict[str, str]] = {
+    "en": {
+        "heartbeat_overdue": "No heartbeat for {since}, expected every {period}.",
+        "heartbeat_failed": "Failure reported{code}.",
+        "heartbeat_never": "Never reported success, set up {since} ago.",
+        # heartbeat_waiting: attribute only (a waiting guard is blind, no alarm).
+        "heartbeat_waiting": "Waiting for the first heartbeat.",
+    },
+    "de": {
+        "heartbeat_overdue": "Kein Lebenszeichen seit {since}, erwartet alle {period}.",
+        "heartbeat_failed": "Fehler gemeldet{code}.",
+        "heartbeat_never": "Noch nie erfolgreich gemeldet, eingerichtet vor {since}.",
+        "heartbeat_waiting": "Wartet auf das erste Lebenszeichen.",
+    },
+}
+DETAIL_CODE_PHRASES: dict[str, dict[str, str]] = {
+    "en": {"exit": ", exit code {code}", "word": ", code {code}"},
+    "de": {"exit": ", Exit-Code {code}", "word": ", Code {code}"},
 }
