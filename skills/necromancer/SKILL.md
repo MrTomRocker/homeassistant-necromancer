@@ -149,13 +149,10 @@ For jobs outside Home Assistant (backups, cron, systemd, NAS or Windows tasks). 
 `?status=<s>`. No status, `ok` or `0` is success, anything else is a failure (the code shows in
 the alert).
 
-- **The token is the only secret.** Never print the URL or path, never write it into an
-  automation, script, dashboard, git repo or chat, and never put it on a command line. Use
-  `necromancer.heartbeat_url` only when the user asks for it. If it leaked: reconfigure the guard
-  and tick *Generate a new token*.
-- **Senders with retries** (Bash, Python, Node.js, PowerShell incl. Windows PowerShell 5.1)
-  read the URL from the `HEARTBEAT_URL` environment variable:
-  https://github.com/MrTomRocker/homeassistant-necromancer/tree/main/docs/examples/heartbeat
+- **The token is the only secret.** Its one place is the sender host's environment (see *Deploy
+  a sender*). Never print the URL or path, never write it into an automation, script, dashboard,
+  git repo or chat, and never put it on a command line. Use `necromancer.heartbeat_url` only when
+  the user asks for it. If it leaked: reconfigure the guard and tick *Generate a new token*.
 - **Timing:** the deadline is last success + **period**; before the first success (new guard,
   or a regenerated token) it counts from setup or regeneration. After the deadline the guard is
   `suspect` for the **grace**, which is the debounce (default 1 h), then it reacts. A failure
@@ -171,6 +168,51 @@ the alert).
   address); `405` the sender used `GET`; `429` more than 5 pings in 10 s; `503` the guard isn't
   running (Necromancer starting or reloading; if it persists, check Repairs and the logs).
 - A guard inside Home Assistant can't report that Home Assistant itself is down.
+
+### Deploy a sender
+
+Don't write your own `curl` call: use a ready-made sender. They retry for about 10 minutes while
+Home Assistant restarts, stop at once on `400`/`403`, never follow redirects and read the URL from
+the `HEARTBEAT_URL` environment variable.
+
+| Host | Sender | Needs |
+|---|---|---|
+| Linux, macOS, NAS (cron, Synology, systemd) | `ping.sh` | bash, curl |
+| anything with Python | `ping.py` | Python 3.8+ |
+| anything with Node.js | `ping.cjs` (keep the `.cjs` name) | Node.js 18+ |
+| Windows (Task Scheduler) | `ping.ps1` | Windows PowerShell 5.1 or PowerShell 7 |
+
+1. **Get it** from `https://raw.githubusercontent.com/MrTomRocker/homeassistant-necromancer/main/docs/examples/heartbeat/<file>`
+   and read it. Copy it to the host (e.g. `/usr/local/bin/ping.sh`, `chmod 755`) and call it by
+   its full path. Don't edit the URL into it.
+2. **Put the URL in the host's environment**, readable only by the job's user, as
+   `HEARTBEAT_URL=http://<ha-ipv4>:8123/api/necromancer/heartbeat/<name>_<token>` (Home
+   Assistant's IPv4 address, not a host name):
+   - Linux/NAS: an env file with mode 600, loaded with `set -a; . <file>; set +a` (systemd:
+     `EnvironmentFile=`). A plain `. <file>` doesn't export it and the sender exits 1.
+   - Windows: a **user** environment variable of the task's account (a system variable is
+     readable by every local user), set by the user in System Properties, not with `setx`.
+   - **Best: ask the user to paste the URL** into that file or variable. If they want you to do
+     it, use a shell pipe, never a tool or MCP call whose result you see: call
+     `POST /api/services/necromancer/heartbeat_url?return_response` with `{"guard": "<status
+     sensor>"}` (an admin token, passed to curl on stdin or from a file, never as an argument),
+     build the line with `jq -r '"HEARTBEAT_URL=http://<ha-ipv4>:8123" + .service_response.path'`
+     (`path`, not `url`: `url` can be a host name or `null`) and write it with `umask 077` into the
+     file on the host. Check it with `grep -c '^HEARTBEAT_URL=http' <file>`, never `cat`.
+3. **Call it as the job's last step** with the job's exit code:
+   `/usr/local/bin/backup.sh; /usr/local/bin/ping.sh $?` (PowerShell: a wrapper with
+   `& "$PSScriptRoot\ping.ps1" $LASTEXITCODE`). Its retries can block for up to 10 minutes; under
+   systemd hand it to a transient unit. Exit codes: `0` delivered, `1` refused, `2` gave up.
+4. **Test it:** run the sender once by hand with the env file loaded
+   (`sh -c 'set -a; . <file>; set +a; exec /usr/local/bin/ping.sh'`, never `HEARTBEAT_URL=… ping.sh`)
+   and check that the guard leaves `blind` and `last_status` reads `ok`. On a notify-only guard,
+   `ping.sh fail` must then alert and the next `ping.sh` clears it. On a guard with a recovery, a
+   failure ping starts the repair at once: test `fail` only with the user's OK.
+
+Ready setups for crontab, Synology, systemd and Windows Task Scheduler (`-ExecutionPolicy Bypass`,
+a wrapper with `$PSScriptRoot` and `exit $LASTEXITCODE`):
+[job heartbeat recipe](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/job-heartbeat.md#send-the-ping)
+and [senders README](https://github.com/MrTomRocker/homeassistant-necromancer/tree/main/docs/examples/heartbeat).
 
 ## Turning a guard off
 
