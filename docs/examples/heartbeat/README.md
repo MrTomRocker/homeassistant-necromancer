@@ -9,7 +9,7 @@ restarts:
 | [`ping.sh`](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.sh) | Linux, macOS, NAS (cron, Synology task, systemd) | bash, curl |
 | [`ping.py`](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.py) | anything with Python 3.8+ | standard library only |
 | [`ping.cjs`](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.cjs) | anything with Node.js 18+ | no packages (built-in `fetch`) |
-| [`ping.ps1`](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.ps1) | Windows, Task Scheduler | PowerShell 7+ |
+| [`ping.ps1`](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.ps1) | Windows, Task Scheduler | Windows PowerShell 5.1 (built into Windows 10/11) or PowerShell 7+ |
 
 ## Use
 
@@ -29,6 +29,26 @@ export HEARTBEAT_URL="http://192.168.1.8:8123/api/necromancer/heartbeat/<name>_<
 `ping.py`, `ping.cjs` and `ping.ps1` take the same argument (`python3 ping.py $?`,
 `node ping.cjs $?`, `.\ping.ps1 $LASTEXITCODE`). `ping.py` and `ping.cjs` can also be imported
 (`send_heartbeat(...)` / `sendHeartbeat(...)`) when the job itself is Python or Node.
+
+On Windows, scripts are blocked by default (execution policy). Start the sender with
+`-ExecutionPolicy Bypass`, which lifts the block for this one call only:
+
+```powershell
+$env:HEARTBEAT_URL = "http://192.168.1.8:8123/api/necromancer/heartbeat/<name>_<token>"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ping.ps1 0
+```
+
+In Task Scheduler, put the same arguments in *Add arguments* (`-NoProfile -ExecutionPolicy Bypass
+-File C:\scripts\backup-and-ping.ps1`) and set `HEARTBEAT_URL` as a user or system environment
+variable. `pwsh.exe` (PowerShell 7) works the same way. A task starts in `C:\Windows\System32`,
+so the wrapper uses full paths, and passes the exit code on to the task's *Last Run Result*:
+
+```powershell
+# C:\scripts\backup-and-ping.ps1 (ping.ps1 lies next to it)
+& 'C:\Program Files\Backup\backup.exe'
+& "$PSScriptRoot\ping.ps1" $LASTEXITCODE
+exit $LASTEXITCODE
+```
 
 `ping.cjs` is CommonJS on purpose, and the `.cjs` extension makes Node load it as CommonJS even in
 a project whose `package.json` says `"type": "module"`. So it runs as a script anywhere, and both

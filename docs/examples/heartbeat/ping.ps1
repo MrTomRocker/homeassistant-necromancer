@@ -1,14 +1,19 @@
 #!/usr/bin/env pwsh
-# Send one heartbeat to a Necromancer guard, with retries (PowerShell 7+).
+# Send one heartbeat to a Necromancer guard, with retries.
+# Runs in Windows PowerShell 5.1 (built into Windows 10/11) and PowerShell 7+.
 #
 #   $env:HEARTBEAT_URL = "http://192.168.1.8:8123/api/necromancer/heartbeat/<name>_<token>"
 #   & .\backup.exe; .\ping.ps1 $LASTEXITCODE   # pass the job's exit code: 0 = success, else failure
 #   .\ping.ps1                                 # no argument = success
 #   .\ping.ps1 fail                            # report a failure without a code
 #
-# In Windows Task Scheduler: program `pwsh.exe`, arguments
-#   -NoProfile -File C:\scripts\backup-and-ping.ps1
+# In Windows Task Scheduler: program `powershell.exe` (or `pwsh.exe`), arguments
+#   -NoProfile -ExecutionPolicy Bypass -File C:\scripts\backup-and-ping.ps1
 # and set HEARTBEAT_URL as a user or system environment variable, not in the arguments.
+# A task starts in C:\Windows\System32, so the wrapper needs full paths:
+#   & 'C:\Program Files\Backup\backup.exe'
+#   & "$PSScriptRoot\ping.ps1" $LASTEXITCODE
+#   exit $LASTEXITCODE
 #
 # Retries on no connection, 404, 429 and 5xx (Home Assistant restarting, Necromancer
 # reloading) every HEARTBEAT_DELAY seconds, HEARTBEAT_ATTEMPTS times in all (default
@@ -38,7 +43,7 @@ function Get-EnvNumber([string] $Name, [double] $Default, [double] $Minimum) {
 }
 
 $url = $env:HEARTBEAT_URL
-$attempts = [int] [Math]::Truncate((Get-EnvNumber 'HEARTBEAT_ATTEMPTS' 11 1))
+$attempts = [Math]::Truncate((Get-EnvNumber 'HEARTBEAT_ATTEMPTS' 11 1))
 $delay = Get-EnvNumber 'HEARTBEAT_DELAY' 60 0
 
 if (-not $url) {
@@ -49,23 +54,41 @@ if (-not $url) {
 if ($PSBoundParameters.ContainsKey('Status')) {
     # Plain values only: Home Assistant answers 400 to odd characters in a query.
     # Anything else still counts as a failure, so send it as "fail".
-    if ($Status -notmatch '^[A-Za-z0-9_-]*$') { $Status = 'fail' }
+    if ($Status -notmatch '\A[A-Za-z0-9_-]*\z') { $Status = 'fail' }
     $sep = if ($url.Contains('?')) { '&' } else { '?' }
     $url = "$url${sep}status=$Status"
 }
 
+# .NET HttpClient instead of Invoke-WebRequest: Windows PowerShell 5.1 has no
+# -SkipHttpErrorCheck and throws on every non-2xx answer. HttpClient behaves the same
+# in 5.1 and 7: it returns any status, and AllowAutoRedirect = $false reports a
+# redirect instead of following it (see above).
+Add-Type -AssemblyName System.Net.Http
+if ($PSVersionTable.PSEdition -ne 'Core') {
+    # Windows PowerShell 5.1 may start with old TLS versions only (Ssl3/Tls); add TLS 1.2
+    # for an https URL (a reverse proxy). Leave SystemDefault alone: there Windows already
+    # picks TLS 1.2/1.3. Plain http on the LAN does not need any of this.
+    $sp = [Net.ServicePointManager]::SecurityProtocol
+    if ($sp -ne [Net.SecurityProtocolType]::SystemDefault) {
+        [Net.ServicePointManager]::SecurityProtocol = $sp -bor [Net.SecurityProtocolType]::Tls12
+    }
+}
+$handler = New-Object System.Net.Http.HttpClientHandler
+$handler.AllowAutoRedirect = $false
+$client = New-Object System.Net.Http.HttpClient($handler)
+$client.Timeout = [TimeSpan]::FromSeconds(10)
+$client.DefaultRequestHeaders.UserAgent.ParseAdd('necromancer-heartbeat')
+
 function Send-Post([string] $Target) {
-    # POST without a body; the HTTP status, 0 when there was no connection.
-    # -MaximumRedirection 0: a redirect is not followed but reported (see above).
+    # POST with an empty body; the HTTP status, 0 when there was no connection.
     try {
-        $response = Invoke-WebRequest -Uri $Target -Method Post -TimeoutSec 10 `
-            -MaximumRedirection 0 -SkipHttpErrorCheck -ErrorAction Stop
-        return [int] $response.StatusCode
+        $body = [System.Net.Http.StringContent]::new('')
+        $response = $client.PostAsync([Uri] $Target, $body).GetAwaiter().GetResult()
+        $code = [int] $response.StatusCode
+        $response.Dispose()
+        return $code
     }
     catch {
-        # Some PowerShell versions throw on a 3xx even with -SkipHttpErrorCheck;
-        # the exception still carries the answer's status.
-        if ($_.Exception.Response) { return [int] $_.Exception.Response.StatusCode }
         return 0
     }
 }
@@ -90,7 +113,9 @@ for ($attempt = 1; $attempt -le $attempts; $attempt++) {
         [Console]::Error.WriteLine("heartbeat: unexpected HTTP $code. Not retrying.")
         exit 1
     }
-    if ($attempt -lt $attempts) { Start-Sleep -Seconds $delay }
+    if ($attempt -lt $attempts) {
+        Start-Sleep -Milliseconds ([int] [Math]::Min($delay * 1000, [int]::MaxValue))
+    }
 }
 
 $why = switch ($code) {

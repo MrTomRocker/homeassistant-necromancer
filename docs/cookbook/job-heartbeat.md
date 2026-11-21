@@ -235,7 +235,8 @@ tap_action:
   [`ping.py`](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.py),
   [`ping.cjs`](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.cjs),
   [`ping.ps1`](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.ps1)
-  (Task Scheduler: `pwsh -NoProfile -File …`, `HEARTBEAT_URL` as an environment variable).
+  (Task Scheduler: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File …`, `HEARTBEAT_URL` as
+  an environment variable).
 - **Back to normal.** Want a message when an escalated backup finally pings again? Trigger on the
   status sensor `from: escalated` `to: ok` — see
   [On your dashboard & in automations](https://github.com/MrTomRocker/homeassistant-necromancer#on-your-dashboard--in-automations).
