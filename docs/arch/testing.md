@@ -56,7 +56,9 @@ one of them:
     state-change listener), never polled.
 11. **The token stays secret.** Necromancer never writes a heartbeat token in full
     into attributes, events, notifications, logs or diagnostics (`describe()` is
-    just `heartbeat`, the Store keeps only its fingerprint `token_fp`).
+    just `heartbeat`, the Store keeps only its fingerprint `token_fp`). It is shown
+    only where it is the point: the flow's URL info step and the admin-only
+    `heartbeat_url` service response.
 12. **A ping is processed or honestly refused.** The heartbeat endpoint answers `2xx`
     only when it applied the ping or deliberately stored it without evaluating
     (`dormant`). Everything the sender should retry is `404`, `429` or `5xx`; `403`
@@ -258,6 +260,19 @@ exploratory and true end-to-end live checks. Drive the real flows and the engine
   re-derives); `snooze`/`unsnooze` (→ `SNOOZED`, ignores health, auto-resumes, refused
   mid-recovery); `snooze_all`/`unsnooze_all` (bulk, no target, busy guards skipped
   best-effort).
+  Heartbeat services (same file, `freezer` for deadlines and the delayed save):
+  `heartbeat_url` returns `url` + `path` from the shared `ping_url` (the same `get_url`
+  arguments as the flow's info step), `url` `None` without any HA URL (path only), a
+  non-heartbeat guard → `not_a_heartbeat_guard`, a foreign entity → `unknown_guard`, a
+  read-only user → `Unauthorized` while an admin gets the URL; `heartbeat_ping` turns an
+  overdue `ESCALATED` guard `OK` with `next_due` = now + `period` and the ping in the
+  Store, ends a `SUSPECT` grace without a notification (also past the old debounce),
+  rejects a non-heartbeat guard (`not_a_heartbeat_guard`) and a closed source
+  (`heartbeat_not_running`, state untouched), writes nothing for a dormant guard (HA's
+  missing-target WARNING), logs one INFO line with the user id and never the token, and
+  keeps a snoozed guard `SNOOZED` while storing the ping. A `device_id` target on a
+  heartbeat guard calls only the status sensor (`heartbeat_ping`, `reset`), and naming
+  the `last_heartbeat` sensor raises `ServiceNotSupported` (device-class filter).
 - **Health primitives** *(`tests/suite/test_health_primitives.py`)*: the response
   services `check_health` (returns the guard's current Health verdict; unknown guard
   raises) and `wait_for_health` (waits up to a timeout / the boot window for OK,

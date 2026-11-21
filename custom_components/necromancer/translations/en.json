@@ -535,7 +535,7 @@
       "options": {
         "state_based": "An entity's state",
         "template_based": "Jinja template",
-        "heartbeat_based": "Heartbeat (webhook)"
+        "heartbeat_based": "Heartbeat (ping URL)"
       }
     },
     "strategy": {
@@ -650,6 +650,20 @@
           "description": "Evaluate once before waiting and return immediately if already healthy (default: `on`)."
         }
       }
+    },
+    "heartbeat_ping": {
+      "name": "Heartbeat ping",
+      "description": "Record a successful heartbeat for a heartbeat guard by hand, as if its job had pinged — for a ping that got lost (e.g. while Home Assistant was down) although the job ran. The deadline starts again now and an overdue guard returns to OK. Logged with the calling user."
+    },
+    "heartbeat_url": {
+      "name": "Heartbeat URL",
+      "description": "Return the ping URL of a heartbeat guard (`url`, null when Home Assistant knows no URL of its own) and its path (`path`). Admin only: the URL contains the guard's secret token.",
+      "fields": {
+        "guard": {
+          "name": "Guard",
+          "description": "The heartbeat guard's status entity."
+        }
+      }
     }
   },
   "exceptions": {
@@ -658,6 +672,12 @@
     },
     "unknown_guard": {
       "message": "{entity_id} is not a Necromancer guard status entity — pass the guard's status sensor, the guard_entity_id a recovery action receives."
+    },
+    "not_a_heartbeat_guard": {
+      "message": "{entity_id} is not a heartbeat guard — this action needs a guard whose health source is the heartbeat."
+    },
+    "heartbeat_not_running": {
+      "message": "The heartbeat of {name} is not running right now (Necromancer is reloading) — try again in a moment."
     }
   },
   "issues": {

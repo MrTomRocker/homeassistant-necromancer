@@ -336,7 +336,7 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
 ### Health-Quellen: state_based vs template_based
 
 - [ ] **HQ1 — Source-Step zeigt Radio state/template/heartbeat** · `P0`
-  - **Prüft:** Der erste Schritt der Gerät-hinzufügen-Subentry bietet die Zustandsquelle als List-Radio `state_based`/`template_based`/`heartbeat_based` („Lebenszeichen (Webhook)“).
+  - **Prüft:** Der erste Schritt der Gerät-hinzufügen-Subentry bietet die Zustandsquelle als List-Radio `state_based`/`template_based`/`heartbeat_based` („Lebenszeichen (Ping-URL)“).
   - **Files:** `config_flow_helpers/schemas.py` → `_source_schema` (`options=[SOURCE_STATE, SOURCE_TEMPLATE, SOURCE_HEARTBEAT]`, `translation_key="source_type"`) · `const.py` (`SOURCE_STATE="state_based"`, `SOURCE_TEMPLATE="template_based"`, `SOURCE_HEARTBEAT="heartbeat_based"`); pytest `test_source_step_offers_three_types`.
   - **Treiber:** Flow direkt starten (POST-only): `import requests; r=requests.post(N.BASE+"/api/config/config_entries/subentries/flow", headers=N.H, json={"handler":[N.hub_id(),"device"]}, timeout=15).json(); fid=r["flow_id"]`.
   - **Assert:** `r["step_id"]=="user"` und im `data_schema` hat das Feld `source_type` ein `select`-Selector mit options `["state_based","template_based","heartbeat_based"]`.
@@ -422,7 +422,7 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
   - **Files:** `config_flow.py` → `async_step_heartbeat_url`, `_heartbeat_url`; `core/health/heartbeat.py` → `ping_path`; pytest `test_heartbeat_create_shows_url_before_creating`.
   - **Treiber:** HB-Setup, vor dem letzten `P(fid,{})` `N.list_subentries(N.hub_id())` prüfen.
   - **Assert:** Vor dem Submit kein Subentry `HBtest`; danach `N.st("sensor.hbtest_status")["state"]=="blind"` mit `attributes.awaiting_first_success==True`, `health_type=="heartbeat"`, `health_detail` = „Wartet auf das erste Lebenszeichen.“ (de); `sensor.hbtest_letztes_lebenszeichen` = `unknown` mit `period==60`, `grace==30` und `next_due` = Anlage + 60 s. Das Token steht in keinem Attribut und nicht in `N.log()` (nur die ersten Zeichen).
-  - **Cleanup:** bleibt für HB2–HB6 stehen.
+  - **Cleanup:** bleibt für HB2–HB8 stehen.
 
 - [ ] **HB2 — Ping-Arten: ok, Exit-Code, Wort, leerer Status** · `P0`
   - **Prüft:** Fehlt `status` oder ist er `ok`/`0`, ist es ein Erfolg; alles andere (auch `status=`) ist ein Fehler. Der Code bleibt nur bei `^[A-Za-z0-9_-]{1,16}$` erhalten.
@@ -457,6 +457,20 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
   - **Files:** `config_flow.py` → `_token_regenerated`, `async_step_heartbeat_url_new`; `core/health/heartbeat.py` → `reconcile_token`; pytest `test_heartbeat_regenerate_token`.
   - **Treiber:** Reconfigure-Flow des Subentrys (wie CF4) mit `source_type=heartbeat_based`, im Device-Step zusätzlich `"regenerate_token":True`, Strategie/notify unverändert, Info-Schritt submitten; `N.wait(3)`.
   - **Assert:** `requests.post(URL).status_code==404`; neue URL (POST) → `200`; vorher `N.st("sensor.hbtest_status")` = `blind` mit `awaiting_first_success==True`.
+  - **Cleanup:** bleibt für HB7–HB8 stehen.
+
+- [ ] **HB7 — Service `heartbeat_url` (Admin, mit Antwort)** · `P0`
+  - **Prüft:** `necromancer.heartbeat_url` mit `guard` = Status-Sensor liefert `{"url": …, "path": …}`, gebaut von derselben Funktion wie der Info-Schritt (`url` = die URL aus HB1, `path` = `/api/necromancer/heartbeat/hbtest_<token>`; `url` ist `null`, wenn HA keine eigene URL kennt). Nur für Admins (die URL enthält das Token): ein Nicht-Admin bekommt `401 Unauthorized`. Ein Guard ohne Heartbeat-Quelle → `ServiceValidationError` (`not_a_heartbeat_guard`), eine fremde Entity → `unknown_guard`.
+  - **Files:** `__init__.py` → `_heartbeat_url` (`async_register_admin_service`, `SupportsResponse.ONLY`); `core/health/heartbeat.py` → `ping_url`, `ping_path`, `require_heartbeat`; `config_flow.py` → `_heartbeat_url` (derselbe Helfer); pytest `test_heartbeat_url_returns_url_and_path`, `test_heartbeat_url_same_builder_as_the_flow`, `test_heartbeat_url_without_any_ha_url_is_path_only`, `test_heartbeat_url_rejects_non_heartbeat_guard`, `test_heartbeat_url_is_admin_only`.
+  - **Treiber:** Nach HB6 (mit dem neuen Token): `r=requests.post(N.BASE+"/api/services/necromancer/heartbeat_url?return_response", headers=N.H, json={"guard":"sensor.hbtest_status"}, timeout=15).json()`; derselbe Aufruf mit `guard` = Status-Sensor eines State-Guards.
+  - **Assert:** `r["service_response"]["url"]` = die neue URL aus dem Info-Schritt von HB6, `r["service_response"]["path"]` = deren Pfad. Der State-Guard → HTTP `400` mit der Meldung „… is not a heartbeat guard …“. Das Token steht nicht in `N.log()`. Nicht-Admin live nur mit einem zweiten Benutzer prüfbar — gedeckt durch pytest.
+  - **Cleanup:** —
+
+- [ ] **HB8 — Service `heartbeat_ping` (manueller Erfolgs-Ping)** · `P0`
+  - **Prüft:** `necromancer.heartbeat_ping` (Ziel: Status-Sensor, wie `reset`/`snooze`) nimmt denselben Weg wie ein Erfolgs-Ping am Endpunkt: Frist ab jetzt, `suspect`/`escalated` → `ok` (aus `suspect` ohne Meldung), gespeichert. Eine INFO-Zeile nennt Guard und auslösenden Benutzer, nie das Token. Geschlummert: bleibt `snoozed`, der Ping wird gespeichert. Ziel ohne Heartbeat-Quelle → `ServiceValidationError` (`not_a_heartbeat_guard`); Quelle gerade gestoppt (Reload) → `heartbeat_not_running`. Ein schlafender Guard (Gerät deaktiviert) hat keinen Status-Sensor: HA meldet das fehlende Ziel als WARNING, nichts wird gespeichert. Ein Geräte-Ziel trifft nur den Status-Sensor (der Timestamp-Sensor wird per Device-Class-Filter übersprungen); den Timestamp-Sensor direkt zu nennen → `ServiceNotSupported`.
+  - **Files:** `sensor.py` → `_async_heartbeat_ping`, `StatusSensor.async_heartbeat_ping`; `core/health/heartbeat.py` → `async_handle_ping`, `require_heartbeat`; pytest `test_heartbeat_ping_clears_overdue_escalation`, `test_heartbeat_ping_on_suspect_is_silent`, `test_heartbeat_ping_rejects_non_heartbeat_guard`, `test_heartbeat_ping_on_stopped_source_raises`, `test_heartbeat_ping_on_dormant_guard_changes_nothing`, `test_heartbeat_ping_logs_user_never_token`, `test_heartbeat_ping_while_snoozed_is_stored`, `test_heartbeat_ping_device_target_skips_last_heartbeat`, `test_entity_services_reject_last_heartbeat_sensor`.
+  - **Treiber:** Nach HB7 (Guard `blind`, wartet auf den ersten Erfolg): `N.wait(95)` ohne Ping (Frist 60 s + Kulanz 30 s) → `escalated`; `N.call("necromancer","heartbeat_ping",entity_id="sensor.hbtest_status")`; `N.wait(2)`.
+  - **Assert:** Vorher `escalated`, danach `N.st("sensor.hbtest_status")["state"]=="ok"`, `last_status=="ok"`; `next_due` am Timestamp-Sensor = Service-Zeit + 60 s. `N.log()` enthält `HBtest: manual heartbeat ping by user <user_id>` und das Token nicht. `N.call` auf einen State-Guard → Fehler „… is not a heartbeat guard …“.
   - **Cleanup:** `N.delete_subentry(N.hub_id(), sub)`; danach gibt die URL `404`.
 
 ### Strategien (4) + Health-Check-Toggle
@@ -1245,7 +1259,7 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
 
 ## Operator-Services & Recovery-Event
 
-> Primär **automatisiert** abgedeckt: `tests/suite/test_services.py` (8) +
+> Primär **automatisiert** abgedeckt: `tests/suite/test_services.py` (23, davon 15 Heartbeat-Services, siehe HB7/HB8) +
 > `tests/suite/test_event.py` (4) + `tests/suite/test_health_primitives.py` (7, die
 > Response-Services). Hier die Live-Smoke-Treiber (de-Slugs beachten —
 > Status-Sensor `sensor.<slug>_status`, Event `event.<slug>_wiederbelebung`).

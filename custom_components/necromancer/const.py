@@ -128,6 +128,8 @@ SERVICE_RESET = "reset"
 SERVICE_SNOOZE = "snooze"
 SERVICE_UNSNOOZE = "unsnooze"
 SERVICE_NOTIFY_GUARD = "notify_guard"
+# Manual success ping for a heartbeat guard (e.g. a ping lost while HA was down).
+SERVICE_HEARTBEAT_PING = "heartbeat_ping"
 ATTR_DURATION = "duration"
 ATTR_MESSAGE = "message"
 ATTR_EVENT = "event"
@@ -141,6 +143,9 @@ SERVICE_WAIT_FOR_HEALTH = "wait_for_health"
 ATTR_GUARD = "guard"
 ATTR_TIMEOUT = "timeout"
 ATTR_CHECK_FIRST = "check_first"
+# Admin-only response service: a heartbeat guard's ping URL (it holds the token),
+# so deploy scripts need not read it from .storage.
+SERVICE_HEARTBEAT_URL = "heartbeat_url"
 # Domain-level bulk services (no target — act on every guard; "maintenance mode").
 SERVICE_SNOOZE_ALL = "snooze_all"
 SERVICE_UNSNOOZE_ALL = "unsnooze_all"

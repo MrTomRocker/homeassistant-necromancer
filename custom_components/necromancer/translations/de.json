@@ -535,7 +535,7 @@
       "options": {
         "state_based": "Zustand einer Entität",
         "template_based": "Jinja-Template",
-        "heartbeat_based": "Lebenszeichen (Webhook)"
+        "heartbeat_based": "Lebenszeichen (Ping-URL)"
       }
     },
     "strategy": {
@@ -650,6 +650,20 @@
           "description": "Vor dem Warten einmal auswerten und sofort zurückkehren, wenn schon gesund (Default: `an`)."
         }
       }
+    },
+    "heartbeat_ping": {
+      "name": "Lebenszeichen setzen",
+      "description": "Setzt für einen Lebenszeichen-Guard von Hand ein erfolgreiches Lebenszeichen, als hätte sein Job gepingt — für einen verlorenen Ping (z. B. während Home Assistant nicht lief), obwohl der Job lief. Die Frist läuft ab jetzt neu, ein überfälliger Guard wird wieder OK. Wird mit dem auslösenden Benutzer protokolliert."
+    },
+    "heartbeat_url": {
+      "name": "Lebenszeichen-URL",
+      "description": "Gibt die Ping-URL eines Lebenszeichen-Guards zurück (`url`, null, wenn Home Assistant keine eigene URL kennt) und ihren Pfad (`path`). Nur für Administratoren: Die URL enthält das geheime Token des Guards.",
+      "fields": {
+        "guard": {
+          "name": "Guard",
+          "description": "Die Status-Entity des Lebenszeichen-Guards."
+        }
+      }
     }
   },
   "exceptions": {
@@ -658,6 +672,12 @@
     },
     "unknown_guard": {
       "message": "{entity_id} ist keine Necromancer-Guard-Status-Entity — übergib den Status-Sensor des Guards, das guard_entity_id, das eine Reparatur-Aktion erhält."
+    },
+    "not_a_heartbeat_guard": {
+      "message": "{entity_id} ist kein Lebenszeichen-Guard — diese Aktion braucht einen Guard mit dem Lebenszeichen als Health-Quelle."
+    },
+    "heartbeat_not_running": {
+      "message": "Das Lebenszeichen von {name} läuft gerade nicht (Necromancer lädt neu) — versuche es gleich noch einmal."
     }
   },
   "issues": {

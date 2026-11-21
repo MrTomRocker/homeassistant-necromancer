@@ -283,6 +283,20 @@ Endpoint and lifecycle — the answer a sender gets:
 | HA shutting down | `503` (HA itself). |
 | query with control chars / SQL-script patterns, or `X-Forwarded-For` without `use_x_forwarded_for` | `400` (HA itself, before Necromancer) — final, not retried. |
 
+Manual ping (`necromancer.heartbeat_ping`, target = the status sensor) — the same
+`async_handle_ping(ok=True)` as a successful endpoint ping, so every evaluation row
+above applies with "now" as the ping time:
+
+| Case | Behaviour |
+|---|---|
+| overdue, `ESCALATED` (a lost ping, the job ran) | `OK`; `last_ok` = now, so `next_due` = now + `period`; saved like an endpoint ping. `reset` would not do: the deadline would stay passed and the guard turn red again. C |
+| overdue, `SUSPECT` (in the grace) | `OK`, debounce cancelled, **no notification** — like a late ping. C |
+| snoozed | stays `SNOOZED`; the ping is stored (`last_ok`, Store) and judged when the snooze ends. C |
+| any ping | one INFO line `<guard>: manual heartbeat ping by user <user_id>` (`-` without a user); the token is never logged. C |
+| guard without heartbeat source | `ServiceValidationError` `not_a_heartbeat_guard`, nothing changes. C |
+| source closed (reload in flight) | `ServiceValidationError` `heartbeat_not_running`, state untouched — no silent store write. C |
+| guard dormant (device disabled) | no status entity: HA logs the target as missing (WARNING), nothing is stored (only the endpoint writes into a dormant guard's stored state). C |
+
 ### PoE (`poe_port` driver & fabric)
 
 | Case | Behaviour |

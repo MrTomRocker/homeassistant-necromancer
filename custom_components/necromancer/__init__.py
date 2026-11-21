@@ -43,6 +43,7 @@ from homeassistant.helpers.event import (
     async_track_device_registry_updated_event,
     async_track_state_change_event,
 )
+from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -71,6 +72,7 @@ from .const import (
     PLATFORMS,
     SAVE_DELAY,
     SERVICE_CHECK_HEALTH,
+    SERVICE_HEARTBEAT_URL,
     SERVICE_REPAIR_POE_PORT,
     SERVICE_SNOOZE_ALL,
     SERVICE_UNSNOOZE_ALL,
@@ -81,7 +83,13 @@ from .const import (
 from .core.drivers import create_driver
 from .core.engine import DeviceEngine, reset_engine_verdict
 from .core.health import create_health
-from .core.health.heartbeat import apply_ping, reconcile_token
+from .core.health.heartbeat import (
+    apply_ping,
+    ping_path,
+    ping_url,
+    reconcile_token,
+    require_heartbeat,
+)
 from .core.heartbeat_registry import DormantApply, HeartbeatRegistry, HeartbeatSpec
 from .core.links import link_components
 from .core.poe import PoeFabric
@@ -469,6 +477,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
                 vol.Optional(ATTR_CHECK_FIRST, default=True): cv.boolean,
             }
         ),
+        supports_response=SupportsResponse.ONLY,
+    )
+
+    # The heartbeat URL contains the guard's secret token, so it is admin-only,
+    # like reading it from the subentry would be. HA's admin wrapper checks the
+    # caller before the handler runs; calls without a user (automations, scripts)
+    # are trusted as for every admin service.
+    async def _heartbeat_url(call: ServiceCall) -> ServiceResponse:
+        guard = call.data[ATTR_GUARD]
+        engine = _engine_for_guard(hass, entry, guard)
+        source = require_heartbeat(engine.health, guard)
+        return {
+            # None when HA knows no own URL: the caller adds its address to `path`.
+            "url": ping_url(hass, engine.name, source.config),
+            "path": ping_path(engine.name, source.token),
+        }
+
+    async_register_admin_service(
+        hass,
+        DOMAIN,
+        SERVICE_HEARTBEAT_URL,
+        _heartbeat_url,
+        schema=vol.Schema({vol.Required(ATTR_GUARD): cv.entity_id}),
         supports_response=SupportsResponse.ONLY,
     )
 

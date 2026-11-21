@@ -32,7 +32,9 @@ import hashlib
 import re
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.event import async_track_point_in_utc_time
+from homeassistant.helpers.network import NoURLAvailableError, get_url
 from homeassistant.util import dt as dt_util, slugify
 
 from ...const import (
@@ -41,6 +43,7 @@ from ...const import (
     CONF_TOKEN,
     DEFAULT_LOCAL_ONLY,
     DEFAULT_PERIOD,
+    DOMAIN,
     HEARTBEAT_PATH,
 )
 from ..heartbeat_registry import HeartbeatRegistry
@@ -105,6 +108,27 @@ def ping_path(name: str, token: str) -> str:
     """
     slug = slugify(name or "")
     return f"{HEARTBEAT_PATH}{slug}_{token}" if slug else f"{HEARTBEAT_PATH}{token}"
+
+
+def ping_url(hass: HomeAssistant, name: str, config: dict) -> str | None:
+    """The full ping URL of a guard (health `config`), or None if HA has no URL.
+
+    The one builder behind the config flow's info step and the `heartbeat_url`
+    service, so both always show the same URL. `prefer_external=False` is
+    explicit: with SSL configured `get_url` would otherwise prefer the external
+    URL, which contradicts `local_only`. Only a guard that accepts non-local
+    callers may get an external/cloud URL.
+    """
+    try:
+        base = get_url(
+            hass,
+            allow_external=not config.get(CONF_LOCAL_ONLY, DEFAULT_LOCAL_ONLY),
+            prefer_external=False,
+            allow_ip=True,
+        )
+    except NoURLAvailableError:
+        return None  # callers fall back to the path (the user adds the address)
+    return base.rstrip("/") + ping_path(name, config[CONF_TOKEN])
 
 
 def token_fp(token: str) -> str:
@@ -397,3 +421,18 @@ class HeartbeatHealth(HealthSource):
     def describe(self) -> str:
         """Only the type — the token is a secret and must not reach diagnostics."""
         return "heartbeat"
+
+
+def require_heartbeat(health: HealthSource, entity_id: str) -> HeartbeatHealth:
+    """The guard's source if it is a heartbeat source, else a service error.
+
+    Shared by the `heartbeat_url` and `heartbeat_ping` services: a state or
+    template guard has neither a URL nor pings.
+    """
+    if not isinstance(health, HeartbeatHealth):
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="not_a_heartbeat_guard",
+            translation_placeholders={"entity_id": entity_id},
+        )
+    return health

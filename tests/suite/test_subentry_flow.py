@@ -388,7 +388,7 @@ async def test_heartbeat_url_without_any_ha_url_is_path_only(
     result = await _cfg(hass, result["flow_id"], {"name": "Job", **HB_DEVICE})
     result = await _cfg(hass, result["flow_id"], {"strategy": "notify"})
     with patch(
-        "custom_components.necromancer.config_flow.get_url",
+        "custom_components.necromancer.core.health.heartbeat.get_url",
         side_effect=NoURLAvailableError,
     ):
         result = await _cfg(hass, result["flow_id"], {"notification": {}})
@@ -410,7 +410,7 @@ async def test_heartbeat_url_prefers_internal_and_respects_local_only(
     result = await _reconfigure(hass, entry.entry_id)
     result = await _cfg(hass, result["flow_id"], {"source_type": "heartbeat_based"})
     with patch(
-        "custom_components.necromancer.config_flow.get_url", wraps=get_url
+        "custom_components.necromancer.core.health.heartbeat.get_url", wraps=get_url
     ) as spy:
         result = await _cfg(
             hass,

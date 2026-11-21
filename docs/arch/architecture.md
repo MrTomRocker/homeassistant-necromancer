@@ -677,8 +677,9 @@ is no separate "mode" field — the notify-vs-recover choice *is* the strategy c
   nothing, so a new token never exists unseen. After `regenerate_token` the same
   handler shows the step as `heartbeat_url_new` (same placeholders, text says the
   old URL stops working); the frontend submits to the shown step id, so both ids
-  route to one method. The URL is `get_url(hass, allow_external=not local_only,
-  prefer_external=False, allow_ip=True)` + `ping_path(name, token)`
+  route to one method. The URL comes from `ping_url` in `core/health/heartbeat.py`
+  (shared with the `heartbeat_url` service, §9): `get_url(hass, allow_external=not
+  local_only, prefer_external=False, allow_ip=True)` + `ping_path(name, token)`
   (`/api/necromancer/heartbeat/<slugify(name)>_<token>`). `prefer_external=False` is
   explicit because with SSL `get_url` would otherwise prefer the external URL,
   which contradicts `local_only`. On `NoURLAvailableError` only the path is shown;
@@ -824,14 +825,47 @@ and the ping time lives on the timestamp sensor.
 
 **Per-guard services** are registered on the sensor platform via
 `async_register_entity_service` (targeted at `sensor.*_status`; device/area targets
-expand to it): `reset`, `snooze(duration)`, `unsnooze`, `notify_guard` (see §3). The status sensor
+expand to it): `reset`, `snooze(duration)`, `unsnooze`, `notify_guard` (see §3), and
+`heartbeat_ping` for heartbeat guards. All five pass
+`entity_device_classes=[ENUM]` (and `device_class: enum` in `services.yaml`): a
+heartbeat guard's device also holds the `last_heartbeat` TIMESTAMP sensor, which has
+no service methods, so a device/area target skips it and naming it explicitly raises
+HA's `ServiceNotSupported` instead of an `AttributeError`. The status sensor
 also carries the `snooze_until` attribute. Recover-now and arm stay the button/switch
 rather than duplicating them as services. The remaining services are **domain-level**
 (no entity target): the port-level `repair_poe_port` (§5), the maintenance-mode
-`snooze_all` / `unsnooze_all` (§3), and the two **response services** `check_health`
-(returns a guard's current Health State) and `wait_for_health(timeout, check_first)`
+`snooze_all` / `unsnooze_all` (§3), and the **response services** `check_health`
+(returns a guard's current Health State), `wait_for_health(timeout, check_first)`
 (awaits OK / timeout) — both take a `guard` status entity and reuse that guard's own
-Health Check, so a recovery script can poll Health out-of-band.
+Health Check, so a recovery script can poll Health out-of-band — and `heartbeat_url`.
+
+- **`heartbeat_ping`** — a manual **success** ping from HA, for a ping that got lost
+  (HA was down) although the job ran. `reset` does not help there: it clears
+  `ESCALATED`, but the deadline stays passed and the guard turns red again at once.
+  The handler is a function, not a method name, because it needs the `ServiceCall`
+  for `context.user_id`; `StatusSensor.async_heartbeat_ping` then takes the endpoint's
+  own path, `HeartbeatHealth.async_handle_ping(ok=True, code=None)`: the deadline
+  starts now, `on_change` re-evaluates (`SUSPECT`/`ESCALATED` → `OK`, from `SUSPECT`
+  silently), the state is saved; while snoozed it is stored and not judged. One INFO
+  line `<guard>: manual heartbeat ping by user <user_id>` (no token) — otherwise it is
+  indistinguishable from a real ping. Errors (`ServiceValidationError`): a guard
+  without heartbeat source → `not_a_heartbeat_guard`; a source already closed (a
+  reload in flight, `HeartbeatClosedError`) → `heartbeat_not_running`, nothing is
+  written. A **dormant** guard has no status entity (no engine, its entities are
+  disabled with the device), so HA's entity-service resolution logs the target as
+  missing (WARNING) and nothing reaches the store — the same as `reset`/`snooze` on a
+  dormant guard; only the endpoint writes pings into a dormant guard's stored state.
+- **`heartbeat_url`** — **admin-only** response service (`SupportsResponse.ONLY`,
+  registered with HA's `async_register_admin_service`, so a non-admin user gets
+  `Unauthorized` before the handler runs): the URL contains the secret token, which a
+  non-admin could not read from the subentry either. Takes `guard` like
+  `check_health` (resolved by `_engine_for_guard`, so an unknown or dormant guard is
+  `unknown_guard`) and returns `{"url": …, "path": …}`. `url` comes from
+  `core/health/heartbeat.py` `ping_url` — the **same helper** the config flow's URL
+  info step uses (§8): `get_url(allow_external=not local_only, prefer_external=False,
+  allow_ip=True)` + `ping_path`. `url` is `None` when HA knows no own URL
+  (`NoURLAvailableError`); the caller prefixes `path` with its HA address. For deploy
+  scripts that need the URL without reading `.storage`.
 
 ---
 

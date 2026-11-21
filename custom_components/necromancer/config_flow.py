@@ -45,7 +45,6 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_NAME
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from .config_flow_helpers.schemas import (
     _action_defaults,
@@ -87,7 +86,6 @@ from .const import (
     CONF_IMPORT_MODE,
     CONF_LABEL,
     CONF_LINKED_GUARDS,
-    CONF_LOCAL_ONLY,
     CONF_NOTIFY_FOLLOWER_SUCCESS,
     CONF_OFF_ACTION,
     CONF_ON_ACTION,
@@ -101,7 +99,6 @@ from .const import (
     CONF_STRATEGY,
     CONF_TOKEN,
     CONF_TYPE,
-    DEFAULT_LOCAL_ONLY,
     DOMAIN,
     HEALTH_TYPE_HEARTBEAT,
     IMPORT_MODE_MERGE,
@@ -116,7 +113,7 @@ from .const import (
     STRATEGY_SWITCH,
     SUBENTRY_TYPE_DEVICE,
 )
-from .core.health.heartbeat import ping_path
+from .core.health.heartbeat import ping_path, ping_url
 from .core.links import group_of
 
 LOGGER = logging.getLogger(__name__)
@@ -558,22 +555,13 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
     def _heartbeat_url(self, data: dict) -> str:
         """The full ping URL, or just the path when HA knows no own URL.
 
-        `prefer_external=False` is explicit: with SSL configured `get_url` would
-        otherwise prefer the external URL, which contradicts `local_only`. Only
-        a guard that accepts non-local callers may get an external/cloud URL.
+        Built by `ping_url`, the same helper as the `heartbeat_url` service.
         """
         health = data[CONF_HEALTH]
-        path = ping_path(data[CONF_NAME], health[CONF_TOKEN])
-        try:
-            base = get_url(
-                self.hass,
-                allow_external=not health.get(CONF_LOCAL_ONLY, DEFAULT_LOCAL_ONLY),
-                prefer_external=False,
-                allow_ip=True,
-            )
-        except NoURLAvailableError:
-            return path  # the step text says to put the HA address in front
-        return base.rstrip("/") + path
+        # Without an own URL the step text says to put the HA address in front.
+        return ping_url(self.hass, data[CONF_NAME], health) or ping_path(
+            data[CONF_NAME], health[CONF_TOKEN]
+        )
 
     async def async_step_heartbeat_url(
         self, user_input: dict[str, Any] | None = None
