@@ -50,7 +50,7 @@ vendor-agnostic, as an orchestrator on top of the entities you already have. Job
 **Start here:** [Why Necromancer?](#why-necromancer) · [Features](#features) · [Installation](#installation) · [Getting started](#getting-started)
 **Understand it:** [How it works](#how-it-works) · [Health Sources](#health-sources) · [Recovery strategies](#recovery-strategies) · [Timing & behaviour](#timing--behaviour) · [What you get](#what-you-get-per-guarded-device) · [💓 Heartbeat for jobs](#heartbeat)
 **Go deeper:** [Linked guards](#linked-guards-groups) · [Supervisor guards](#supervisor-guards-watch-other-guards) · [PoE ports](#poe-ports) · [Notifications](#notifications) · [Services](#services)
-**Use & support:** [Cookbook](#cookbook) · [FAQ](#faq) · [Architecture](#architecture--internals) · [Contributing](#contributing) · [License](#license)
+**Use & support:** [Cookbook](#cookbook) · [FAQ](#faq) · [AI agents](#ai-agents) · [Architecture](#architecture--internals) · [Contributing](#contributing) · [License](#license)
 
 ---
 
@@ -143,6 +143,7 @@ smart plug, a PoE camera, a cloud bridge or a nightly backup — all guarded wit
 - 🧰 **Wizard-built & reconfigurable** — create and edit guards entirely in the UI; no YAML to hand-write.
 - 🏠 **Local & dependency-free** — no cloud, no extra Python packages; it orchestrates the entities you already have, and its verdicts (escalated, snooze) and each heartbeat's last ping survive a restart.
 - 🌍 **Localized** — full English and German UI.
+- 🧠 **Agent skill** — teaches AI agents (e.g. Claude with a Home Assistant MCP server) how guards, states, actions and heartbeats work, so they read your guards correctly and never leak a heartbeat token — see [AI agents](#ai-agents).
 
 👉 **Real-world use cases:** see the **[Cookbook](#cookbook)** — PoE access points, Hue / Zigbee / Z-Wave bridges, Docker containers, pool pumps, solar inverters, Node-RED watchdogs, nightly backups & cron jobs and more.
 
@@ -469,16 +470,20 @@ Automate on the recovery event — e.g. alert only when a guard actually gives u
 
 ```yaml
 - triggers:
-    - trigger: state
-      entity_id: event.hue_bridge_recovery
-  conditions:
-    - condition: template
-      value_template: "{{ trigger.to_state.attributes.event_type in ['escalated', 'blocked'] }}"
+    - trigger: event.received
+      target:
+        entity_id: event.hue_bridge_recovery
+      options:
+        event_type: [escalated, blocked]
   actions:
     - action: notify.mobile_app_phone
       data:
-        message: "Necromancer gave up on {{ trigger.to_state.name }}"
+        message: "Necromancer gave up on {{ state_attr('sensor.hue_bridge_status', 'guard_name') }}"
 ```
+
+The recovery event reports the outcome of a recovery *cycle*. A guard that escalates without
+trying — auto-recovery off, a notify-only guard, a failed linked repair — fires no event; to catch
+every escalation, use a state trigger on `sensor.<guard>_status` `to: escalated`.
 
 Or tell yourself when an escalated guard is **back to normal** — e.g. the backup finally pinged
 again, or you fixed the device by hand. Trigger on the status sensor:
@@ -1047,6 +1052,23 @@ the status, or a proxy sends `X-Forwarded-For` without `use_x_forwarded_for`. Se
 **Can Necromancer tell me when Home Assistant itself is down?** No — it runs inside Home Assistant,
 so it stops with it. Keep one check outside Home Assistant for that; Necromancer covers everything
 Home Assistant can see and every job that pings it.
+
+## AI agents
+
+If you let an AI agent work on your Home Assistant — for example Claude through a Home Assistant
+MCP server — give it the **Necromancer skill**
+([`skills/necromancer`](https://github.com/MrTomRocker/homeassistant-necromancer/tree/main/skills/necromancer)).
+It tells the agent how to find a guard and read its state, which actions take a `target` and which
+a `guard` field, how to write automations on the status sensor and the recovery event, and that a
+heartbeat URL is a secret it must never print. The MCP server gives the agent access to Home
+Assistant; the skill adds what it needs to know about Necromancer.
+
+- **claude.ai / Claude Desktop:** download `necromancer-skill.zip` from the
+  [latest release](https://github.com/MrTomRocker/homeassistant-necromancer/releases/latest) and
+  upload it as a custom skill in the Skills settings.
+- **Claude Code and other agents that read [Agent Skills](https://agentskills.io):**
+  `npx skills add MrTomRocker/homeassistant-necromancer`, or copy the `skills/necromancer` folder
+  into the agent's skills folder (for Claude Code `~/.claude/skills/`).
 
 ## Architecture & internals
 

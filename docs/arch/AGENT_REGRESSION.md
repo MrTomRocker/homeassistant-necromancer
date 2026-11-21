@@ -318,13 +318,13 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
 
 ### Automatisiert statt manuell
 
-- [ ] **AUTO-1 — Automatisierte Suiten laufen grün (51/22/80/12)** · `P0`
+- [ ] **AUTO-1 — Automatisierte Suiten laufen grün (52/22/80/12)** · `P0`
   - **Prüft:** Die vier Real-HA-core-Suiten (`tests.common.async_test_home_assistant`) sind grün und decken PoE resolve/cycle/coalescing/Platzhalter, Engine-State-Machine + Persistenz, Health-Registry-Events inkl. Template-Blind-Erkennung (B3), Linking-Koordination ab.
-  - **Files:** `tests/test_units.py` (51), `test_poe.py` (22), `test_engine.py` (80), `test_integration.py` (7 Test-Funktionen / 12 `ok(...)`-Checks). Health-Tests u. a. `test_health_self_reference_warns`, `test_health_template_all_missing_is_blind`, `test_health_template_partial_missing_warns_only`. Linking-Tests u. a. `test_engine.py::test_linked_follower_recovers_with_leader`, `test_linked_follower_escalates_when_leader_fails`, `test_linked_auto_off_follower_escalates`, `test_leader_stop_does_not_escalate_follower`, `test_debounce_arbitration_second_follows`.
+  - **Files:** `tests/test_units.py` (52), `test_poe.py` (22), `test_engine.py` (80), `test_integration.py` (7 Test-Funktionen / 12 `ok(...)`-Checks). Health-Tests u. a. `test_health_self_reference_warns`, `test_health_template_all_missing_is_blind`, `test_health_template_partial_missing_warns_only`. Linking-Tests u. a. `test_engine.py::test_linked_follower_recovers_with_leader`, `test_linked_follower_escalates_when_leader_fails`, `test_linked_auto_off_follower_escalates`, `test_leader_stop_does_not_escalate_follower`, `test_debounce_arbitration_second_follows`.
   - **Treiber:** Die Skripte haben ein eigenes `main()` (kein pytest): aus dem Repo `for f in test_units test_poe test_engine test_integration; do PYTHONPATH=<ha-core>:<ha-core>/packages/pytest-home-assistant:<repo> <ha-venv>/bin/python tests/$f.py; done` (in-process, kein laufender Server nötig; wie CI).
-  - **Assert:** Schlusszeilen `51 passed, 0 failed` (`test_units`), `22 passed, 0 failed` (`test_poe`), `80 passed, 0 failed` (`test_engine`), `12/12 checks passed` (`test_integration`, 7 Test-Funktionen). Gesamt **kein** FAIL/ERROR.
+  - **Assert:** Schlusszeilen `52 passed, 0 failed` (`test_units`), `22 passed, 0 failed` (`test_poe`), `80 passed, 0 failed` (`test_engine`), `12/12 checks passed` (`test_integration`, 7 Test-Funktionen). Gesamt **kein** FAIL/ERROR.
   - **Cleanup:** —
-  - *Hinweis: Zähler am 2026-11-21 nachgemessen → 51/22/80/12. Die pytest-Suite (181) wird separat in den Voraussetzungen geführt.*
+  - *Hinweis: Zähler am 2026-11-21 nachgemessen → 52/22/80/12. Die pytest-Suite (181) wird separat in den Voraussetzungen geführt.*
 
 - [ ] **AUTO-2 — Gates grün (ruff/format)** · `P1`
   - **Prüft:** Lint-/Format-Gates bestehen für das Necromancer-Paket.
@@ -1018,7 +1018,7 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
 ### Hinweis zum doc-internen Zählerstand
 
 - [x] **DOC-1 — erledigt** (2026-11-21): Das frühere `REGRESSION.md` gibt es nicht mehr; die
-  Suite-Zähler stehen nur noch in AUTO-1, GAP-SUITE und den Voraussetzungen oben (51/22/80/12,
+  Suite-Zähler stehen nur noch in AUTO-1, GAP-SUITE und den Voraussetzungen oben (52/22/80/12,
   pytest 181), und „lock" ist dort überall durch **Coalescing** ersetzt (s. GAP-CC6).
 
 ---
@@ -1433,7 +1433,7 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
   - **Cleanup:** —
 
 - [ ] **GAP-SUITE — Aktuelle Suite-Zählungen stimmen (Doc-Drift gegen Code)** · `P2`
-  - **Prüft:** Die vier In-Process-Suiten melden die aktuellen Counts (units=51, poe=22, engine=80, integration=12 Checks); zusätzlich die pytest-Suite (181), in `<ha-core>` als `tests/necromancer/` eingehängt (wie CI).
+  - **Prüft:** Die vier In-Process-Suiten melden die aktuellen Counts (units=52, poe=22, engine=80, integration=12 Checks); zusätzlich die pytest-Suite (181), in `<ha-core>` als `tests/necromancer/` eingehängt (wie CI).
   - **Treiber:** die Skript-Schleife aus AUTO-1; dazu aus `<ha-core>`: `<ha-venv>/bin/python -m pytest tests/necromancer/ -q`.
-  - **Assert:** Schlusszeilen `51 passed`, `22 passed`, `80 passed`, `12/12 checks passed`, `181 passed` (jeweils 0 failed). Bei neuen Tests die Zähler hier, in AUTO-1, in den Voraussetzungen und in `testing.md` §2 nachziehen.
+  - **Assert:** Schlusszeilen `52 passed`, `22 passed`, `80 passed`, `12/12 checks passed`, `181 passed` (jeweils 0 failed). Bei neuen Tests die Zähler hier, in AUTO-1, in den Voraussetzungen und in `testing.md` §2 nachziehen.
   - **Cleanup:** —

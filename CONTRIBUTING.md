@@ -61,7 +61,8 @@ python -m compileall custom_components/necromancer
 Additional house rules:
 
 - **Logging:** lazy `%`-formatting (never f-strings in log calls), no trailing period, no component name prefix (the logger name already carries it).
-- **Translations:** custom components ship **no `strings.json`** (a Core build-time file) — `translations/en.json` is the source, edited directly, and `translations/de.json` mirrors its keys. Placeholder sets per key must stay consistent, every flow step needs a `description`, and descriptions must contain **no `{…}` braces** except real `description_placeholders` (HA renders config translations via ICU MessageFormat).
+- **Translations:** custom components ship **no `strings.json`** (a Core build-time file) — `translations/en.json` is the source, edited directly, and `translations/de.json` mirrors its keys. Placeholder sets per key must stay consistent, every flow step needs a `description`, and descriptions must contain **no `{…}` braces** except real `description_placeholders` (HA renders config translations via ICU MessageFormat). Service names and descriptions also go into `services.yaml` in English, word for word as in `en.json`: the frontend shows the translations, but the services API (and every agent reading it) only sees `services.yaml`. `test_units.py` checks that both match.
+- **Agent skill:** a change to an action, entity, attribute, state, default or the heartbeat endpoint also goes into [`skills/necromancer/SKILL.md`](skills/necromancer/SKILL.md) — AI agents act on what it says.
 
 ## Testing
 

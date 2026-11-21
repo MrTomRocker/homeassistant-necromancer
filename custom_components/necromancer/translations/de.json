@@ -256,7 +256,7 @@
               },
               "data_description": {
                 "reload_entry": "Lädt die Integration des zugewiesenen Geräts nach der Reparatur-Aktion neu, bevor der Health Check läuft — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss, damit es wieder gesund meldet.",
-                "reload_delay": "Wie lange nach dem Neuladen gewartet wird, bevor erneut geprüft wird — gibt der Integration Zeit, sich neu zu verbinden."
+                "reload_delay": "Wie lange nach der Reparatur gewartet wird, bevor die Integration neu geladen wird — damit das Gerät hochfahren kann, bevor Home Assistant sich neu verbindet."
               }
             }
           }
@@ -318,7 +318,7 @@
               },
               "data_description": {
                 "reload_entry": "Lädt die Integration des zugewiesenen Geräts nach der Reparatur-Aktion neu, bevor der Health Check läuft — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss, damit es wieder gesund meldet.",
-                "reload_delay": "Wie lange nach dem Neuladen gewartet wird, bevor erneut geprüft wird — gibt der Integration Zeit, sich neu zu verbinden."
+                "reload_delay": "Wie lange nach der Reparatur gewartet wird, bevor die Integration neu geladen wird — damit das Gerät hochfahren kann, bevor Home Assistant sich neu verbindet."
               }
             }
           }
@@ -385,7 +385,7 @@
               },
               "data_description": {
                 "reload_entry": "Lädt die Integration des zugewiesenen Geräts nach der Reparatur-Aktion neu, bevor der Health Check läuft — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss, damit es wieder gesund meldet.",
-                "reload_delay": "Wie lange nach dem Neuladen gewartet wird, bevor erneut geprüft wird — gibt der Integration Zeit, sich neu zu verbinden."
+                "reload_delay": "Wie lange nach der Reparatur gewartet wird, bevor die Integration neu geladen wird — damit das Gerät hochfahren kann, bevor Home Assistant sich neu verbindet."
               }
             }
           }
@@ -446,7 +446,7 @@
               },
               "data_description": {
                 "reload_entry": "Lädt die Integration des zugewiesenen Geräts nach der Reparatur-Aktion neu, bevor der Health Check läuft — nützlich, wenn Home Assistant die Verbindung zum Gerät neu aufbauen muss, damit es wieder gesund meldet.",
-                "reload_delay": "Wie lange nach dem Neuladen gewartet wird, bevor erneut geprüft wird — gibt der Integration Zeit, sich neu zu verbinden."
+                "reload_delay": "Wie lange nach der Reparatur gewartet wird, bevor die Integration neu geladen wird — damit das Gerät hochfahren kann, bevor Home Assistant sich neu verbindet."
               }
             }
           }
@@ -557,7 +557,7 @@
   "services": {
     "repair_poe_port": {
       "name": "PoE-Port reparieren",
-      "description": "Löst eine Geräte-id zu ihrem PoE-Port auf und startet ihn per Stromabschaltung neu. Blockierend und pro Port serialisiert, sodass mehrere Guards oder Automatisierungen sich auf einen Cycle einigen, statt um denselben Port zu konkurrieren.",
+      "description": "Löst eine Geräte-id zu ihrem PoE-Port auf und startet ihn per Stromabschaltung neu. Blockierend und pro Port serialisiert, sodass mehrere Guards oder Automatisierungen sich auf einen Cycle einigen, statt um denselben Port zu konkurrieren. Gibt nichts zurück: Eine id, die keinen oder mehrere Ports trifft, wird nur protokolliert.",
       "fields": {
         "id": {
           "name": "Geräte-id",
@@ -567,11 +567,11 @@
     },
     "reset": {
       "name": "Zurücksetzen",
-      "description": "Setzt einen eskalierten Guard auf normal zurück und prüft erneut. Ist das überwachte Gerät weiterhin gestört, versucht der Guard erneut eine Reparatur; ist es wiederhergestellt, wacht er einfach weiter."
+      "description": "Setzt einen eskalierten Guard auf normal zurück und prüft erneut. Wirkt nur bei einem eskalierten Guard. Ist das überwachte Gerät weiterhin gestört, wartet der Guard erneut die Wartezeit vor Reaktion ab und repariert dann (wenn die Auto-Reparatur an ist); ist es wiederhergestellt, wacht er einfach weiter. Für ein verlorenes Lebenszeichen stattdessen „Lebenszeichen setzen“ nutzen."
     },
     "snooze": {
       "name": "Schlummern",
-      "description": "Setzt einen Guard für eine bestimmte Dauer aus — er ignoriert die Gesundheit des überwachten Geräts und meldet nichts (z. B. bei geplanter Wartung) und wacht danach automatisch wieder auf.",
+      "description": "Setzt einen Guard für eine bestimmte Dauer aus — er ignoriert die Gesundheit des überwachten Geräts und meldet nichts (z. B. bei geplanter Wartung) und wacht danach automatisch wieder auf. Ziel: der Status-Sensor eines Guards, sein Gerät oder ein Bereich. Wird abgelehnt, während der Guard repariert.",
       "fields": {
         "duration": {
           "name": "Dauer",
@@ -625,7 +625,7 @@
     },
     "check_health": {
       "name": "Health prüfen",
-      "description": "Wertet die Health eines Guards sofort aus und gibt sie zurück (`ok` / `unhealthy` / `unknown`) — damit ein Reparatur-Skript den eigenen Health Check des Guards wiederverwendet, statt sie nachzubauen.",
+      "description": "Wertet die Health eines Guards sofort aus und gibt sie zurück (`ok` / `unhealthy` / `unknown`) — damit ein Reparatur-Skript den eigenen Health Check des Guards wiederverwendet, statt sie nachzubauen. Gibt nur Daten zurück: mit einer Antwortvariable aufrufen.",
       "fields": {
         "guard": {
           "name": "Guard",
@@ -635,7 +635,7 @@
     },
     "wait_for_health": {
       "name": "Auf Health warten",
-      "description": "Wartet, bis ein Guard wieder gesund meldet, oder bis der Timeout greift. Gibt `health`, `timed_out` und `waited_s` zurück — so kann eine gestufte Reparatur zwischen den Stufen über den eigenen Health Check des Guards verifizieren.",
+      "description": "Wartet, bis ein Guard wieder gesund meldet, oder bis der Timeout greift. Gibt `health`, `timed_out` und `waited_s` zurück — so kann eine gestufte Reparatur zwischen den Stufen über den eigenen Health Check des Guards verifizieren. Gibt nur Daten zurück: mit einer Antwortvariable aufrufen.",
       "fields": {
         "guard": {
           "name": "Guard",
@@ -657,7 +657,7 @@
     },
     "heartbeat_url": {
       "name": "Lebenszeichen-URL",
-      "description": "Gibt die Ping-URL eines Lebenszeichen-Guards zurück (`url`, null, wenn Home Assistant keine eigene URL kennt) und ihren Pfad (`path`). Nur für Administratoren: Die URL enthält das geheime Token des Guards.",
+      "description": "Gibt die Ping-URL eines Lebenszeichen-Guards zurück (`url`, null, wenn Home Assistant keine eigene URL kennt) und ihren Pfad (`path`). Nur für Administratoren: Beide enthalten das geheime Token des Guards — nie ausgeben oder weitergeben. Gibt nur Daten zurück: mit einer Antwortvariable aufrufen.",
       "fields": {
         "guard": {
           "name": "Guard",
