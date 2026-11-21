@@ -12,7 +12,7 @@ shipped values from `const.py`; all of them are per-guard configurable in the wi
 
 | Parameter | Default | Scope | Where it bites | Meaning |
 |---|---|---|---|---|
-| `debounce` | **120 s** | per guard | `_enter_suspect` → `async_call_later` | How long a guard must stay unhealthy (`SUSPECT`) before recovery is allowed to start. Absorbs blips. |
+| `debounce` | **120 s** (heartbeat: **3600 s**) | per guard, 0 to **86400 s** (1 day) | `_enter_suspect` → `_arm_debounce` → `async_call_later` | How long a guard must stay unhealthy (`SUSPECT`) before recovery is allowed to start. Absorbs blips. For a heartbeat guard it is the **grace** after a missed ping (`DEFAULT_HEARTBEAT_DEBOUNCE`). A **confirmed** verdict (`HealthSource.confirmed()`: a heartbeat's failure ping) skips it — also cutting a running one short. A finding made before HA has started starts its debounce only at `EVENT_HOMEASSISTANT_STARTED` (`async_at_started`), so no alarm or repair runs against actions bootstrap has not registered yet; a confirmed one reacts right then. A source that knows when its fault began (`HealthSource.fault_since()`: a heartbeat's passed deadline) gets only the **rest**, `debounce − (now − anchor)` clamped to `[0, debounce]`, on every arming (start of `SUSPECT`, reload, restart, the deferred start at HA started); a rest of 0 reacts at once. The anchor is `fault_since`, but never before the guard's own last reaction: its latest cycle start (`last_cycle_start`, persisted) or the end of the cooldown after its latest repair (`last_recover + cooldown`). So a heartbeat reacts at `deadline + debounce`, however often the timer is rebuilt in between, and a fault that outlives a repair waits a full debounce again (no repair or boot loop). Other sources (`None`) get the full debounce from the moment the engine sees the fault. |
 | `boot_window` | **180 s** | per guard (Health Check on) | `VERIFY` → `_wait_health_ok` | How long to wait for the Health State to read OK again after the recovery action before counting the attempt as failed. |
 | `cooldown` | **600 s** | per guard | `_recover_success` → `async_call_later` | Settle pause after a successful recovery before returning to `OK`. While cooling down a fresh fault re-enters `SUSPECT` directly. |
 | `max_attempts` | **2** | per guard | `_run_recovery_cycle` loop | How many recovery attempts before `ESCALATED`. With Health Check off the **driver's own verdict** decides each attempt: a clean result succeeds at once, a reported failure (raise / `recover_failed` / port not online) retries up to `max_attempts`. |
@@ -23,9 +23,14 @@ shipped values from `const.py`; all of them are per-guard configurable in the wi
 | `SAVE_DELAY` | **5 s** | global (fixed) | `Store.async_delay_save` | Debounce on writing runtime state to disk; a flush on unload guarantees no loss across a reload. |
 | boot grace | — | global (fixed) | `async_at_started` | Referenced-entity/service existence is only checked **after** HA has fully started, so a not-yet-registered dependency during boot is not flagged. |
 | auto-recovery | **on** | per guard (runtime) | `switch.<guard>_auto_recovery` | Not a setup timer but gates whether recovery (own *or* following a link) runs at all. |
+| `period` | **86400 s** (1 day) | per guard (heartbeat source) | `core/health/heartbeat.py` `evaluate` / `next_deadline` | The expected interval between two successful pings. Deadline = basis + `period`, basis = last success (else `armed_at`, creation or new token); overdue is `now > deadline` (strict). There is no separate grace: the slack after the deadline is the guard's `debounce` in `SUSPECT`. No startup grace: after an HA restart the same arithmetic applies. A `grace` left in stored dev data is ignored. |
 
 `debounce` is the only timer for a **notify-only** guard; it has no recovery, verify,
-cooldown or attempts.
+cooldown or attempts. A **heartbeat** guard has one more, owned by its source: a
+point-in-time timer on the next deadline (+1 s, since the check is strict), which
+calls `on_change` so the engine re-evaluates. It is re-armed on every ping, on
+start/restore and after it fires if the new deadline is still ahead; there is none
+while the last ping was a failure (that is UNHEALTHY regardless of time).
 
 ---
 
@@ -71,8 +76,8 @@ is the **cooldown** (post-success), not a retry gap.
 | State | Entered when | Timer running | Exits |
 |---|---|---|---|
 | `OK` | healthy, or after cooldown | none | → `SUSPECT` on UNHEALTHY |
-| `SUSPECT` | OK→UNHEALTHY | **debounce** | → `OK` (recovered/blip) · → `ESCALATED` (auto off / policy) · → follow (partner) · → `RECOVERING` (start cycle) |
-| `BLIND` | health `UNKNOWN` while idle (OK/SUSPECT/BLIND) — source unavailable / template render error | none | → `OK` (health reads OK) · → `SUSPECT` (health reads UNHEALTHY). No recovery; `UNKNOWN` is never a fault. |
+| `SUSPECT` | OK→UNHEALTHY (a heartbeat: deadline passed — its grace starts) | **debounce** (none if confirmed: left in the same tick; only its rest counted from `fault_since()` for a heartbeat, none once used up) | → `OK` (recovered/blip; a heartbeat's late success, no notification) · → `ESCALATED` (auto off / policy) · → follow (partner) · → `RECOVERING` (start cycle). A confirmed fault (heartbeat failure ping) cancels the debounce and takes the same exits at once. |
+| `BLIND` | health `UNKNOWN` while idle (OK/SUSPECT/BLIND) — source unavailable / template render error / a heartbeat guard waiting for its first success (new guard or new token, until `armed_at + period`) | none (a waiting heartbeat source keeps its own deadline timer) | → `OK` (health reads OK) · → `SUSPECT` (health reads UNHEALTHY). No recovery; `UNKNOWN` is never a fault. |
 | `RECOVERING` | cycle starts (or claimed) | none (driver runs) | → `VERIFY` (with check) · → `COOLDOWN`/`OK` (no check, driver `True`) · → `RECOVERING` (no check, driver `False`, retry) · → `ESCALATED` (blocked / out of attempts) |
 | `VERIFY` | after the action, Health Check on | **boot_window** | → `COOLDOWN` (healthy) · → `RECOVERING` (retry) · → `ESCALATED` (out of attempts) |
 | `COOLDOWN` | success | **cooldown** | → `OK` (healthy) · → `SUSPECT` (unhealthy) |
@@ -181,12 +186,14 @@ Every distinct case the system handles. *(C = confirmed by a test/probe; L = see
 | health entity renamed | the registry listener re-points; guard keeps watching. |
 | health entity removed / disabled | logged at ERROR ("guard is blind"); re-enabled → INFO. Also raised as a Repair (see Config-health). |
 | referenced entity missing **at boot** | not flagged until after HA start (`async_at_started`). |
+| unhealthy **at boot** (e.g. heartbeat overdue, or a stored failure ping) | `SUSPECT` at once, but the debounce starts only once HA has started; then alarm/recovery as usual. Without this the notify or repair action may not be registered yet: the alarm is lost, every attempt fails in one tick, and the persisted `ESCALATED` never alarms again. C |
 
 ### Recovery
 
 | Case | Behaviour |
 |---|---|
 | unhealthy < debounce then healthy | blip absorbed, no recovery. |
+| confirmed fault (`confirmed()` true: heartbeat failure ping) | no debounce: reacts at once on the elapsed-debounce path (notify / no_auto_recovery / cycle); while `SUSPECT` it cancels the running debounce. Other sources never confirm. C |
 | `can_recover()` false (missing switch / no port / invalid action) | `ESCALATED` (`recovery_blocked`), no blind action. C |
 | `recover()` raises (e.g. missing service) | failed attempt → retry/escalate, never false success. C |
 | Health Check off | the driver's bool verdict decides the attempt: clean → success; reported failure (raise / `recover_failed` / port not online) → retry/escalate. Continuous monitoring still re-triggers if it didn't work. C |
@@ -206,10 +213,14 @@ Every distinct case the system handles. *(C = confirmed by a test/probe; L = see
 | `ESCALATED` + healthy again | auto-clears to `OK`. |
 | `recover_count`, `last_recover`, `last_seen`, `auto` | restored from the Store. |
 | `fail_count`, `last_fail`, `last_recover_driver_result`, `last_recover_driver_time` | restored from the Store. |
+| `last_cycle_start` (start of the latest own recovery cycle) | restored from the Store; a source with `fault_since()` counts its debounce from no earlier than this, so a reload or a restart in the middle of a cycle (also one the recovery action caused itself) does not start the next cycle at once. C |
 | transient `RECOVERING`/`VERIFY`/`COOLDOWN`/`BLIND` | **not** restored — re-derived from live health. |
 | PoE last-known port (fabric `_poe_cache`) | restored, so a `poe_port` guard keeps its fallback target across a reboot. |
 | `SNOOZED` + snooze still active | restored as `SNOOZED`; the remaining snooze time is re-armed on start. |
 | `SNOOZED` + snooze already elapsed | resumes to `OK` and re-derives from live health. |
+| heartbeat source state (`source`: `last_ping`, `last_ok`, `last_status`, `last_code`, `armed_at`, `token_fp`) | restored by `HealthSource.restore()`; a fingerprint mismatch (new token, type switch) resets it to "armed now" and drops a stored `ESCALATED` (a `SNOOZED` stays). C |
+| heartbeat guard overdue before the restart, or its deadline passed during the outage | `UNHEALTHY` at once after the start — no startup grace — so it re-enters `SUSPECT` and waits the rest of its debounce counted from the deadline (armed at HA started, see Health); the sender's retry within it makes it `OK` without an alarm. Rest used up → the reaction right after HA started. A stored `ESCALATED` stays without a new alarm. C |
+| guard without a running engine (dormant, or its setup failed) | its stored blob is carried over verbatim on every save, so another guard's save cannot wipe it. C |
 
 ### Snooze (operator `necromancer.snooze` / `unsnooze`)
 
@@ -222,6 +233,55 @@ Every distinct case the system handles. *(C = confirmed by a test/probe; L = see
 | `snooze` during an active recovery (`RECOVERING`/`VERIFY`) | refused — raises `ServiceValidationError` (`snooze_during_recovery`). |
 | `snooze_all` with some guards recovering | snoozes the rest; busy guards skipped (WARNING), no error raised. |
 | snooze persisted across restart | restored as `SNOOZED`; remaining time re-armed (or resumes if elapsed). |
+
+### Heartbeat (`heartbeat` source + `/api/necromancer/heartbeat/<name>_<token>`)
+
+Evaluation — first matching row wins (`deadline = basis + period`, basis = last
+success, else `armed_at`). The source has no grace: the wait after the deadline is
+the engine's debounce (default 1 h for heartbeat guards).
+
+| Case | Behaviour |
+|---|---|
+| last ping a failure (`status` anything but missing/`ok`/`0`, also empty or `start`) | `UNHEALTHY` at once, regardless of time; detail `heartbeat_failed`; `confirmed()` → no debounce: `ESCALATED` + alarm (or the repair) at once, also from `SUSPECT`. No deadline timer while failed. C |
+| failure with `3` / `TERM` | kept as `last_code`, the alarm reads "Exit-Code 3" / "Code TERM". C |
+| failure with `fail`, empty, or not `^[A-Za-z0-9_-]{1,16}$` (`RTMIN 3`, `a;b`, 20 chars) | no code kept, just "failure". C |
+| no success yet, deadline ahead (new guard or new token) | `UNKNOWN` → `BLIND`, detail `heartbeat_waiting` (attribute only). C |
+| no success yet, deadline past | `UNHEALTHY` → `SUSPECT`; at `armed_at + period + debounce` `ESCALATED`, `heartbeat_never` (since `armed_at`). C |
+| `now > deadline` | `UNHEALTHY` → `SUSPECT` (the grace = debounce runs, counted from the deadline via `fault_since()`, not from the source timer's +1 s); `heartbeat_overdue` (since last success, expected period). Exactly on the deadline is still OK. C |
+| success while `SUSPECT` (within the grace) | `OK`, debounce cancelled, **no notification**. C |
+| debounce elapses without a success | at `deadline + debounce` the normal reaction: notify-only → `ESCALATED` + `problem_detected`; recovery → the cycle. C |
+| entry reload while `SUSPECT` (any guard of the entry changed) | the new engine waits only the rest of the grace: the reaction stays at `deadline + debounce`, also after several reloads; a success within the rest → `OK`, silent. C |
+| still overdue after a repair (an action without health check, no ping yet) | `COOLDOWN` ends → `SUSPECT` for a **full** debounce counted from the cooldown end, then the next cycle — not at once. C |
+| entry reload while `COOLDOWN` or `RECOVERING`, still overdue | comes back `OK` → `SUSPECT`; the debounce counts from the cycle start / cooldown end (a future cooldown end = a full debounce from the reload), never a cycle in the same tick. C |
+| the recovery restarts HA (or the host) while still overdue | after the boot the debounce counts from the stored cycle start (the bootstrap time counts), so restarts come at most once per debounce, not once per boot. C |
+| success after a failure | `OK` at once. C |
+| `period` or debounce changed | only the deadline / the wait moves; nothing resets. C |
+| HA restart | same arithmetic, no startup grace: overdue stays overdue and re-enters `SUSPECT` for the **rest** of the grace (from HA started; the bootstrap time counts); a sender retry within it makes it `OK` silently. Down past `deadline + debounce`: the reaction comes right after HA started, and a retry a moment later turns it `OK` but the alarm is out. A stored `ESCALATED` stays. C |
+| snooze ends after `deadline + debounce` (deadline passed during the snooze) | the grace is used up: the reaction comes right after the snooze. Deliberate (KISS): still broken after maintenance is broken. |
+| `period` shortened so that the new `deadline + debounce` is already past | the reaction comes right after saving (the reload). Deliberate (KISS): under the new period the job is overdue. |
+
+Endpoint and lifecycle — the answer a sender gets:
+
+| Case | Behaviour |
+|---|---|
+| ping accepted (POST only, query only, body never read) | `200 {"health": "ok"/"unhealthy"/"unknown"}`; apply, re-arm the deadline timer, save (also OK→OK via `bind_persist`), `on_change`. C |
+| other method (`GET`, `PUT`, `HEAD`…) | `405` (aiohttp) — no `get` handler, so a link preview or prefetch never counts as a ping. C |
+| unknown token, or Necromancer not loaded yet (no route) | `404` — sender retries. C |
+| guard `local_only`, caller not local (global IPv6, `100.64.0.0/10`, cloud, unparsable IP) | `403`, nothing changes, rate counter untouched. C |
+| more than 5 pings in 10 s for one guard | `429` — sender retries; a rejected ping is not counted. C |
+| unknown token from a non-local caller | `404` (lookup comes first). C |
+| reload in progress (between unload and setup) | `503` (`waiting`) — sender retries into the next source. C |
+| ping races the unload (source already closed) | `503` (`HeartbeatClosedError`), state untouched, no timer left. C |
+| engine start raised after the source's setup | the source is unsubscribed → `waiting`, `503`; its stored state is kept. C |
+| entry unloaded and not reloaded (integration disabled) | `503` until the next HA restart, then `404`. C |
+| integration deleted | `404` at once. C |
+| guard deleted | `404`; its stored blob drops out at the next save. C |
+| guard dormant (device disabled) | `200 {"dormant": true}`: written into the stored source state, not evaluated, no timer, no alarm. Re-enabled after more than `period` → `OK`, not overdue. C |
+| dormant guard created asleep / token regenerated in its sleep | the dormant ping resets the stored state to the new token (and drops a stored `ESCALATED`) before applying; wake-up → `OK`. C |
+| `ESCALATED`, then token regenerated | `BLIND` (awaiting the first success); after `period` without one → `SUSPECT`, after the debounce → `problem_detected`. C |
+| unexpected exception in Necromancer | `500` — sender retries; only the first 6 token characters are logged. C |
+| HA shutting down | `503` (HA itself). |
+| query with control chars / SQL-script patterns, or `X-Forwarded-For` without `use_x_forwarded_for` | `400` (HA itself, before Necromancer) — final, not retried. |
 
 ### PoE (`poe_port` driver & fabric)
 
@@ -246,6 +306,8 @@ Every distinct case the system handles. *(C = confirmed by a test/probe; L = see
 | A–B, B–C | transitive: `{A,B,C}` one group; next edit shows all. C |
 | stale partner id (partner deleted) | dropped from the effective group at runtime; self-cleans on next reconfigure. C |
 | notify-only guard in the mix | excluded from the closure and from the flow options. C |
+| heartbeat guard in the mix | excluded from the closure at runtime (a stale `linked_guards` is ignored) and from the flow: no link section, not offered to other guards, nothing stored. C |
+| linked guard switched to heartbeat | removed from every partner on save (`_apply_link_removals`); the rest of the group stays. C |
 | one guard trips | it leads; linked partners follow (hold + re-verify), no parallel recovery. L |
 | both trip simultaneously | first to `_debounce_done` claims `RECOVERING`; the other follows (no double-cycle). C |
 | follower healthy after the shared repair | settles through `_recover_success` (cooldown + stats) like the leader. L |
@@ -267,6 +329,14 @@ Every distinct case the system handles. *(C = confirmed by a test/probe; L = see
 | import merge vs replace | upsert by `label` / overwrite. |
 | reactive attribute/state pickers | follow the sibling entity field live (device step is flat; the port editor binds within its section). |
 | own entities in pickers | excluded (no self-watch / self-switch). |
+| heartbeat `period` < 60 s | rejected (`period_too_short`) after the duration is converted to seconds; exactly 60 s is accepted. The device step has no `grace` field (sending one is `InvalidData`); a stored one is not pre-filled and is dropped on save. |
+| debounce > 86400 s | rejected by the selector (`InvalidData`) for every guard; exactly 1 day is accepted. |
+| heartbeat guard saved | only after the URL info step (`heartbeat_url`) is submitted — on create and on every reconfigure that ends as heartbeat. Closing the dialog there saves nothing (a new guard has no token). |
+| reconfigure, nothing changed | same token, the info step shows the same URL; the source keeps its state (no reset). |
+| "Generate a new token" | new token before saving, info step `heartbeat_url_new` with the new URL; on submit the old URL answers `404`, the reload resets the source (new `token_fp`) → `blind` + `awaiting_first_success`, `problem_detected` after `period` + debounce without success. |
+| type switch → heartbeat | new token, strategy default `notify`, stored debounce replaced by 3600 (the grace), link removed from partners. The reset rule is the same as for a new token. |
+| type switch heartbeat → other | no info step; the source-step field text warns that the URL becomes invalid (`404`); debounce default back to `DEFAULT_DEBOUNCE`; the token is not stored. |
+| no internal/external URL | the info step shows only the path; its text says to put the HA address in front. |
 
 ### Config-health (Repairs)
 
@@ -304,6 +374,47 @@ clears the moment the cause is fixed or the guard/port is removed.
   ESCALATED or a SNOOZED (whose remaining time is re-armed, or resumes at once if it
   elapsed meanwhile); every transient state is re-derived by the first `_evaluate()` in
   `async_start`.
+- **A dormant heartbeat guard still takes pings — stored, not evaluated.** Its URL
+  answers `200` + `{"dormant": true}` and moves `last_ok` in the Store, but no
+  deadline timer runs and nothing alarms. The sender's journal shows a notice, not
+  an error, so "dormant" does not look like a broken job.
+- **`local_only` is about the connection's IP.** Loopback, link-local, RFC1918 and
+  ULA are local — also other VLANs and Docker networks. A **global IPv6** address and
+  `100.64.0.0/10` (e.g. Tailscale) are not: a sender whose hostname resolves to IPv6
+  gets `403`, so senders use HA's IPv4 address. Behind a reverse proxy, HA uses the
+  `X-Forwarded-For` address only with `use_x_forwarded_for` **and**
+  `trusted_proxies`; a proxy that sends the header without that config makes HA
+  answer `400` before Necromancer, and a proxy that sends no header at all makes
+  every caller look local (its own private IP).
+- **Integration disabled or deleted ≠ silence at the sender.** Unloaded and not
+  reloaded, the tokens answer `503` until the next HA restart, then `404` (no route);
+  deleted, `404` at once. Senders retry ~10 min and then log an error — the
+  monitoring really is off.
+- **`boot_window` ≥ the job's runtime.** A heartbeat repair (restart the job) is only
+  verified if the success ping arrives within `boot_window` (up to 1 h). Longer jobs
+  belong on `notify`.
+- **An HA outage over a ping time alarms although the job ran.** There is no startup
+  grace: if a ping fell into an outage longer than the sender's retries (~10 min),
+  the guard alarms once its deadline passes and its debounce (the grace) has run
+  out. A retry that does get through within the debounce clears it silently.
+- **A long HA outage uses up the grace.** The debounce of a heartbeat guard counts
+  from the deadline, not from the start (so a reload or restart cannot postpone the
+  alarm). Down for longer than `deadline + debounce`, the alarm (or the repair)
+  follows right after HA started — even if the sender's retry arrives a second
+  later and turns the guard `OK` again. A deadline is a deadline. This holds only
+  until the guard's own reaction: a fault that outlives a repair counts its debounce
+  from the cycle start or the cooldown end again (both persisted), so repeated
+  repairs — or restarts made by the recovery action — are a full debounce apart.
+  `max_attempts` still does not span restarts (a cycle cut short by one is not
+  restored), so a recovery that restarts HA repeats once per debounce until the
+  sender pings again.
+- **A debounce of 0 on a heartbeat guard has no grace.** The alarm follows the
+  missed deadline at once; a job whose runtime varies then alarms on every slow run.
+- **The last-heartbeat sensor writes one recorder row per ping.** That is its job (the
+  history of pings). A job pinging every 5 min costs 288 rows a day; exclude
+  `sensor.*_last_heartbeat` from the recorder if that is too much. The status sensor
+  does not move per ping (its heartbeat attributes only follow the verdict), and its
+  `health_detail` is the text at the time of the finding — `{since}` does not count up.
 - **Notify action runs detached.** A user `delay` in the notify action never stalls the
   engine — but it also means a notify is not awaited; failures only show in the log.
 - **Cooldown is post-success, not a retry gap.** Retries are back-to-back (only the

@@ -12,9 +12,9 @@ blocking (no blind cycling), which the unit suites don't reach.
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 import logging
 import sys
-from datetime import timedelta
 
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -58,11 +58,17 @@ class LogCapture(logging.Handler):
 
 
 def engine(hass, health, driver, **behavior):
-    b = {"debounce": 2, "boot_window": 0, "cooldown": 2, "max_attempts": 1,
-         "health_check": True}
+    b = {
+        "debounce": 2,
+        "boot_window": 0,
+        "cooldown": 2,
+        "max_attempts": 1,
+        "health_check": True,
+    }
     b.update(behavior)
-    return DeviceEngine(hass, "G", health, driver, StandardPolicy({}), b,
-                        subentry_id="g", engines={})
+    return DeviceEngine(
+        hass, "G", health, driver, StandardPolicy({}), b, subentry_id="g", engines={}
+    )
 
 
 async def _advance(hass, seconds):
@@ -77,8 +83,15 @@ async def test_health_disable_logs_blind(hass, cap):
     reg = er.async_get(hass)
     e = reg.async_get_or_create("binary_sensor", "test", "blind1")
     hass.states.async_set(e.entity_id, "on")
-    h = create_health(hass, {"type": "entity_state", "entity_id": e.entity_id,
-                             "on_value": ["on"], "off_value": ["off"]})
+    h = create_health(
+        hass,
+        {
+            "type": "entity_state",
+            "entity_id": e.entity_id,
+            "on_value": ["on"],
+            "off_value": ["off"],
+        },
+    )
     eng = engine(hass, h, _Noop(hass))
     await eng.async_start()
     cap.clear()
@@ -95,11 +108,20 @@ async def test_health_rename_follows(hass, cap):
     e = reg.async_get_or_create("binary_sensor", "test", "ren1")
     hass.states.async_set(e.entity_id, "on")
     renamed_to = []
-    h = create_health(hass, {"type": "entity_state", "entity_id": e.entity_id,
-                             "on_value": ["on"]})
-    eng = DeviceEngine(hass, "G", h, _Noop(hass), StandardPolicy({}), {"debounce": 2},
-                       subentry_id="g", engines={},
-                       on_health_renamed=renamed_to.append)
+    h = create_health(
+        hass, {"type": "entity_state", "entity_id": e.entity_id, "on_value": ["on"]}
+    )
+    eng = DeviceEngine(
+        hass,
+        "G",
+        h,
+        _Noop(hass),
+        StandardPolicy({}),
+        {"debounce": 2},
+        subentry_id="g",
+        engines={},
+        on_health_renamed=renamed_to.append,
+    )
     await eng.async_start()
     cap.clear()
     new_id = "binary_sensor.renamed_target"
@@ -114,8 +136,9 @@ async def test_health_remove_logs(hass, cap):
     reg = er.async_get(hass)
     e = reg.async_get_or_create("binary_sensor", "test", "rem1")
     hass.states.async_set(e.entity_id, "on")
-    h = create_health(hass, {"type": "entity_state", "entity_id": e.entity_id,
-                             "on_value": ["on"]})
+    h = create_health(
+        hass, {"type": "entity_state", "entity_id": e.entity_id, "on_value": ["on"]}
+    )
     eng = engine(hass, h, _Noop(hass))
     await eng.async_start()
     cap.clear()
@@ -155,14 +178,29 @@ class _Noop:
 
 async def test_poe_bogus_id_blocks_no_blind(hass, cap):
     from custom_components.necromancer.const import (
-        CONF_ACTUATOR, CONF_EXPECTED_ID, CONF_ID_STATIC, CONF_LABEL,
-        CONF_STATUS_ENTITY, CONF_STATUS_OFF, CONF_STATUS_ON, CONF_TYPE,
+        CONF_ACTUATOR,
+        CONF_EXPECTED_ID,
+        CONF_ID_STATIC,
+        CONF_LABEL,
+        CONF_STATUS_ENTITY,
+        CONF_STATUS_OFF,
+        CONF_STATUS_ON,
+        CONF_TYPE,
     )
+
     fabric = PoeFabric(hass)
-    fabric.set_ports([{CONF_LABEL: "P1", CONF_ACTUATOR: "switch.a",
-                       CONF_STATUS_ENTITY: "binary_sensor.s",
-                       CONF_STATUS_ON: ["on"], CONF_STATUS_OFF: ["off"],
-                       CONF_ID_STATIC: "real-device"}])
+    fabric.set_ports(
+        [
+            {
+                CONF_LABEL: "P1",
+                CONF_ACTUATOR: "switch.a",
+                CONF_STATUS_ENTITY: "binary_sensor.s",
+                CONF_STATUS_ON: ["on"],
+                CONF_STATUS_OFF: ["off"],
+                CONF_ID_STATIC: "real-device",
+            }
+        ]
+    )
     hass.data.setdefault(DOMAIN, {})["fabric"] = fabric
     drv = PoePortDriver(hass, {CONF_TYPE: "poe_port", CONF_EXPECTED_ID: "BOGUS-XYZ"})
 
@@ -189,12 +227,23 @@ async def test_poe_bogus_id_blocks_no_blind(hass, cap):
 async def test_health_self_reference_warns(hass, cap):
     # a template health that reads the guard's OWN status entity -> feedback loop
     reg = er.async_get(hass)
-    e = reg.async_get_or_create("sensor", DOMAIN, "g_status",
-                                suggested_object_id="g_status")
-    h = create_health(hass, {"type": "template",
-                             "template": f"{{{{ is_state('{e.entity_id}', 'ok') }}}}"})
-    eng = DeviceEngine(hass, "G", h, _Noop(hass), StandardPolicy({}), {"debounce": 2},
-                       subentry_id="g", engines={})
+    e = reg.async_get_or_create(
+        "sensor", DOMAIN, "g_status", suggested_object_id="g_status"
+    )
+    h = create_health(
+        hass,
+        {"type": "template", "template": f"{{{{ is_state('{e.entity_id}', 'ok') }}}}"},
+    )
+    eng = DeviceEngine(
+        hass,
+        "G",
+        h,
+        _Noop(hass),
+        StandardPolicy({}),
+        {"debounce": 2},
+        subentry_id="g",
+        engines={},
+    )
     await eng.async_start()
     cap.clear()
     eng._check_config(hass)  # the startup config check
@@ -205,10 +254,20 @@ async def test_health_self_reference_warns(hass, cap):
 
 async def test_health_template_all_missing_is_blind(hass, cap):
     # template health whose only referenced entity is missing -> blind guard
-    h = create_health(hass, {"type": "template",
-                             "template": "{{ is_state('binary_sensor.ghost', 'on') }}"})
-    eng = DeviceEngine(hass, "G", h, _Noop(hass), StandardPolicy({}), {"debounce": 2},
-                       subentry_id="g", engines={})
+    h = create_health(
+        hass,
+        {"type": "template", "template": "{{ is_state('binary_sensor.ghost', 'on') }}"},
+    )
+    eng = DeviceEngine(
+        hass,
+        "G",
+        h,
+        _Noop(hass),
+        StandardPolicy({}),
+        {"debounce": 2},
+        subentry_id="g",
+        engines={},
+    )
     await eng.async_start()
     cap.clear()
     eng._check_config(hass)
@@ -226,11 +285,21 @@ async def test_health_template_partial_missing_warns_only(hass, cap):
     hass.states.async_set(e.entity_id, "on")
     # `and` with a true left side forces the template to also read the ghost
     # (an `or` would short-circuit, dropping it from referenced_entities()).
-    tmpl = (f"{{{{ is_state('{e.entity_id}', 'on') "
-            f"and states('binary_sensor.ghost') != 'never' }}}}")
+    tmpl = (
+        f"{{{{ is_state('{e.entity_id}', 'on') "
+        f"and states('binary_sensor.ghost') != 'never' }}}}"
+    )
     h = create_health(hass, {"type": "template", "template": tmpl})
-    eng = DeviceEngine(hass, "G", h, _Noop(hass), StandardPolicy({}), {"debounce": 2},
-                       subentry_id="g", engines={})
+    eng = DeviceEngine(
+        hass,
+        "G",
+        h,
+        _Noop(hass),
+        StandardPolicy({}),
+        {"debounce": 2},
+        subentry_id="g",
+        engines={},
+    )
     await eng.async_start()
     cap.clear()
     eng._check_config(hass)
@@ -241,11 +310,15 @@ async def test_health_template_partial_missing_warns_only(hass, cap):
     await eng.async_stop()
 
 
-TESTS = [test_health_disable_logs_blind, test_health_rename_follows,
-         test_health_remove_logs, test_poe_bogus_id_blocks_no_blind,
-         test_health_self_reference_warns,
-         test_health_template_all_missing_is_blind,
-         test_health_template_partial_missing_warns_only]
+TESTS = [
+    test_health_disable_logs_blind,
+    test_health_rename_follows,
+    test_health_remove_logs,
+    test_poe_bogus_id_blocks_no_blind,
+    test_health_self_reference_warns,
+    test_health_template_all_missing_is_blind,
+    test_health_template_partial_missing_warns_only,
+]
 
 
 async def main():

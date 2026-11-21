@@ -13,6 +13,9 @@ ready-made `message` or compose their own from the parts:
   - `event_text` — the localized event text without the name (e.g. "Reparatur erfolgreich.")
   - `event`      — the notify key (e.g. "recovery_success")
   - plus event params: `attempt`, `max`, `attempts` (plural-correct), `reason`
+  - `health_detail` — why the source judged as it did ("" if it has no detail),
+    from `DETAIL_MESSAGES`; also appended to `message`/`event_text` as a second
+    sentence. Its own placeholders are rendered here, never exposed as variables.
 The sequence runs detached so a user delay never stalls the engine.
 """
 
@@ -24,14 +27,34 @@ import voluptuous as vol
 
 from homeassistant.core import HomeAssistant
 
-from ..const import NOTIFY_MESSAGES
+from ..const import DETAIL_CODE_PHRASES, DETAIL_MESSAGES, NOTIFY_MESSAGES
 from .actions import async_run
 
 LOGGER = logging.getLogger(__name__)
 
 # Optional alert variables default to "" so a notify action template can reference
 # them (`{{ attempt }}`) without an undefined-variable error when they don't apply.
-_OPTIONAL_DEFAULTS = {"attempt": "", "max": "", "attempts": "", "reason": ""}
+_OPTIONAL_DEFAULTS = {
+    "attempt": "",
+    "max": "",
+    "attempts": "",
+    "reason": "",
+    "health_detail": "",
+}
+
+# Spoken duration units: (seconds per unit, de forms, en forms). German forms are
+# (singular, plural nominative/accusative, plural dative): "alle 7 Tage" but
+# "seit 3 Tagen"; minutes and hours do not inflect.
+_DURATION_UNITS = {
+    "minute": (60, ("Minute", "Minuten", "Minuten"), ("minute", "minutes")),
+    "hour": (3600, ("Stunde", "Stunden", "Stunden"), ("hour", "hours")),
+    "day": (86400, ("Tag", "Tage", "Tagen"), ("day", "days")),
+}
+
+
+def _lang(hass: HomeAssistant) -> str:
+    """The instance language as a bare code ("de-CH" -> "de")."""
+    return (hass.config.language or "en").split("-")[0]
 
 
 def _add_attempts(lang: str, params: dict) -> None:
@@ -47,15 +70,93 @@ def _add_attempts(lang: str, params: dict) -> None:
             params["attempts"] = f"{n} attempt" if n == 1 else f"{n} attempts"
 
 
+def _format_duration(lang: str, seconds: float, *, dative: bool = False) -> str:
+    """A TTS-friendly duration: minutes under 2 h, hours under 2 days, else days.
+
+    Rounded to the unit, at least 1. German needs the case of the preposition in
+    front of it: `dative` for "seit"/"vor" ("seit 3 Tagen", "vor 1 Tag"), the
+    default accusative for "alle" ("alle 7 Tage"). Like `_add_attempts`.
+    """
+    seconds = max(float(seconds), 0.0)
+    if seconds < 2 * 3600:
+        unit = "minute"
+    elif seconds < 2 * 86400:
+        unit = "hour"
+    else:
+        unit = "day"
+    size, de_forms, en_forms = _DURATION_UNITS[unit]
+    n = max(round(seconds / size), 1)
+    if lang == "de":
+        word = de_forms[0] if n == 1 else de_forms[2 if dative else 1]
+    else:
+        word = en_forms[0] if n == 1 else en_forms[1]
+    return f"{n} {word}"
+
+
+def render_detail(lang: str, detail: tuple[str, dict] | None) -> str:
+    """Plain text for a `HealthSource.detail()` result ("" when there is none).
+
+    Raw params become spoken text here: `since` (seconds, after "seit"/"vor" ->
+    dative), `period` (seconds, after "alle" -> accusative) and `code` (the raw
+    `last_code`: digits are an exit code, anything else a code word, None adds
+    nothing). An unknown key or a broken template yields "" rather than a half
+    sentence in an alarm.
+    """
+    if not detail:
+        return ""
+    key, raw = detail
+    if lang not in DETAIL_MESSAGES:
+        lang = "en"
+    template = DETAIL_MESSAGES[lang].get(key)
+    if template is None:
+        return ""
+    params: dict[str, str] = {}
+    if "since" in raw:
+        params["since"] = _format_duration(lang, raw["since"], dative=True)
+    if "period" in raw:
+        params["period"] = _format_duration(lang, raw["period"])
+    code = raw.get("code")
+    if code:
+        phrase = DETAIL_CODE_PHRASES[lang]["exit" if str(code).isdigit() else "word"]
+        params["code"] = phrase.format(code=code)
+    else:
+        params["code"] = ""
+    try:
+        return template.format(**params)
+    except (KeyError, IndexError, ValueError):
+        return ""
+
+
+def detail_text(hass: HomeAssistant, detail: tuple[str, dict] | None) -> str:
+    """`render_detail` in the instance language (what the engine stores/sends)."""
+    return render_detail(_lang(hass), detail)
+
+
 def _resolve(lang: str, name: str, key: str, params: dict) -> tuple[str, str]:
-    """Return (message, event_text) for `key` in `lang` (adds the `attempts` phrase)."""
+    """Return (message, event_text) for `key` in `lang` (adds the `attempts` phrase).
+
+    A non-empty `health_detail` is appended as a second sentence; the `event` key
+    itself stays unchanged, so automations branching on it see no difference.
+    """
     messages = NOTIFY_MESSAGES.get(lang, NOTIFY_MESSAGES["en"])
     template = messages.get(key) or NOTIFY_MESSAGES["en"].get(key, key)
     _add_attempts(lang, params)
+    # German needs the dative after "nach" ("nach 2 Versuchen"); the `attempts`
+    # action variable keeps the plain form, so this stays a template-only key.
+    fmt = dict(params)
+    if "attempt" in params:
+        n = params["attempt"]
+        fmt["attempts_dative"] = (
+            (f"{n} Versuch" if n == 1 else f"{n} Versuchen")
+            if lang == "de"
+            else params["attempts"]
+        )
     try:
-        event_text = template.format(name=name, **params)
+        event_text = template.format(name=name, **fmt)
     except (KeyError, IndexError):
         event_text = key
+    if detail := params.get("health_detail"):
+        event_text = f"{event_text} {detail}"
     return f"{name}: {event_text}", event_text
 
 
@@ -67,7 +168,7 @@ async def async_notify(
     **params: object,
 ) -> None:
     """Resolve the message for `key` in the active language and run the action."""
-    lang = (hass.config.language or "en").split("-")[0]
+    lang = _lang(hass)
     message, event_text = _resolve(lang, name, key, params)
     LOGGER.debug("Notify %s: %s", name, message)
 
@@ -119,13 +220,13 @@ async def async_notify_custom(
     caller provides it (e.g. a recovery script reporting progress via the
     `necromancer.notify_guard` service). The same variables a built-in alert exposes
     are passed (`message`, `name`, `event_text`, `event`, plus optional `attempt` /
-    `max` / `attempts` / `reason`), so an existing notify action template works
-    unchanged. `event_text` defaults to `message` when omitted.
+    `max` / `attempts` / `reason` / `health_detail`), so an existing notify action
+    template works unchanged. `event_text` defaults to `message` when omitted.
     """
     LOGGER.debug("Notify (custom) %s: %s", name, message)
     if not action:
         return
-    lang = (hass.config.language or "en").split("-")[0]
+    lang = _lang(hass)
     _add_attempts(lang, params)
     _dispatch(
         hass,

@@ -26,7 +26,7 @@ async def _snooze(hass: HomeAssistant, eid: str, **dur: int) -> None:
 async def test_reset_clears_escalation(
     hass: HomeAssistant, setup_guards: SetupGuards
 ) -> None:
-    """reset on an ESCALATED guard returns it to OK (health is fine again)."""
+    """Reset on an ESCALATED guard returns it to OK (health is fine again)."""
     from custom_components.necromancer.core.state import GState
 
     hass.states.async_set("binary_sensor.guard_health", "on")
@@ -66,10 +66,10 @@ async def test_snooze_ignores_health(
 async def test_unsnooze_rederives_state(
     hass: HomeAssistant, setup_guards: SetupGuards
 ) -> None:
-    """unsnooze lifts the snooze and re-derives from live health (OK here)."""
+    """Unsnooze lifts the snooze and re-derives from live health (OK here)."""
     hass.states.async_set("binary_sensor.guard_health", "on")
     hass.states.async_set("switch.guard_target", "on")
-    entry = await setup_guards(make_guard("Unsnooze Guard"))
+    await setup_guards(make_guard("Unsnooze Guard"))
     eid = entity_id_for(hass, "guard0", "sensor", "status")
 
     await _snooze(hass, eid, hours=1)
@@ -88,7 +88,7 @@ async def test_snooze_auto_resumes_on_elapse(
     """The snooze timer fires after its duration and the guard resumes."""
     hass.states.async_set("binary_sensor.guard_health", "on")
     hass.states.async_set("switch.guard_target", "on")
-    entry = await setup_guards(make_guard("Auto Resume"))
+    await setup_guards(make_guard("Auto Resume"))
     eid = entity_id_for(hass, "guard0", "sensor", "status")
 
     await _snooze(hass, eid, seconds=30)
@@ -102,7 +102,7 @@ async def test_snooze_auto_resumes_on_elapse(
 async def test_snooze_during_recovery_raises(
     hass: HomeAssistant, setup_guards: SetupGuards
 ) -> None:
-    """snooze is refused while a recovery cycle is in flight (busy)."""
+    """Snooze is refused while a recovery cycle is in flight (busy)."""
     hass.states.async_set("binary_sensor.guard_health", "on")
     hass.states.async_set("switch.guard_target", "on")
     entry = await setup_guards(make_guard("Busy Guard"))
@@ -114,7 +114,9 @@ async def test_snooze_during_recovery_raises(
     try:
         with pytest.raises(ServiceValidationError):
             await hass.services.async_call(
-                DOMAIN, "snooze", {"entity_id": eid, "duration": {"hours": 1}},
+                DOMAIN,
+                "snooze",
+                {"entity_id": eid, "duration": {"hours": 1}},
                 blocking=True,
             )
     finally:

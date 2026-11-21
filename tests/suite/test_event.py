@@ -26,25 +26,23 @@ def _event_type(hass: HomeAssistant) -> str | None:
 
 
 @pytest.mark.usefixtures("mock_switch_services")
-async def test_recovered_event(
-    hass: HomeAssistant, setup_guards: SetupGuards
-) -> None:
+async def test_recovered_event(hass: HomeAssistant, setup_guards: SetupGuards) -> None:
     """A successful recovery fires the `recovered` event."""
     hass.states.async_set("binary_sensor.guard_health", "off")
     hass.states.async_set("switch.guard_target", "on")
     entry = await setup_guards(make_guard("Evt Rec", strategy="switch"))
 
     button = entity_id_for(hass, "guard0", "button", "recover")
-    await hass.services.async_call("button", "press", {"entity_id": button}, blocking=True)
+    await hass.services.async_call(
+        "button", "press", {"entity_id": button}, blocking=True
+    )
     await hass.async_block_till_done()
 
     assert _event_type(hass) == "recovered"
     assert entry.runtime_data.engines["guard0"].recover_count == 1
 
 
-async def test_escalated_event(
-    hass: HomeAssistant, setup_guards: SetupGuards
-) -> None:
+async def test_escalated_event(hass: HomeAssistant, setup_guards: SetupGuards) -> None:
     """A guard that exhausts its attempts fires the `escalated` event."""
     hass.states.async_set("binary_sensor.guard_health", "off")
     await setup_guards(
@@ -61,9 +59,7 @@ async def test_escalated_event(
     assert _event_type(hass) == "escalated"
 
 
-async def test_blocked_event(
-    hass: HomeAssistant, setup_guards: SetupGuards
-) -> None:
+async def test_blocked_event(hass: HomeAssistant, setup_guards: SetupGuards) -> None:
     """A pre-flight block (missing switch) fires the `blocked` event."""
     hass.states.async_set("binary_sensor.guard_health", "off")
     await setup_guards(

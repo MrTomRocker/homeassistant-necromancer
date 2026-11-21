@@ -4,6 +4,13 @@ Fixed runtime; Health / Policy / Driver are pluggable:
 
   OK --(unhealthy)--> SUSPECT --(debounce)--> RECOVERING --> VERIFY(boot_window)
   VERIFY: ok -> COOLDOWN -> OK | fail&retry<max -> RECOVERING | else -> ESCALATED
+
+A source whose verdict is already confirmed (`HealthSource.confirmed()`, e.g. a
+heartbeat's reported failure) skips the debounce: same reaction, no wait. A source
+that knows when its fault began (`HealthSource.fault_since()`, e.g. a heartbeat's
+passed deadline) gets only the rest of the debounce, so a reload or restart
+cannot postpone the reaction; counted from no earlier than the guard's own last
+reaction, so a fault outliving a repair waits a full debounce again.
 """
 
 from __future__ import annotations
@@ -13,7 +20,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 import logging
 
-from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, CoreState, Event, HomeAssistant, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.entity_registry import EventEntityRegistryUpdatedData
@@ -22,6 +29,7 @@ from homeassistant.helpers.event import (
     async_track_entity_registry_updated_event,
     async_track_state_change_event,
 )
+from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt as dt_util
 
 from ..const import (
@@ -47,7 +55,7 @@ from ..const import (
 from .drivers import RecoveryDriver
 from .health import Health, HealthSource
 from .links import LinkCoordinator
-from .notify import async_notify, async_notify_custom
+from .notify import async_notify, async_notify_custom, detail_text
 from .policies import RecoveryPolicy
 from .state import GState
 
@@ -56,6 +64,24 @@ LOGGER = logging.getLogger(__name__)
 
 def _noop() -> None:
     """Default save callback when none is provided (e.g. in tests)."""
+
+
+def reset_engine_verdict(stored: dict) -> dict:
+    """Drop a stored verdict judged under a source identity that no longer exists.
+
+    Returns a copy of a guard's stored blob with `state` -> ok and `attempt` -> 0
+    (stats, `auto` and `source` kept). A deliberate snooze is kept as is. Used by
+    `_apply_persisted` when `HealthSource.restore()` reports a new identity (a
+    regenerated heartbeat token), and by the heartbeat endpoint for a dormant guard
+    whose token changed in its sleep — there is no engine then, so without this the
+    stale ESCALATED would survive the wake-up (restore() would see a matching
+    fingerprint by then) and the new token would never go grey.
+    """
+    new = dict(stored)
+    if new.get("state") != GState.SNOOZED.value:
+        new["state"] = GState.OK.value
+        new["attempt"] = 0
+    return new
 
 
 class DeviceEngine:
@@ -104,6 +130,10 @@ class DeviceEngine:
         self.last_fail: datetime | None = None
         self.last_recover_driver_result: str | None = None
         self.last_recover_driver_time: datetime | None = None
+        # When our latest own recovery cycle began. Persisted because the
+        # RECOVERING/VERIFY it starts are not: it is the only trace across a
+        # reload or restart that we already reacted (see _debounce_anchor).
+        self.last_cycle_start: datetime | None = None
         self.auto = bool(behavior.get(CONF_AUTO_RESTART, DEFAULT_AUTO_RESTART))
         # Operator snooze (necromancer.snooze): health ignored until `snooze_until`
         # (re-armed on restart) or unsnooze. Reuses `_unsub_timer` (states are
@@ -126,8 +156,16 @@ class DeviceEngine:
         self._listeners: list[CALLBACK_TYPE] = []
         # Typed lifecycle events for the event entity: (event_type, data).
         self._event_listeners: list[Callable[[str, dict], None]] = []
+        # The health source's reason (rendered `detail()`), captured at the last
+        # state change and sent with alarms — the text *at the finding*, so it does
+        # not drift as time passes (e.g. "since 26 hours"). None = no detail.
+        self.health_detail: str | None = None
 
         self._apply_persisted(persisted or {})
+        # A source with state of its own (heartbeat) must save on changes the
+        # engine never sees as a transition (an OK->OK ping); bind after restore so
+        # a reset made there is flushed right away.
+        self.health.bind_persist(self._save)
 
     def _apply_persisted(self, data: dict) -> None:
         """Seed runtime state from the Store (entity-independent persistence).
@@ -136,7 +174,14 @@ class DeviceEngine:
         is restored so a dead device gets no free retry on reboot (auto-clears via
         ESCALATED->OK once health returns). Transient states are re-derived from
         live health by the first evaluation in async_start.
+
+        The source's own state (`source`) goes to `health.restore()` first — always,
+        also when absent, so a source can tell "never stored" from "stored". If it
+        reports a new identity, the stored verdict judged the old one and is
+        dropped (a snooze stays).
         """
+        if self.health.restore(data.get("source") or {}):
+            data = reset_engine_verdict(data)
         self.recover_count = int(data.get("recover_count", 0) or 0)
         self.fail_count = int(data.get("fail_count", 0) or 0)
         self.last_recover = dt_util.parse_datetime(data.get("last_recover") or "")
@@ -145,6 +190,9 @@ class DeviceEngine:
         self.last_recover_driver_result = data.get("last_recover_driver_result")
         self.last_recover_driver_time = dt_util.parse_datetime(
             data.get("last_recover_driver_time") or ""
+        )
+        self.last_cycle_start = dt_util.parse_datetime(
+            data.get("last_cycle_start") or ""
         )
         if "auto" in data:
             self.auto = bool(data["auto"])
@@ -174,10 +222,15 @@ class DeviceEngine:
             "last_recover_driver_time": self.last_recover_driver_time.isoformat()
             if self.last_recover_driver_time
             else None,
+            "last_cycle_start": self.last_cycle_start.isoformat()
+            if self.last_cycle_start
+            else None,
             "auto": self.auto,
             "snooze_until": self._snooze_until.isoformat()
             if self._snooze_until
             else None,
+            # Source-owned state (heartbeat pings); {} for sources without any.
+            "source": self.health.snapshot(),
         }
 
     # ---------- lifecycle ----------
@@ -203,12 +256,25 @@ class DeviceEngine:
         # Sources that track something else (e.g. a template) register here and
         # call _evaluate on change; state sources use watched_entities above.
         self._unsub_source = await self.health.async_setup(self._evaluate)
-        # The driver may watch its own inputs (poe_port: the port id-entities, so
-        # it caches the resolved port the moment the neighbour table reports it).
-        self._unsub_driver = await self.driver.async_setup()
-        if self._snoozed:
-            self._rearm_snooze()
-        self._evaluate()
+        try:
+            # The driver may watch its own inputs (poe_port: the port id-entities,
+            # so it caches the resolved port the moment the neighbour table
+            # reports it).
+            self._unsub_driver = await self.driver.async_setup()
+            if self._snoozed:
+                self._rearm_snooze()
+            # A restored ESCALATED/SNOOZED guard keeps its state without a
+            # transition, so take the reason once here; it is as of this start,
+            # not the old finding.
+            self._read_detail()
+            self._evaluate()
+        except Exception:
+            # __init__ drops an engine whose start raised, without async_stop. Tear
+            # down what we subscribed here ourselves: otherwise a heartbeat token
+            # stays `active` on a dead source and its pings get 200 into the void
+            # (unsub sets it back to `waiting` -> 503, the sender retries).
+            await self.async_stop()
+            raise
 
     @callback
     def _check_config(self, _hass: HomeAssistant) -> None:
@@ -443,8 +509,16 @@ class DeviceEngine:
         if state != self.state:
             self.state = state
             LOGGER.debug("%s entered state %s", self.name, state)
+            # Read the reason synchronously at the transition, so an alarm sent
+            # for it and the status attribute carry the very same text.
+            self._read_detail()
             self._save()
         self._emit()
+
+    def _read_detail(self) -> str:
+        """Capture the source's current reason as plain text ("" if none)."""
+        self.health_detail = detail_text(self.hass, self.health.detail()) or None
+        return self.health_detail or ""
 
     def _int(self, key: str, default: int) -> int:
         """Read an int behavior option, falling back to `default` if unset/invalid."""
@@ -452,6 +526,11 @@ class DeviceEngine:
             return int(self.behavior.get(key, default))
         except (TypeError, ValueError):
             return default
+
+    @property
+    def debounce(self) -> int:
+        """Seconds a fault must persist before we react (a heartbeat's grace)."""
+        return self._int(CONF_DEBOUNCE, DEFAULT_DEBOUNCE)
 
     @property
     def max_attempts(self) -> int:
@@ -646,6 +725,19 @@ class DeviceEngine:
 
         if self.state in (GState.OK, GState.BLIND) and h == Health.UNHEALTHY:
             self._enter_suspect()
+        elif (
+            self.state == GState.SUSPECT
+            and h == Health.UNHEALTHY
+            and self.health.confirmed()
+            and self.hass.state is CoreState.running
+        ):
+            # Already waiting (e.g. a heartbeat overdue, in its grace) and the
+            # source now confirms the fault (a failure ping): stop waiting, react
+            # now. During bootstrap the deferred start of the debounce stays in
+            # place; `_arm_debounce` reacts at once when HA has started.
+            LOGGER.info("%s fault confirmed, not waiting out the debounce", self.name)
+            self._cancel_timer()
+            self._debounce_done(None)
         elif self.state in (GState.SUSPECT, GState.BLIND) and h == Health.OK:
             self._cancel_timer()
             self._set_state(GState.OK)
@@ -660,13 +752,113 @@ class DeviceEngine:
         """Enter SUSPECT and arm the debounce timer before committing to recovery.
 
         The debounce window lets a transient blip self-resolve, avoiding a needless
-        recovery cycle for a flap.
+        recovery cycle for a flap. A confirmed verdict skips it (`_arm_debounce`).
         """
-        debounce = self._int(CONF_DEBOUNCE, DEFAULT_DEBOUNCE)
-        LOGGER.info("%s unhealthy, waiting %ss (debounce)", self.name, debounce)
+        if not self.health.confirmed() and self.health.fault_since() is None:
+            # A source with a known start logs the rest it waits in _arm_debounce.
+            LOGGER.info(
+                "%s unhealthy, waiting %ss (debounce)", self.name, self.debounce
+            )
         self._set_state(GState.SUSPECT)
         self._cancel_timer()
-        self._unsub_timer = async_call_later(self.hass, debounce, self._debounce_done)
+        if self.hass.state is CoreState.running:
+            self._arm_debounce()
+            return
+        # A finding made during bootstrap (e.g. a heartbeat overdue at boot, or a
+        # stored failure ping, which skips the debounce) must not act yet: the
+        # notify/recovery actions it would call may not be registered, so the
+        # alarm is lost and every attempt burns in one tick into a persisted
+        # ESCALATED. The verdict stays UNHEALTHY (no startup grace); only the side
+        # effects wait. Held in `_unsub_timer`, so the usual _cancel_timer (health
+        # back, stop, snooze) drops the wait as well.
+        LOGGER.debug("%s: HA not started yet, debounce starts once it is", self.name)
+        self._unsub_timer = async_at_started(self.hass, self._debounce_at_started)
+
+    @callback
+    def _debounce_at_started(self, _hass: HomeAssistant) -> None:
+        """Arm the debounce deferred by `_enter_suspect` now that HA has started."""
+        # Not via _cancel_timer: this listener already fired, removing it again
+        # would only log an unknown-listener error.
+        self._unsub_timer = None
+        if self.state == GState.SUSPECT:
+            self._arm_debounce()
+
+    def _arm_debounce(self) -> None:
+        """Start the SUSPECT debounce window (`_debounce_done` when it elapses).
+
+        A confirmed verdict (a heartbeat's failure ping) has nothing to wait out:
+        react now, on the very path an elapsed debounce takes. A source that knows
+        when its fault began gets only the rest of the debounce, and none once it
+        is used up (e.g. after a long HA outage: a deadline is a deadline).
+        """
+        if self.health.confirmed():
+            LOGGER.info("%s fault confirmed, not waiting out the debounce", self.name)
+            self._debounce_done(None)
+            return
+        anchor = self._debounce_anchor()
+        remaining = self._debounce_remaining(anchor)
+        if remaining is None:
+            delay: float = self.debounce
+        elif remaining <= 0:
+            LOGGER.info(
+                "%s unhealthy, debounce counted from %s already used up",
+                self.name,
+                anchor,
+            )
+            self._debounce_done(None)
+            return
+        else:
+            LOGGER.info(
+                "%s unhealthy, debounce counted from %s: %ss left",
+                self.name,
+                anchor,
+                round(remaining),
+            )
+            delay = remaining
+        self._unsub_timer = async_call_later(self.hass, delay, self._debounce_done)
+
+    def _debounce_anchor(self) -> datetime | None:
+        """The moment the debounce counts from, or None to count from now.
+
+        The source's `fault_since()`, but never before our own last reaction to
+        the fault: the start of our latest recovery cycle, or the end of the
+        cooldown after our latest repair. A fault that outlives a repair is a new
+        round and earns a full debounce again, as it does for sources without a
+        start. Without this, a grace once used up stays used up: every cooldown
+        end, reload during COOLDOWN/RECOVERING (neither is persisted, so the
+        guard comes back as OK) or HA restart by the recovery action itself
+        would start the next cycle at once — a repair loop, or a boot loop,
+        spaced only by the cooldown or the boot time. Both marks are persisted,
+        so this holds across reloads and restarts like `fault_since()` itself.
+        """
+        since = self.health.fault_since()
+        if since is None:
+            return None
+        marks = [since]
+        if self.last_cycle_start is not None:
+            marks.append(self.last_cycle_start)
+        if self.last_recover is not None:
+            marks.append(
+                self.last_recover
+                + timedelta(seconds=self._int(CONF_COOLDOWN, DEFAULT_COOLDOWN))
+            )
+        return max(marks)
+
+    def _debounce_remaining(self, anchor: datetime | None) -> float | None:
+        """Seconds of the debounce still to wait, counted from `anchor`.
+
+        Arming is the only place the debounce is measured, and every re-arm (entry
+        reload, HA restart, the deferred bootstrap start, a fallback after a linked
+        repair) comes through here. Counting from a stored start instead of "now"
+        keeps the reaction at that start + debounce, however often the timer is
+        rebuilt. None when the source does not know the start: the debounce then
+        runs in full from now, as before. A start in the future (clock skew, or a
+        cooldown end not reached yet) counts as nothing elapsed.
+        """
+        if anchor is None:
+            return None
+        elapsed = max((dt_util.utcnow() - anchor).total_seconds(), 0.0)
+        return max(self.debounce - elapsed, 0.0)
 
     @callback
     def _debounce_done(self, _now) -> None:
@@ -685,9 +877,14 @@ class DeviceEngine:
             return
         allowed, reason = self.policy.should_attempt(auto_enabled=self.auto)
         if not allowed:
+            # Transition first: it captures the reason the alarm then carries.
+            self._set_state(GState.ESCALATED)
+            detail = self.health_detail or ""
             if reason == REASON_OBSERVE:
                 LOGGER.warning("%s problem detected (notify-only)", self.name)
-                self.hass.async_create_task(self._notify("problem_detected"))
+                self.hass.async_create_task(
+                    self._notify("problem_detected", health_detail=detail)
+                )
             else:
                 LOGGER.warning(
                     "%s still unhealthy but auto-recovery is off (%s)",
@@ -695,9 +892,10 @@ class DeviceEngine:
                     reason,
                 )
                 self.hass.async_create_task(
-                    self._notify("no_auto_recovery", reason=reason)
+                    self._notify(
+                        "no_auto_recovery", reason=reason, health_detail=detail
+                    )
                 )
-            self._set_state(GState.ESCALATED)
             return
         # Linking arbitration: if a group partner is already repairing, follow it
         # (hold + verify after) instead of launching a competing recovery.
@@ -721,6 +919,9 @@ class DeviceEngine:
         """
         if self._cycle_task and not self._cycle_task.done():
             return
+        # Recorded before the transition persists it: should the recovery restart
+        # HA (or the entry be reloaded) mid-cycle, the debounce counts from here.
+        self.last_cycle_start = dt_util.utcnow()
         # Claim the leader role *synchronously* (before the cycle task runs) so a
         # linked partner whose debounce elapses in the same tick already sees us as
         # RECOVERING and follows, instead of both starting a competing recovery.
@@ -769,8 +970,13 @@ class DeviceEngine:
                     self.max_attempts,
                     self.driver.target_info(),
                 )
+                # Only the first attempt says why (read now, before the await);
+                # later attempts and their reasons would just repeat it.
                 await self._notify(
-                    "recovery_attempt", attempt=self.attempt, max=self.max_attempts
+                    "recovery_attempt",
+                    attempt=self.attempt,
+                    max=self.max_attempts,
+                    health_detail=self._read_detail() if self.attempt == 1 else "",
                 )
                 ok, reason = await self.driver.can_recover()
                 if not ok:
@@ -1000,6 +1206,10 @@ class DeviceEngine:
         params.setdefault("attempt", self.attempt)
         self._record_failure()
         self._set_state(GState.ESCALATED)
+        # A block carries its own reason (the action); a give-up says why the
+        # device was judged faulty, as captured by the transition above.
+        if notify_key == "recovery_failed":
+            params.setdefault("health_detail", self.health_detail or "")
         self._fire_event(
             "blocked" if notify_key == "recovery_blocked" else "escalated",
             attempt=self.attempt,

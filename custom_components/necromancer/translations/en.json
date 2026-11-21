@@ -139,7 +139,8 @@
       "error": {
         "no_self_link": "Necromancer's own devices can't be linked. Pick a different device.",
         "duplicate_name": "A guard with this name already exists. Pick a unique name so the status entities stay unambiguous.",
-        "action_required": "This recovery needs an action — a guard with no action can only escalate."
+        "action_required": "This recovery needs an action — a guard with no action can only escalate.",
+        "period_too_short": "The period must be at least 1 minute."
       },
       "abort": {
         "reconfigure_successful": "Re-configuration successful."
@@ -147,16 +148,19 @@
       "step": {
         "user": {
           "title": "Health Source",
-          "description": "You're adding a Necromancer guard. How should Necromancer detect the monitored device's Health State — from an entity's state, or from a Jinja template?",
+          "description": "You're adding a Necromancer guard. How should Necromancer detect the monitored device's Health State — from an entity's state, from a Jinja template, or from heartbeats that a job outside Home Assistant sends to a URL?",
           "data": {
             "source_type": "Source type"
           }
         },
         "reconfigure": {
           "title": "Health Source",
-          "description": "How should Necromancer detect the monitored device's Health State — from an entity's state, or from a Jinja template?",
+          "description": "How should Necromancer detect the monitored device's Health State — from an entity's state, from a Jinja template, or from heartbeats that a job outside Home Assistant sends to a URL?",
           "data": {
             "source_type": "Source type"
+          },
+          "data_description": {
+            "source_type": "Switching a heartbeat guard to another type makes its URL invalid; senders then get 404."
           }
         },
         "device": {
@@ -169,6 +173,9 @@
             "on_value": "Value meaning \"OK\"",
             "off_value": "Value meaning \"faulty\"",
             "template": "Health Template",
+            "period": "Period",
+            "local_only": "Local network only",
+            "regenerate_token": "Generate a new token",
             "device_id": "Assigned Home Assistant device (optional)"
           },
           "data_description": {
@@ -178,6 +185,9 @@
             "on_value": "e.g. `on`, `home`, `online`. Any value other than this or the faulty value counts as `unknown` and triggers nothing.",
             "off_value": "e.g. `off`, `unavailable`.",
             "template": "Return `true`, `on`, `1` or `yes` for OK; `false`, `off`, `0` or `no` for faulty — e.g. a comparison like CPU below 90, or `is_state(...)`. Anything else (`unavailable`, `unknown`, `none`, a blank result, or a render error) counts as `unknown` and triggers nothing (no false alarm). Re-checked when referenced entities change. Point it at the monitored device — not at this guard's own status/health entities, or you create a feedback loop.",
+            "period": "How often the job reports success, e.g. 1 day for a nightly backup. At least 1 minute.",
+            "local_only": "On (default): only senders in private networks (LAN, VPN, this host) are accepted; others get 403. Turn it off only if a sender outside your network must report.",
+            "regenerate_token": "Issues a new secret URL. The old URL stops working (404) once you save — use this if the URL leaked.",
             "device_id": "Optional. Links this Guard's own device to the chosen Home Assistant device, so the Guard is listed as connected via it. It also unlocks reloading that device's integration after a recovery."
           }
         },
@@ -211,7 +221,7 @@
                 "max_attempts": "Max attempts"
               },
               "data_description": {
-                "debounce": "How long a fault must persist before Necromancer acts — brief blips are absorbed and don't trigger a recovery.",
+                "debounce": "How long a fault must persist before Necromancer reacts — brief blips are absorbed. For a heartbeat this is the grace period after a missed ping; a reported failure reacts at once.",
                 "health_check": "On (default): the recovery is verified against the monitored device's Health State before the guard goes quiet. Off: the action is assumed to have worked and goes directly to cooldown.",
                 "boot_window": "With Health Check on: how long to wait after the action for the monitored device to read healthy again.",
                 "cooldown": "A quiet period after a successful recovery before the guard watches again.",
@@ -220,7 +230,7 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason. Reference a variable with double curly braces in your action.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
               "data": {
                 "notify_action": "Action"
               }
@@ -273,7 +283,7 @@
                 "max_attempts": "Max attempts"
               },
               "data_description": {
-                "debounce": "How long a fault must persist before Necromancer acts — brief blips are absorbed and don't trigger a recovery.",
+                "debounce": "How long a fault must persist before Necromancer reacts — brief blips are absorbed. For a heartbeat this is the grace period after a missed ping; a reported failure reacts at once.",
                 "health_check": "On (default): the recovery is verified against the monitored device's Health State before the guard goes quiet. Off: the action is assumed to have worked and goes directly to cooldown.",
                 "boot_window": "With Health Check on: how long to wait after the action for the monitored device to read healthy again.",
                 "cooldown": "A quiet period after a successful recovery before the guard watches again.",
@@ -282,7 +292,7 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason. Reference a variable with double curly braces in your action.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
               "data": {
                 "notify_action": "Action"
               }
@@ -340,7 +350,7 @@
                 "max_attempts": "Max attempts"
               },
               "data_description": {
-                "debounce": "How long a fault must persist before Necromancer acts — brief blips are absorbed and don't trigger a recovery.",
+                "debounce": "How long a fault must persist before Necromancer reacts — brief blips are absorbed. For a heartbeat this is the grace period after a missed ping; a reported failure reacts at once.",
                 "health_check": "On (default): the recovery is verified against the monitored device's Health State before the guard goes quiet. Off: the action is assumed to have worked and goes directly to cooldown.",
                 "boot_window": "With Health Check on: how long to wait after the action for the monitored device to read healthy again.",
                 "cooldown": "A quiet period after a successful recovery before the guard watches again.",
@@ -349,7 +359,7 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason. Reference a variable with double curly braces in your action.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
               "data": {
                 "notify_action": "Action"
               }
@@ -401,7 +411,7 @@
                 "max_attempts": "Max attempts"
               },
               "data_description": {
-                "debounce": "How long a fault must persist before Necromancer acts — brief blips are absorbed and don't trigger a recovery.",
+                "debounce": "How long a fault must persist before Necromancer reacts — brief blips are absorbed. For a heartbeat this is the grace period after a missed ping; a reported failure reacts at once.",
                 "health_check": "On (default): the recovery is verified against the monitored device's Health State before the guard goes quiet. Off: the action is assumed to have worked and goes directly to cooldown.",
                 "boot_window": "With Health Check on: how long to wait after the action for the monitored device to read healthy again.",
                 "cooldown": "A quiet period after a successful recovery before the guard watches again.",
@@ -410,7 +420,7 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason. Reference a variable with double curly braces in your action.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
               "data": {
                 "notify_action": "Action"
               }
@@ -448,17 +458,25 @@
             "debounce": "Wait before reacting"
           },
           "data_description": {
-            "debounce": "How long a fault must persist before the notification fires — brief blips are absorbed."
+            "debounce": "How long a fault must persist before Necromancer reacts — brief blips are absorbed. For a heartbeat this is the grace period after a missed ping; a reported failure reacts at once."
           },
           "sections": {
             "notification": {
               "name": "Notification",
-              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason. Reference a variable with double curly braces in your action.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
               "data": {
                 "notify_action": "Action"
               }
             }
           }
+        },
+        "heartbeat_url": {
+          "title": "Heartbeat URL",
+          "description": "Your job reports to this URL. Nothing is saved until you submit; if you close this dialog while adding a guard, the guard is not created and the URL does not work.\n\n```\n{url}\n```\n\nReport success:\n\n```\n{example_ok}\n```\n\nReport a failure:\n\n```\n{example_fail}\n```\n\nPass the job's exit code (`0` means success, anything else is a failure):\n\n```\n{example}\n```\n\nWith “Local network only”, senders should use Home Assistant's IPv4 address; a host name may resolve to IPv6 and be refused (403). If the URL starts with `/api`, Home Assistant has no URL of its own configured: put `http://HA-ADDRESS:8123` in front. To see the URL again later, reconfigure the guard."
+        },
+        "heartbeat_url_new": {
+          "title": "New heartbeat URL",
+          "description": "A new token was generated. Once you submit, the old URL stops working (senders get 404), so switch every sender to this URL. If you close this dialog, nothing changes and the old URL keeps working.\n\n```\n{url}\n```\n\nReport success:\n\n```\n{example_ok}\n```\n\nReport a failure:\n\n```\n{example_fail}\n```\n\nPass the job's exit code (`0` means success, anything else is a failure):\n\n```\n{example}\n```\n\nWith “Local network only”, senders should use Home Assistant's IPv4 address; a host name may resolve to IPv6 and be refused (403). If the URL starts with `/api`, Home Assistant has no URL of its own configured: put `http://HA-ADDRESS:8123` in front. To see the URL again later, reconfigure the guard."
         }
       }
     }
@@ -477,6 +495,9 @@
           "escalated": "Escalated",
           "snoozed": "Snoozed"
         }
+      },
+      "last_heartbeat": {
+        "name": "Last heartbeat"
       }
     },
     "binary_sensor": {
@@ -513,7 +534,8 @@
     "source_type": {
       "options": {
         "state_based": "An entity's state",
-        "template_based": "Jinja template"
+        "template_based": "Jinja template",
+        "heartbeat_based": "Heartbeat (webhook)"
       }
     },
     "strategy": {

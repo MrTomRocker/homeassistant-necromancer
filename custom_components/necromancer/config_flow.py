@@ -12,8 +12,10 @@ VERIFY step) is a per-recovery `health_check` toggle in the behaviour section,
 defaulting on, shown for every strategy.
 
 The health "what to watch" block — entity + attribute (empty = state) + on/off
-values — lives in the device step. Every guard is device & health → strategy →
-final step (a recovery form, or the notify form when notify-only is picked).
+values, a template, or a heartbeat's period/local-only — lives in the device
+step. Every guard is device & health → strategy → final step (a recovery form, or
+the notify form when notify-only is picked). A heartbeat guard then gets one more,
+read-only step that shows its ping URL before anything is saved.
 
 PoE ports are a single **flat list** managed via the service's **options flow**
 (add / edit / delete port). Every `poe_port` guard searches that whole list by
@@ -27,6 +29,7 @@ This file stays a single module at the integration root (hassfest requires
 from __future__ import annotations
 
 import logging
+import secrets
 from typing import Any
 
 import voluptuous as vol
@@ -42,12 +45,14 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_NAME
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.network import NoURLAvailableError, get_url
 
 from .config_flow_helpers.schemas import (
     _action_defaults,
     _action_schema,
     _actions_defaults,
     _actions_schema,
+    _as_seconds,
     _behavior_defaults,
     _build_data,
     _coerce_ports,
@@ -78,23 +83,32 @@ from .const import (
     CONF_ACTION,
     CONF_BEHAVIOR,
     CONF_DEVICE_ID,
+    CONF_HEALTH,
     CONF_IMPORT_MODE,
     CONF_LABEL,
     CONF_LINKED_GUARDS,
+    CONF_LOCAL_ONLY,
     CONF_NOTIFY_FOLLOWER_SUCCESS,
     CONF_OFF_ACTION,
     CONF_ON_ACTION,
+    CONF_PERIOD,
     CONF_POLICY,
     CONF_PORT_SELECTION,
     CONF_PORTS,
     CONF_PORTS_YAML,
+    CONF_REGENERATE_TOKEN,
     CONF_SOURCE_TYPE,
     CONF_STRATEGY,
+    CONF_TOKEN,
     CONF_TYPE,
+    DEFAULT_LOCAL_ONLY,
     DOMAIN,
+    HEALTH_TYPE_HEARTBEAT,
     IMPORT_MODE_MERGE,
     IMPORT_MODE_REPLACE,
+    MIN_PERIOD,
     MODE_NOTIFY,
+    SOURCE_HEARTBEAT,
     SOURCE_STATE,
     STRATEGY_ACTION,
     STRATEGY_ACTIONS,
@@ -102,6 +116,7 @@ from .const import (
     STRATEGY_SWITCH,
     SUBENTRY_TYPE_DEVICE,
 )
+from .core.health.heartbeat import ping_path
 from .core.links import group_of
 
 LOGGER = logging.getLogger(__name__)
@@ -148,6 +163,10 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
         self._source_type = SOURCE_STATE
         self._step1: dict = {}
         self._strategy = STRATEGY_SWITCH
+        # Heartbeat: the data waiting behind the URL info step, and whether the
+        # token was regenerated on request (changes the info step's wording).
+        self._pending: dict = {}
+        self._token_regenerated = False
 
     def _is_own_device(self, device_id: str) -> bool:
         """True if the device belongs to Necromancer (block self/cross links)."""
@@ -173,14 +192,31 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             if se.subentry_type == SUBENTRY_TYPE_DEVICE
         )
 
+    def _stored_source_type(self) -> str | None:
+        """The edited guard's stored source type, or None while adding."""
+        return _source_type_of(self._reconfig_data()) if self._reconfig else None
+
+    def _switching_to_heartbeat(self) -> bool:
+        """A new heartbeat guard, or a reconfigure that turns a guard into one."""
+        return (
+            self._source_type == SOURCE_HEARTBEAT
+            and self._stored_source_type() != SOURCE_HEARTBEAT
+        )
+
     # ---------- guard linking ----------
     def _recover_guards(self) -> dict[str, dict]:
-        """All recover-mode device subentries by id (notify guards can't link)."""
+        """All device subentries that can link, by id.
+
+        Notify guards never act, and heartbeat guards are excluded like the
+        runtime's `_is_recover`: as a leader their job restart would mute every
+        partner for its whole cycle (up to max_attempts times boot_window).
+        """
         return {
             sid: dict(se.data)
             for sid, se in self._get_entry().subentries.items()
             if se.subentry_type == SUBENTRY_TYPE_DEVICE
             and se.data.get(CONF_POLICY, {}).get(CONF_TYPE) != MODE_NOTIFY
+            and se.data.get(CONF_HEALTH, {}).get(CONF_TYPE) != HEALTH_TYPE_HEARTBEAT
         }
 
     def _own_subentry_id(self) -> str | None:
@@ -210,6 +246,8 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
 
     def _with_link(self, schema: vol.Schema) -> vol.Schema:
         """Append the collapsed link section to a recover-strategy schema."""
+        if self._source_type == SOURCE_HEARTBEAT:
+            return schema  # heartbeat guards never link (see _recover_guards)
         notify_success = (
             self._reconfig_data()
             .get(CONF_BEHAVIOR, {})
@@ -237,7 +275,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> SubentryFlowResult:
-        """Start adding a guard: pick the health source type (state vs template)."""
+        """Start adding a guard: pick the health source type."""
         return await self._source(user_input, reconfig=False)
 
     async def async_step_reconfigure(
@@ -274,9 +312,14 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             elif self._name_taken(user_input.get(CONF_NAME, "")):
                 # Distinct names keep entity_ids (sensor.<name>_status) unambiguous.
                 errors[CONF_NAME] = "duplicate_name"
-            else:
-                user_input[CONF_SOURCE_TYPE] = self._source_type
-                self._step1 = user_input
+            elif self._source_type == SOURCE_HEARTBEAT:
+                errors = self._heartbeat_errors(user_input)
+            if not errors:
+                step1 = dict(user_input)
+                step1[CONF_SOURCE_TYPE] = self._source_type
+                if self._source_type == SOURCE_HEARTBEAT:
+                    self._heartbeat_step1(step1)
+                self._step1 = step1
                 return await self.async_step_strategy()
             defaults = user_input
         elif self._reconfig:
@@ -291,8 +334,40 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                 # Only THIS guard's own entities — other guards' status/health stay
                 # pickable so you can build supervisor / staged guards.
                 exclude=_own_guard_entities(self.hass, self._own_subentry_id()),
+                # Only a guard that already has a token can regenerate it.
+                regenerate=(
+                    self._source_type == SOURCE_HEARTBEAT == self._stored_source_type()
+                ),
             ),
             errors=errors,
+        )
+
+    @staticmethod
+    def _heartbeat_errors(user_input: dict) -> dict[str, str]:
+        """Check the period after converting the duration to seconds."""
+        errors: dict[str, str] = {}
+        if _as_seconds(user_input[CONF_PERIOD]) < MIN_PERIOD:
+            errors[CONF_PERIOD] = "period_too_short"
+        return errors
+
+    def _heartbeat_step1(self, step1: dict) -> None:
+        """Store seconds and settle the token (kept, or a new one) in step1.
+
+        The token is created here, not in `_build_data`, so the pure builder stays
+        deterministic. A new token is issued for a new guard, a type switch to
+        heartbeat, or on request; otherwise the stored one is kept so the senders'
+        URL keeps working.
+        """
+        step1[CONF_PERIOD] = _as_seconds(step1[CONF_PERIOD])
+        regenerate = bool(step1.pop(CONF_REGENERATE_TOKEN, False))
+        stored = (
+            self._reconfig_data().get(CONF_HEALTH, {}).get(CONF_TOKEN)
+            if self._reconfig and not self._switching_to_heartbeat()
+            else None
+        )
+        self._token_regenerated = regenerate and stored is not None
+        step1[CONF_TOKEN] = (
+            stored if stored and not regenerate else secrets.token_hex(32)
         )
 
     # ---------- strategy select (recover) ----------
@@ -309,14 +384,28 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                 STRATEGY_ACTIONS: self.async_step_actions,
                 STRATEGY_POE: self.async_step_poe_port,
             }[self._strategy]()
-        default = (
-            _current_strategy(self._reconfig_data())
-            if self._reconfig
-            else STRATEGY_SWITCH
-        )
+        if self._switching_to_heartbeat():
+            # A job outside HA is usually watched, not restarted: notify-only is
+            # the sensible start (restart via `action` stays available).
+            default = MODE_NOTIFY
+        elif self._reconfig:
+            default = _current_strategy(self._reconfig_data())
+        else:
+            default = STRATEGY_SWITCH
         return self.async_show_form(
             step_id="strategy", data_schema=_strategy_schema(default)
         )
+
+    def _defaults(self, builder) -> dict | None:
+        """Reconfigure form defaults from a `*_defaults` builder, else None.
+
+        The chosen source type is passed through because the stored debounce is
+        replaced when the edit switches to or from heartbeat (see
+        `_stored_debounce`); the schema's own default only applies on create.
+        """
+        if not self._reconfig:
+            return None
+        return builder(self._reconfig_data(), self._source_type)
 
     # ---------- recovery strategy forms (one step per action shape) ----------
     async def async_step_switch(
@@ -327,7 +416,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             return await self._finish(
                 _build_data(self._step1, user_input, self._strategy)
             )
-        d = _switch_defaults(self._reconfig_data()) if self._reconfig else None
+        d = self._defaults(_switch_defaults)
         return self.async_show_form(
             step_id="switch",
             data_schema=self._with_link(
@@ -335,6 +424,7 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                     d,
                     exclude=_own_entities(self.hass),
                     reload_block=self._reload_block(),
+                    source_type=self._source_type,
                 )
             ),
         )
@@ -356,11 +446,15 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                 )
             d = flat
         else:
-            d = _action_defaults(self._reconfig_data()) if self._reconfig else None
+            d = self._defaults(_action_defaults)
         return self.async_show_form(
             step_id="action",
             data_schema=self._with_link(
-                _action_schema(d, reload_block=self._reload_block())
+                _action_schema(
+                    d,
+                    reload_block=self._reload_block(),
+                    source_type=self._source_type,
+                )
             ),
             errors=errors,
         )
@@ -382,11 +476,15 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                 )
             d = flat
         else:
-            d = _actions_defaults(self._reconfig_data()) if self._reconfig else None
+            d = self._defaults(_actions_defaults)
         return self.async_show_form(
             step_id="actions",
             data_schema=self._with_link(
-                _actions_schema(d, reload_block=self._reload_block())
+                _actions_schema(
+                    d,
+                    reload_block=self._reload_block(),
+                    source_type=self._source_type,
+                )
             ),
             errors=errors,
         )
@@ -400,11 +498,15 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
             return await self._finish(
                 _build_data(self._step1, user_input, STRATEGY_POE)
             )
-        d = _poe_defaults(self._reconfig_data()) if self._reconfig else None
+        d = self._defaults(_poe_defaults)
         return self.async_show_form(
             step_id="poe_port",
             data_schema=self._with_link(
-                _poe_schema(d, reload_block=self._reload_block())
+                _poe_schema(
+                    d,
+                    reload_block=self._reload_block(),
+                    source_type=self._source_type,
+                )
             ),
         )
 
@@ -415,8 +517,11 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
         """Show the notify-only form (observe, never recover)."""
         if user_input is not None:
             return await self._finish(_build_data(self._step1, user_input, MODE_NOTIFY))
-        d = _behavior_defaults(self._reconfig_data()) if self._reconfig else None
-        return self.async_show_form(step_id="notify", data_schema=_notify_schema(d))
+        d = self._defaults(_behavior_defaults)
+        return self.async_show_form(
+            step_id="notify",
+            data_schema=_notify_schema(d, source_type=self._source_type),
+        )
 
     # ---------- create / update ----------
     def _apply_link_removals(self, subentry, data: dict) -> None:
@@ -443,6 +548,66 @@ class DeviceSubentryFlow(ConfigSubentryFlow):
                 )
 
     async def _finish(self, data: dict) -> SubentryFlowResult:
+        """Save the guard — a heartbeat guard shows its URL first."""
+        if data[CONF_HEALTH].get(CONF_TYPE) == HEALTH_TYPE_HEARTBEAT:
+            self._pending = data
+            return await self.async_step_heartbeat_url()
+        return await self._save(data)
+
+    # ---------- heartbeat: show the ping URL before saving ----------
+    def _heartbeat_url(self, data: dict) -> str:
+        """The full ping URL, or just the path when HA knows no own URL.
+
+        `prefer_external=False` is explicit: with SSL configured `get_url` would
+        otherwise prefer the external URL, which contradicts `local_only`. Only
+        a guard that accepts non-local callers may get an external/cloud URL.
+        """
+        health = data[CONF_HEALTH]
+        path = ping_path(data[CONF_NAME], health[CONF_TOKEN])
+        try:
+            base = get_url(
+                self.hass,
+                allow_external=not health.get(CONF_LOCAL_ONLY, DEFAULT_LOCAL_ONLY),
+                prefer_external=False,
+                allow_ip=True,
+            )
+        except NoURLAvailableError:
+            return path  # the step text says to put the HA address in front
+        return base.rstrip("/") + path
+
+    async def async_step_heartbeat_url(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Show the URL (and an example call); submitting saves the guard.
+
+        It comes before `async_create_entry`/`async_update_and_abort` because those
+        take no placeholders. Closing the dialog here saves nothing, so a new token
+        never exists without the user having seen its URL.
+        """
+        if user_input is not None:
+            return await self._save(self._pending)
+        url = self._heartbeat_url(self._pending)
+        # URL and example only as placeholders: flow texts are ICU MessageFormat,
+        # a literal brace in a translation would break the rendering.
+        return self.async_show_form(
+            # Same step, other text: the frontend submits to the shown step_id.
+            step_id=(
+                "heartbeat_url_new" if self._token_regenerated else "heartbeat_url"
+            ),
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "url": url,
+                # POST only: the endpoint answers GET with 405, so a link
+                # preview or prefetch never counts as a heartbeat.
+                "example_ok": f'curl -fsS -X POST "{url}"',
+                "example_fail": f'curl -fsS -X POST "{url}?status=fail"',
+                "example": f'curl -fsS -X POST "{url}?status=$?"',
+            },
+        )
+
+    async_step_heartbeat_url_new = async_step_heartbeat_url
+
+    async def _save(self, data: dict) -> SubentryFlowResult:
         """Create the guard subentry, or update and abort on reconfigure."""
         if not self._reconfig:
             LOGGER.debug("Creating guard subentry for %s", data[CONF_NAME])

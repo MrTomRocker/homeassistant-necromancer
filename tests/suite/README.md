@@ -64,12 +64,25 @@ python -m coverage html -d <repo>/htmlcov
 
 ## Fixtures (`conftest.py`)
 
-- `make_guard(name, *, strategy=…, …)` — build one guard subentry `data` dict in
-  the exact shape the config flow emits (every strategy supported).
+- `make_guard(name, *, strategy=…, source=…, …)` — build one guard subentry `data`
+  dict in the exact shape the config flow emits (every strategy supported).
+  `source` is `state_based` (default), `template_based` or `heartbeat_based`; the
+  heartbeat source takes `period` (seconds; its grace is the guard's `debounce`), `token` (default
+  `HEARTBEAT_TOKEN`, a fixed 64-hex test token) and `local_only`, and — like the
+  flow — stores no `linked_guards` for it.
 - `setup_guards(*guard_dicts, options=…)` — async factory: create a service
   `MockConfigEntry` with those guards as subentries, set it up, assert it loaded.
 - `entity_id_for(hass, subentry_id, domain, key)` — resolve a guard's view-entity
-  id via the registry (`status`, `health`, `auto_restart`, `recover`, `recovery_event`).
+  id via the registry (`status`, `health`, `auto_restart`, `recover`, `recovery_event`;
+  `last_heartbeat` for heartbeat guards only).
+
+## Heartbeat endpoint tests (`test_heartbeat.py`)
+
+Pings go over real HTTP with `hass_client_no_auth` (the client connects from
+127.0.0.1). A non-local caller is simulated by patching
+`custom_components.necromancer.heartbeat_view.is_local`; time-dependent cases
+(deadline, the Store's delayed save) use the `freezer` fixture plus
+`async_fire_time_changed`, since the source judges with `dt_util.utcnow()`.
 
 ## Two flow-rejection idioms
 

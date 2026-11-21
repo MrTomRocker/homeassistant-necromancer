@@ -3,7 +3,7 @@
   "name": "Necromancer",
   "codeowners": ["@MrTomRocker"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["http"],
   "documentation": "https://github.com/MrTomRocker/homeassistant-necromancer",
   "integration_type": "service",
   "iot_class": "calculated",

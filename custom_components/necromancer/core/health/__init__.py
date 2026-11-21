@@ -6,12 +6,14 @@ from homeassistant.core import HomeAssistant
 
 from .base import Health, HealthSource
 from .entity_state import EntityStateHealth
+from .heartbeat import HeartbeatHealth
 from .template import TemplateHealth
 
 # Generic first; group + technology-specific sources layer on later.
 HEALTH_TYPES: dict[str, type[HealthSource]] = {
     "entity_state": EntityStateHealth,
     "template": TemplateHealth,
+    "heartbeat": HeartbeatHealth,
 }
 
 

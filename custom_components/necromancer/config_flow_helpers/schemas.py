@@ -14,7 +14,11 @@ import yaml
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import section
-from homeassistant.helpers import entity_registry as er, selector
+from homeassistant.helpers import (
+    config_validation as cv,
+    entity_registry as er,
+    selector,
+)
 
 from ..const import (
     CONF_ACTION,
@@ -37,6 +41,7 @@ from ..const import (
     CONF_IMPORT_MODE,
     CONF_LABEL,
     CONF_LINKED_GUARDS,
+    CONF_LOCAL_ONLY,
     CONF_MAX_ATTEMPTS,
     CONF_NOTIFY_ACTION,
     CONF_NOTIFY_FOLLOWER_SUCCESS,
@@ -47,9 +52,11 @@ from ..const import (
     CONF_ON_ACTION,
     CONF_ON_TIMEOUT,
     CONF_ON_VALUE,
+    CONF_PERIOD,
     CONF_POLICY,
     CONF_PORT_SELECTION,
     CONF_PORTS_YAML,
+    CONF_REGENERATE_TOKEN,
     CONF_RELOAD_DELAY,
     CONF_RELOAD_ENTRY,
     CONF_SOURCE,
@@ -61,19 +68,26 @@ from ..const import (
     CONF_STRATEGY,
     CONF_SWITCH_ENTITY,
     CONF_TEMPLATE,
+    CONF_TOKEN,
     CONF_TYPE,
     DEFAULT_BOOT_WINDOW,
     DEFAULT_COOLDOWN,
     DEFAULT_DEBOUNCE,
+    DEFAULT_HEARTBEAT_DEBOUNCE,
+    DEFAULT_LOCAL_ONLY,
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_OFF_ON_DELAY,
+    DEFAULT_PERIOD,
     DEFAULT_PORT_OFF_TIMEOUT,
     DEFAULT_PORT_ON_TIMEOUT,
     DEFAULT_RELOAD_DELAY,
     DOMAIN,
+    HEALTH_TYPE_HEARTBEAT,
     IMPORT_MODE_MERGE,
     IMPORT_MODE_REPLACE,
+    MAX_DEBOUNCE,
     MODE_NOTIFY,
+    SOURCE_HEARTBEAT,
     SOURCE_STATE,
     SOURCE_TEMPLATE,
     STRATEGY_ACTION,
@@ -161,11 +175,15 @@ def _section(key: str, fields: dict, *, collapsed: bool = False) -> dict:
     return {vol.Required(key): section(vol.Schema(fields), {"collapsed": collapsed})}
 
 
+# Fields whose own value is a dict (DurationSelector) — not a section to lift.
+_DICT_VALUED_FIELDS = frozenset({CONF_PERIOD})
+
+
 def _flatten_sections(user_input: dict) -> dict:
     """Lift section sub-dicts back to the top level (sections nest their fields)."""
     out: dict = {}
     for key, value in user_input.items():
-        if isinstance(value, dict):
+        if isinstance(value, dict) and key not in _DICT_VALUED_FIELDS:
             out.update(value)
         else:
             out[key] = value
@@ -196,12 +214,12 @@ def _own_guard_entities(hass: HomeAssistant, subentry_id: str | None) -> list[st
 
 
 def _source_schema(default: str) -> vol.Schema:
-    """Build the health-source-type selection schema (entity state vs template)."""
+    """Build the health-source-type selection schema (state, template, heartbeat)."""
     return vol.Schema(
         {
             vol.Required(CONF_SOURCE_TYPE, default=default): selector.SelectSelector(
                 selector.SelectSelectorConfig(
-                    options=[SOURCE_STATE, SOURCE_TEMPLATE],
+                    options=[SOURCE_STATE, SOURCE_TEMPLATE, SOURCE_HEARTBEAT],
                     translation_key="source_type",
                     mode=selector.SelectSelectorMode.LIST,
                 )
@@ -211,13 +229,70 @@ def _source_schema(default: str) -> vol.Schema:
 
 
 def _source_type_of(data: dict) -> str:
-    """Derive the source type (template vs state) from a stored guard's health."""
-    is_template = data.get(CONF_HEALTH, {}).get(CONF_TYPE) == "template"
-    return SOURCE_TEMPLATE if is_template else SOURCE_STATE
+    """Derive the wizard source type from a stored guard's health type."""
+    htype = data.get(CONF_HEALTH, {}).get(CONF_TYPE)
+    if htype == "template":
+        return SOURCE_TEMPLATE
+    if htype == HEALTH_TYPE_HEARTBEAT:
+        return SOURCE_HEARTBEAT
+    return SOURCE_STATE
 
 
-def _health_fields(d: dict, *, source_type: str, exclude: list[str]) -> dict:
+# The heartbeat period is edited as a DurationSelector (days for weekly jobs) but
+# stored as plain seconds like every other time field.
+_DURATION_SELECTOR = selector.DurationSelector(
+    selector.DurationSelectorConfig(enable_day=True)
+)
+
+
+def _as_duration(value: object, fallback: int) -> dict:
+    """Seconds (stored) or a selector dict (re-shown input) -> a selector dict."""
+    if isinstance(value, dict):
+        return value
+    seconds = int(fallback if value is None else value)
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, secs = divmod(rest, 60)
+    return {"days": days, "hours": hours, "minutes": minutes, "seconds": secs}
+
+
+def _as_seconds(value: object) -> int:
+    """A selector dict (or already seconds) -> whole seconds."""
+    if isinstance(value, dict):
+        return int(cv.time_period_dict(value).total_seconds())
+    return int(value)
+
+
+def _heartbeat_fields(d: dict, *, regenerate: bool) -> dict:
+    """Period, local-only and (reconfigure only) the token-regenerate flag.
+
+    No grace field: the wait after a missed ping is the debounce of the last step.
+    """
+    fields: dict = {
+        vol.Required(
+            CONF_PERIOD, default=_as_duration(d.get(CONF_PERIOD), DEFAULT_PERIOD)
+        ): _DURATION_SELECTOR,
+        vol.Required(
+            CONF_LOCAL_ONLY, default=d.get(CONF_LOCAL_ONLY, DEFAULT_LOCAL_ONLY)
+        ): selector.BooleanSelector(),
+    }
+    if regenerate:
+        # Only offered when the guard already has a token; a new guard or a type
+        # switch to heartbeat gets a fresh one anyway.
+        fields[
+            vol.Required(
+                CONF_REGENERATE_TOKEN, default=d.get(CONF_REGENERATE_TOKEN, False)
+            )
+        ] = selector.BooleanSelector()
+    return fields
+
+
+def _health_fields(
+    d: dict, *, source_type: str, exclude: list[str], regenerate: bool = False
+) -> dict:
     """The state-detection fields (flat, no section), per the chosen source type."""
+    if source_type == SOURCE_HEARTBEAT:
+        return _heartbeat_fields(d, regenerate=regenerate)
     if source_type == SOURCE_TEMPLATE:
         return {
             vol.Required(
@@ -233,14 +308,27 @@ def _health_fields(d: dict, *, source_type: str, exclude: list[str]) -> dict:
 
 
 def _device_schema(
-    d: dict | None = None, *, source_type: str = SOURCE_STATE, exclude: list[str] = ()
+    d: dict | None = None,
+    *,
+    source_type: str = SOURCE_STATE,
+    exclude: list[str] = (),
+    regenerate: bool = False,
 ) -> vol.Schema:
-    """Build the device step schema: name + health fields + assigned device (flat)."""
+    """Build the device step schema: name + health fields + assigned device (flat).
+
+    `regenerate` adds the heartbeat "generate a new token" toggle (reconfigure of a
+    guard that is already a heartbeat guard).
+    """
     d = d or {}
     return vol.Schema(
         {
             vol.Required(CONF_NAME, default=d.get(CONF_NAME, "")): str,
-            **_health_fields(d, source_type=source_type, exclude=list(exclude)),
+            **_health_fields(
+                d,
+                source_type=source_type,
+                exclude=list(exclude),
+                regenerate=regenerate,
+            ),
             vol.Optional(
                 CONF_DEVICE_ID,
                 description={"suggested_value": d.get(CONF_DEVICE_ID)},
@@ -331,16 +419,33 @@ def _reload_section(d: dict) -> dict:
     )
 
 
-def _debounce_field(d: dict) -> dict:
-    """Build the debounce-seconds field (how long down before acting)."""
+def _default_debounce(source_type: str) -> int:
+    """Debounce default per source type.
+
+    For a heartbeat the debounce is the grace after a missed ping (1 h, a job's
+    runtime varies); a reported failure skips it anyway. Entity/template health
+    can blip for a moment, so two minutes absorb that.
+    """
+    return (
+        DEFAULT_HEARTBEAT_DEBOUNCE
+        if source_type == SOURCE_HEARTBEAT
+        else DEFAULT_DEBOUNCE
+    )
+
+
+def _debounce_field(d: dict, source_type: str = SOURCE_STATE) -> dict:
+    """Build the debounce-seconds field (how long down before acting).
+
+    Up to a day for every guard: a heartbeat's grace for a weekly job can be long.
+    """
     return {
         vol.Required(
-            CONF_DEBOUNCE, default=d.get(CONF_DEBOUNCE, DEFAULT_DEBOUNCE)
-        ): _seconds_selector(3600)
+            CONF_DEBOUNCE, default=d.get(CONF_DEBOUNCE, _default_debounce(source_type))
+        ): _seconds_selector(MAX_DEBOUNCE)
     }
 
 
-def _behavior_section(d: dict) -> dict:
+def _behavior_section(d: dict, source_type: str = SOURCE_STATE) -> dict:
     """Timing/retry behaviour, in a titled section (good defaults).
 
     Field order is deliberate: debounce + cooldown first, then the `health_check`
@@ -352,7 +457,7 @@ def _behavior_section(d: dict) -> dict:
     VERIFY; the PoE driver's own "port came back" check runs regardless).
     """
     fields: dict = {
-        **_debounce_field(d),
+        **_debounce_field(d, source_type),
         vol.Required(
             CONF_COOLDOWN, default=d.get(CONF_COOLDOWN, DEFAULT_COOLDOWN)
         ): _seconds_selector(86400),
@@ -388,21 +493,27 @@ def _switch_fields(d: dict, exclude: list[str]) -> dict:
 
 
 def _switch_schema(
-    d: dict | None = None, *, exclude: list[str] = (), reload_block=None
+    d: dict | None = None,
+    *,
+    exclude: list[str] = (),
+    reload_block=None,
+    source_type: str = SOURCE_STATE,
 ) -> vol.Schema:
     """Build the switch power-cycle recovery form schema."""
     d = d or {}
     return vol.Schema(
         {
             **_switch_fields(d, list(exclude)),
-            **_behavior_section(d),
+            **_behavior_section(d, source_type),
             **(reload_block or {}),
             **_notification_section(d),
         }
     )
 
 
-def _action_schema(d: dict | None = None, *, reload_block=None) -> vol.Schema:
+def _action_schema(
+    d: dict | None = None, *, reload_block=None, source_type: str = SOURCE_STATE
+) -> vol.Schema:
     """One recovery action sequence (in its own section) + behaviour."""
     d = d or {}
     return vol.Schema(
@@ -416,14 +527,16 @@ def _action_schema(d: dict | None = None, *, reload_block=None) -> vol.Schema:
                     ): selector.ActionSelector(),
                 },
             ),
-            **_behavior_section(d),
+            **_behavior_section(d, source_type),
             **(reload_block or {}),
             **_notification_section(d),
         }
     )
 
 
-def _actions_schema(d: dict | None = None, *, reload_block=None) -> vol.Schema:
+def _actions_schema(
+    d: dict | None = None, *, reload_block=None, source_type: str = SOURCE_STATE
+) -> vol.Schema:
     """An "off" and an "on" action sequence + delay, in their own section."""
     d = d or {}
     return vol.Schema(
@@ -445,17 +558,19 @@ def _actions_schema(d: dict | None = None, *, reload_block=None) -> vol.Schema:
                     ): _seconds_selector(600),
                 },
             ),
-            **_behavior_section(d),
+            **_behavior_section(d, source_type),
             **(reload_block or {}),
             **_notification_section(d),
         }
     )
 
 
-def _notify_schema(d: dict | None = None) -> vol.Schema:
+def _notify_schema(
+    d: dict | None = None, *, source_type: str = SOURCE_STATE
+) -> vol.Schema:
     """Build the notify-only form schema (debounce + alert action)."""
     d = d or {}
-    return vol.Schema({**_debounce_field(d), **_notification_section(d)})
+    return vol.Schema({**_debounce_field(d, source_type), **_notification_section(d)})
 
 
 def _watch_config(block: dict) -> dict:
@@ -498,7 +613,16 @@ def _build_data(step1: dict, step2: dict, strategy: str) -> dict:
         CONF_DEBOUNCE: int(step2[CONF_DEBOUNCE]),
         CONF_NOTIFY_ACTION: step2.get(CONF_NOTIFY_ACTION),
     }
-    if step1.get(CONF_SOURCE_TYPE) == SOURCE_TEMPLATE:
+    heartbeat = step1.get(CONF_SOURCE_TYPE) == SOURCE_HEARTBEAT
+    if heartbeat:
+        # The flow puts the token into step1 (kept, or freshly generated).
+        health = {
+            CONF_TYPE: HEALTH_TYPE_HEARTBEAT,
+            CONF_TOKEN: step1[CONF_TOKEN],
+            CONF_PERIOD: _as_seconds(step1[CONF_PERIOD]),
+            CONF_LOCAL_ONLY: bool(step1.get(CONF_LOCAL_ONLY, DEFAULT_LOCAL_ONLY)),
+        }
+    elif step1.get(CONF_SOURCE_TYPE) == SOURCE_TEMPLATE:
         health = {CONF_TYPE: "template", CONF_TEMPLATE: step1[CONF_TEMPLATE]}
     else:
         health = {
@@ -529,9 +653,12 @@ def _build_data(step1: dict, step2: dict, strategy: str) -> dict:
             )
     if step1.get(CONF_DEVICE_ID):
         data[CONF_DEVICE_ID] = step1[CONF_DEVICE_ID]
-    if not notify_only and step2.get(CONF_LINKED_GUARDS):
+    # Heartbeat guards never link (a job restart rarely shares a cause with a
+    # device, and a leader's cycle would mute its partners for up to an hour).
+    links = not notify_only and not heartbeat
+    if links and step2.get(CONF_LINKED_GUARDS):
         data[CONF_LINKED_GUARDS] = sorted(step2[CONF_LINKED_GUARDS])
-    if not notify_only and step2.get(CONF_NOTIFY_FOLLOWER_SUCCESS):
+    if links and step2.get(CONF_NOTIFY_FOLLOWER_SUCCESS):
         behavior[CONF_NOTIFY_FOLLOWER_SUCCESS] = True
     return data
 
@@ -572,15 +699,39 @@ def _health_defaults(data: dict) -> dict:
         CONF_ENTITY_ID: health.get(CONF_ENTITY_ID),
         CONF_TEMPLATE: health.get(CONF_TEMPLATE, ""),
         **_watch_defaults(health),
+        CONF_PERIOD: health.get(CONF_PERIOD, DEFAULT_PERIOD),
+        CONF_LOCAL_ONLY: health.get(CONF_LOCAL_ONLY, DEFAULT_LOCAL_ONLY),
         CONF_DEVICE_ID: data.get(CONF_DEVICE_ID),
     }
 
 
-def _behavior_defaults(data: dict) -> dict:
-    """Pre-fill the timing/retry/notify fields from a stored guard's behavior."""
+def _stored_debounce(data: dict, source_type: str | None) -> int:
+    """The stored debounce, unless the edit crosses the heartbeat boundary.
+
+    Heartbeat defaults to its grace (DEFAULT_HEARTBEAT_DEBOUNCE) and the others to
+    DEFAULT_DEBOUNCE; a value tuned for one kind of source makes no sense for the
+    other, so a type switch to or from heartbeat starts from the new type's default
+    instead.
+    """
+    if source_type is None:
+        source_type = _source_type_of(data)
+    stored = data.get(CONF_BEHAVIOR, {}).get(CONF_DEBOUNCE)
+    crossed = (_source_type_of(data) == SOURCE_HEARTBEAT) != (
+        source_type == SOURCE_HEARTBEAT
+    )
+    if stored is None or crossed:
+        return _default_debounce(source_type)
+    return stored
+
+
+def _behavior_defaults(data: dict, source_type: str | None = None) -> dict:
+    """Pre-fill the timing/retry/notify fields from a stored guard's behavior.
+
+    `source_type` is the type chosen in this edit (None = keep the stored one).
+    """
     b = data.get(CONF_BEHAVIOR, {})
     return {
-        CONF_DEBOUNCE: b.get(CONF_DEBOUNCE, DEFAULT_DEBOUNCE),
+        CONF_DEBOUNCE: _stored_debounce(data, source_type),
         CONF_HEALTH_CHECK: b.get(CONF_HEALTH_CHECK, True),
         CONF_BOOT_WINDOW: b.get(CONF_BOOT_WINDOW, DEFAULT_BOOT_WINDOW),
         CONF_COOLDOWN: b.get(CONF_COOLDOWN, DEFAULT_COOLDOWN),
@@ -589,51 +740,53 @@ def _behavior_defaults(data: dict) -> dict:
     }
 
 
-def _switch_defaults(data: dict) -> dict:
+def _switch_defaults(data: dict, source_type: str | None = None) -> dict:
     """Pre-fill the switch strategy form from a stored guard."""
     drv = data.get(CONF_DRIVER, {})
     return {
-        **_behavior_defaults(data),
+        **_behavior_defaults(data, source_type),
         CONF_SWITCH_ENTITY: drv.get(CONF_SWITCH_ENTITY, vol.UNDEFINED),
         CONF_OFF_ON_DELAY: drv.get(CONF_OFF_ON_DELAY, DEFAULT_OFF_ON_DELAY),
     }
 
 
-def _action_defaults(data: dict) -> dict:
+def _action_defaults(data: dict, source_type: str | None = None) -> dict:
     """Pre-fill the single-action strategy form from a stored guard."""
     return {
-        **_behavior_defaults(data),
+        **_behavior_defaults(data, source_type),
         CONF_ACTION: data.get(CONF_DRIVER, {}).get(CONF_ACTION),
     }
 
 
-def _actions_defaults(data: dict) -> dict:
+def _actions_defaults(data: dict, source_type: str | None = None) -> dict:
     """Pre-fill the off/on action-pair strategy form from a stored guard."""
     drv = data.get(CONF_DRIVER, {})
     return {
-        **_behavior_defaults(data),
+        **_behavior_defaults(data, source_type),
         CONF_OFF_ACTION: drv.get(CONF_OFF_ACTION),
         CONF_ON_ACTION: drv.get(CONF_ON_ACTION),
         CONF_OFF_ON_DELAY: drv.get(CONF_OFF_ON_DELAY, DEFAULT_OFF_ON_DELAY),
     }
 
 
-def _poe_defaults(data: dict) -> dict:
+def _poe_defaults(data: dict, source_type: str | None = None) -> dict:
     """Pre-fill the PoE-port strategy form from a stored guard."""
     drv = data.get(CONF_DRIVER, {})
     return {
-        **_behavior_defaults(data),
+        **_behavior_defaults(data, source_type),
         CONF_EXPECTED_ID: drv.get(CONF_EXPECTED_ID, ""),
     }
 
 
-def _poe_schema(d: dict | None = None, *, reload_block=None) -> vol.Schema:
+def _poe_schema(
+    d: dict | None = None, *, reload_block=None, source_type: str = SOURCE_STATE
+) -> vol.Schema:
     """Build the PoE-port recovery form schema (expected id + behaviour)."""
     d = d or {}
     return vol.Schema(
         {
             vol.Required(CONF_EXPECTED_ID, default=d.get(CONF_EXPECTED_ID, "")): str,
-            **_behavior_section(d),
+            **_behavior_section(d, source_type),
             **(reload_block or {}),
             **_notification_section(d),
         }
