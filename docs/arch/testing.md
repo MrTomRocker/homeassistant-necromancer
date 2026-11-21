@@ -71,7 +71,7 @@ one of them:
 ## 2. Level 1 — unit (pure logic / real `hass`)
 
 Fast, deterministic. Three runnable in-process modules cover this level today (run
-them with the dev venv, see §5): **`tests/test_units.py`** (51), **`tests/test_poe.py`**
+them with the dev venv, see §5): **`tests/test_units.py`** (52), **`tests/test_poe.py`**
 (22), **`tests/test_engine.py`** (80); a fourth script, **`tests/test_integration.py`**
 (12 checks), covers the health-registry robustness path (disable / rename / remove)
 and PoE pre-flight blocking against a real `hass` (§3). On top sits a **pytest suite

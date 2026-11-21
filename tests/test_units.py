@@ -1266,6 +1266,35 @@ async def test_detail_messages_symmetric(hass, _):
         assert set(DETAIL_CODE_PHRASES[lang]) == {"exit", "word"}
 
 
+async def test_services_yaml_mirrors_en_json(hass, _):
+    """services.yaml carries the English names/descriptions of translations/en.json.
+
+    The frontend shows the translations; the services API (and every agent or MCP
+    server reading it) only sees services.yaml. Both must say the same.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    import custom_components.necromancer as pkg
+
+    base = Path(pkg.__file__).parent
+    services = yaml.safe_load((base / "services.yaml").read_text(encoding="utf-8"))
+    en = json.loads((base / "translations/en.json").read_text(encoding="utf-8"))
+    tr = en["services"]
+    assert set(services) == set(tr)
+    for name, svc in services.items():
+        for key in ("name", "description"):
+            assert svc.get(key) == tr[name].get(key), f"{name}.{key}"
+        fields = svc.get("fields") or {}
+        assert set(fields) == set(tr[name].get("fields", {})), name
+        for field, spec in fields.items():
+            for key in ("name", "description"):
+                assert spec.get(key) == tr[name]["fields"][field].get(key), (
+                    f"{name}.{field}.{key}"
+                )
+
+
 async def test_format_duration(hass, _):
     """de/en, singular/plural, German dative after seit/vor, rounding boundaries."""
     from custom_components.necromancer.core.notify import _format_duration as fd

@@ -20,7 +20,13 @@ jobs:
         run: |
           cd custom_components/necromancer
           zip necromancer.zip -r ./
-      - name: Upload zip to the release
+      - name: Zip the agent skill
+        run: |
+          cd skills
+          zip necromancer-skill.zip -r necromancer
+      - name: Upload zips to the release
         uses: softprops/action-gh-release@v3
         with:
-          files: custom_components/necromancer/necromancer.zip
+          files: |
+            custom_components/necromancer/necromancer.zip
+            skills/necromancer-skill.zip

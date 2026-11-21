@@ -1,12 +1,18 @@
 repair_poe_port:
+  name: "Repair PoE port"
+  description: "Resolve a device id to its PoE port and power-cycle it. Blocking and serialised per port, so multiple guards or automations coordinate on a single cycle instead of fighting over the same port. Returns nothing: an id that matches no port or several ports is only logged."
   fields:
     id:
+      name: "Device id"
+      description: "The id that identifies the device on its PoE port — the MAC, IP or static label configured for that port."
       required: true
       example: "ec:b5:fa:12:fd:07"
       selector:
         text:
 
 reset:
+  name: "Reset"
+  description: "Clear an escalated guard back to normal and re-check it. Does nothing unless the guard is escalated. If the monitored device is still unhealthy, the guard waits out its debounce again and then recovers (when auto-recovery is on); if it has recovered it simply resumes watching. For a heartbeat that got lost, use Heartbeat ping instead."
   target:
     entity:
       integration: necromancer
@@ -14,6 +20,8 @@ reset:
       device_class: enum
 
 snooze:
+  name: "Snooze"
+  description: "Temporarily suspend a guard for a set duration — it ignores the monitored device's health and raises no alerts (e.g. during planned maintenance), then resumes automatically. Target a guard's status sensor, its device or an area. Refused while the guard is recovering."
   target:
     entity:
       integration: necromancer
@@ -21,12 +29,16 @@ snooze:
       device_class: enum
   fields:
     duration:
+      name: "Duration"
+      description: "How long to suspend the guard before it automatically resumes."
       required: true
       example: "01:00:00"
       selector:
         duration:
 
 unsnooze:
+  name: "Unsnooze"
+  description: "Resume a snoozed guard immediately instead of waiting for its snooze to elapse."
   target:
     entity:
       integration: necromancer
@@ -34,6 +46,8 @@ unsnooze:
       device_class: enum
 
 notify_guard:
+  name: "Notify via guard"
+  description: "Send a custom message through a guard's own notify action — for recovery scripts that want to report their own progress on the same channel the guard already uses."
   target:
     entity:
       integration: necromancer
@@ -41,25 +55,35 @@ notify_guard:
       device_class: enum
   fields:
     message:
+      name: "Message"
+      description: "The text to send. Exposed to the notify action as the `message` and `event_text` variables; the guard name is the title."
       required: true
       example: "Sanfter Neustart fehlgeschlagen – lege hart nach"
       selector:
         text:
     event:
+      name: "Event key"
+      description: "Optional routing key exposed as the `event` variable (default: `custom`), so your notify action can branch on it."
       example: "custom"
       selector:
         text:
     event_text:
+      name: "Event text"
+      description: "Optional name-less text exposed as `event_text` (defaults to the message) — for titles/TTS that set the name separately."
       example: "Lege hart nach"
       selector:
         text:
     attempt:
+      name: "Attempt"
+      description: "Optional attempt count exposed as `attempt`; also derives the plural-correct `attempts` phrase."
       example: 2
       selector:
         number:
           min: 0
           mode: box
     max:
+      name: "Max attempts"
+      description: "Optional attempt limit exposed as `max`."
       example: 2
       selector:
         number:
@@ -67,6 +91,8 @@ notify_guard:
           mode: box
 
 heartbeat_ping:
+  name: "Heartbeat ping"
+  description: "Record a successful heartbeat for a heartbeat guard by hand, as if its job had pinged — for a ping that got lost (e.g. while Home Assistant was down) although the job ran. The deadline starts again now and an overdue guard returns to OK. Logged with the calling user."
   target:
     entity:
       integration: necromancer
@@ -74,18 +100,28 @@ heartbeat_ping:
       device_class: enum
 
 snooze_all:
+  name: "Snooze all"
+  description: "Snooze every guard for a duration — system-wide maintenance mode. Each guard ignores health and raises no alerts, then auto-resumes. Guards mid-recovery are skipped (best-effort)."
   fields:
     duration:
+      name: "Duration"
+      description: "How long to suspend all guards before they auto-resume."
       required: true
       example: "01:00:00"
       selector:
         duration:
 
 unsnooze_all:
+  name: "Unsnooze all"
+  description: "Resume every snoozed guard immediately."
 
 check_health:
+  name: "Check Health"
+  description: "Evaluate a guard's health right now and return it (`ok` / `unhealthy` / `unknown`) — for a recovery script to re-use the guard's own Health Check instead of rebuilding it. Returns data only: call it with a response variable."
   fields:
     guard:
+      name: "Guard"
+      description: "The guard's status entity — the value a recovery action receives as `guard_entity_id`."
       required: true
       example: sensor.hue_bridge_status
       selector:
@@ -94,8 +130,12 @@ check_health:
           domain: sensor
 
 wait_for_health:
+  name: "Wait for Health"
+  description: "Wait until a guard reports healthy again, or the timeout elapses. Returns `health`, `timed_out` and `waited_s` — so a staged recovery can verify between tiers using the guard's own Health Check. Returns data only: call it with a response variable."
   fields:
     guard:
+      name: "Guard"
+      description: "The guard's status entity — the value a recovery action receives as `guard_entity_id`."
       required: true
       example: sensor.hue_bridge_status
       selector:
@@ -103,6 +143,8 @@ wait_for_health:
           integration: necromancer
           domain: sensor
     timeout:
+      name: "Timeout"
+      description: "Seconds to wait for health to read `OK`. Defaults to the guard's boot window."
       example: 60
       selector:
         number:
@@ -111,13 +153,19 @@ wait_for_health:
           unit_of_measurement: s
           mode: box
     check_first:
+      name: "Check first"
+      description: "Evaluate once before waiting and return immediately if already healthy (default: `on`)."
       default: true
       selector:
         boolean:
 
 heartbeat_url:
+  name: "Heartbeat URL"
+  description: "Return the ping URL of a heartbeat guard (`url`, null when Home Assistant knows no URL of its own) and its path (`path`). Admin only: both contain the guard's secret token — never print or share them. Returns data only: call it with a response variable."
   fields:
     guard:
+      name: "Guard"
+      description: "The heartbeat guard's status entity."
       required: true
       example: sensor.backup_job_status
       selector:
