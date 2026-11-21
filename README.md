@@ -7,14 +7,20 @@
 [![Downloads](https://img.shields.io/github/downloads/MrTomRocker/homeassistant-necromancer/total)](https://github.com/MrTomRocker/homeassistant-necromancer/releases)
 
 <div align="center">
-  <img width="100%" alt="Necromancer — self-healing for every Home Assistant device & service" src="https://raw.githubusercontent.com/MrTomRocker/homeassistant-necromancer/main/img/hero_banner.png">
+  <img width="100%" alt="Necromancer — self-healing for every device, service & job" src="https://raw.githubusercontent.com/MrTomRocker/homeassistant-necromancer/main/img/hero_banner.png">
 </div>
 
+<p align="center"><b>Self-healing for every device, service &amp; job.</b><br>
+Devices crash, jobs go silent — Necromancer brings them back.</p>
+
 **Necromancer is a generic self-healing framework for Home Assistant.** It watches your
-devices, decides — calmly — when one is actually broken, and runs a recovery: power-cycle a
-switch, run an action, or auto-resolve a device to its PoE port and reboot it. It replaces the
+devices — and the jobs that run *outside* Home Assistant — decides, calmly, when one is actually
+broken, and runs a recovery: power-cycle a switch, run an action, auto-resolve a device to its PoE
+port and reboot it, or wake a server and re-run a backup that never reported in. It replaces the
 usual pile of bespoke *"ping → reload/restart"* automations with one configurable engine,
-vendor-agnostic, as an orchestrator on top of the entities you already have.
+vendor-agnostic, as an orchestrator on top of the entities you already have. Jobs without an entity
+— backups, cron and systemd jobs, NAS tasks — simply ping a secret local
+[heartbeat URL](#heartbeat).
 
 <table align="center">
   <tr>
@@ -29,12 +35,21 @@ vendor-agnostic, as an orchestrator on top of the entities you already have.
     <td align="center"><sub>Ping spikes → the PoE port is power-cycled → recovery <b>verified</b>.</sub></td>
     <td align="center"><sub>Power draw collapses → the smart plug is power-cycled → recovery <b>verified</b>.</sub></td>
   </tr>
+  <tr>
+    <td align="center" colspan="2"><b>💓 Heartbeat — nightly backup</b></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img width="50%" alt="Necromancer waking a backup server after a missed heartbeat" src="https://raw.githubusercontent.com/MrTomRocker/homeassistant-necromancer/main/img/heartbeat.gif"></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><sub>Backup ping missing → server woken → ping back → recovery <b>verified</b>.</sub></td>
+  </tr>
 </table>
 
 ---
 
 **Start here:** [Why Necromancer?](#why-necromancer) · [Features](#features) · [Installation](#installation) · [Getting started](#getting-started)
-**Understand it:** [How it works](#how-it-works) · [Health Sources](#health-sources) · [Recovery strategies](#recovery-strategies) · [Timing & behaviour](#timing--behaviour) · [What you get](#what-you-get-per-guarded-device)
+**Understand it:** [How it works](#how-it-works) · [Health Sources](#health-sources) · [Recovery strategies](#recovery-strategies) · [Timing & behaviour](#timing--behaviour) · [What you get](#what-you-get-per-guarded-device) · [💓 Heartbeat for jobs](#heartbeat)
 **Go deeper:** [Linked guards](#linked-guards-groups) · [Supervisor guards](#supervisor-guards-watch-other-guards) · [PoE ports](#poe-ports) · [Notifications](#notifications) · [Services](#services)
 **Use & support:** [Cookbook](#cookbook) · [FAQ](#faq) · [Architecture](#architecture--internals) · [Contributing](#contributing) · [License](#license)
 
@@ -45,7 +60,7 @@ vendor-agnostic, as an orchestrator on top of the entities you already have.
 It started as a mess of my own making: my *"is this device dead? → fix it"* logic was spread
 across **pyscript, Node-RED and a stack of Home Assistant automations** — every device handled a
 little differently, and half of them never even checked whether the thing actually came back. I
-wanted **one harmonized workflow** for every device and service instead of rebuilding
+wanted **one harmonized workflow** for every device, service and job instead of rebuilding
 *"ping → restart"* by hand each time. So I built Necromancer.
 
 Devices die quietly. A Hue bridge that needs a power-cycle, an access point that drops off the
@@ -54,16 +69,21 @@ network, a camera that hangs — each one usually ends up with its own hand-writ
 never verify the device actually came back, and PoE-restart tooling is vendor-locked
 (UniFi / Omada / Netgear) while generic SNMP tools are port-centric with no device logic.
 
-Necromancer is vendor-agnostic. It watches **any** health signal you already have and runs
-**any** recovery you can express — and for PoE it resolves a device to the **right port
-automatically** (by MAC, hostname or neighbour, even after you move the cable), cycles it, and
-**confirms the device is healthy again** before calling it done.
+Jobs fail even more quietly. A nightly backup, a cron script or a sync task that stopped running
+has no entity in Home Assistant and nothing turns red — you find out the day you need the backup.
+
+Necromancer is vendor-agnostic. It watches **any** health signal you already have — or a
+**heartbeat** your jobs send it — and runs **any** recovery you can express. For PoE it resolves a
+device to the **right port automatically** (by MAC, hostname or neighbour, even after you move the
+cable), cycles it, and **confirms the device is healthy again** before calling it done. For a job,
+"healthy again" means the job pinged again.
 
 > *Examples:* a **Hue bridge** on a ping sensor → Necromancer finds its PoE port, cuts power, waits
 > for it to come back, and only then clears the alarm. A wedged **Docker container** → a graceful
 > restart, and a force-kill if that didn't take — both in one attempt. A **solar inverter** that's
-> *"online but making 0 W at noon"* → caught by a template and alerted. One guard each, no brittle
-> automation.
+> *"online but making 0 W at noon"* → caught by a template and alerted. A **nightly NAS backup**
+> whose ping doesn't arrive → Necromancer wakes the NAS by Wake-on-LAN, re-runs the backup over SSH,
+> and calls it fixed only once the backup pings again. One guard each, no brittle automation.
 
 **What sets it apart:**
 
@@ -77,6 +97,9 @@ automatically** (by MAC, hostname or neighbour, even after you move the cable), 
 - **One engine, and guards that cooperate.** Each device is a *guard* (health + recovery + timing)
   built in a wizard — not a pile of `if unreachable for 5 min` YAML. Link guards that share a root
   cause so one repairs and the rest follow, or stage cheap fixes under a **supervisor** guard.
+- **Jobs heal too, not just devices.** A backup, cron or systemd job reports to a secret local URL.
+  A missing or failed ping gets the same treatment as a dead device: wait, repair (wake the server,
+  restart the service, re-run the job), and verify by the next ping.
 
 Under the hood it's three pluggable layers, each with a generic escape hatch so the common case
 needs no custom code:
@@ -85,13 +108,14 @@ needs no custom code:
 
 ## Features
 
-**One harmonized workflow for every device and service.** A Hue bridge, a Docker container, a smart
-plug, a PoE camera or a cloud bridge — all guarded with the *same* model (health → recovery → verify
-→ timing), vendor- and protocol-agnostic. No bespoke per-device scripts.
+**One harmonized workflow for every device, service and job.** A Hue bridge, a Docker container, a
+smart plug, a PoE camera, a cloud bridge or a nightly backup — all guarded with the *same* model
+(health → recovery → verify → timing), vendor- and protocol-agnostic. No bespoke per-device scripts.
 
 🔎 **Detect — is it broken?**
 
-- 🩺 **Two Health Sources** — any entity's state/attribute, or an inline **Jinja template** (e.g. *"online but drawing 0 W"*). Ambiguous readings (`unknown`/`unavailable`, render errors) count as *unknown*, never a fault — the guard goes **`blind`** instead of showing a stale OK.
+- 🩺 **Three Health Sources** — any entity's state/attribute, an inline **Jinja template** (e.g. *"online but drawing 0 W"*), or a [**heartbeat**](#heartbeat) from a job outside Home Assistant. Ambiguous readings (`unknown`/`unavailable`, render errors) count as *unknown*, never a fault — the guard goes **`blind`** instead of showing a stale OK.
+- 💓 **Heartbeat URLs for jobs outside Home Assistant** — each heartbeat guard gets a secret local URL. Backups, cron and systemd jobs, NAS and Windows tasks `POST` to it with `?status=$?`; a ping that doesn't arrive in time, or one that reports a failure, raises the alarm — and can trigger a repair like any other guard (wake the server, restart the service, re-run the job), verified by the next ping. Ready-made senders for Bash, Python, JavaScript and PowerShell.
 
 🛠 **Recover — fix it**
 
@@ -113,15 +137,15 @@ plug, a PoE camera or a cloud bridge — all guarded with the *same* model (heal
 ⚙️ **Operate & integrate**
 
 - 🎛️ **Full operator surface** — per-guard status & health entities (with recover & fail counts and the recovery driver's own last result), a revive button, an arm/disarm switch, and recovery `event`s for dashboards and automations.
-- 🖥️ **Ready-made dashboard** — a generic, copy-paste fleet overview (status banner, live-incident list, and a per-guard pop-up with one-tap revive/snooze) that auto-discovers every guard via `guard_name` and is fully responsive — see **[docs/dashboard](docs/dashboard/)**.
+- 🖥️ **Ready-made dashboard** — a generic, copy-paste fleet overview (status banner, live-incident list, and a per-guard pop-up with one-tap revive/snooze) that auto-discovers every guard via `guard_name` and is fully responsive — see **[docs/dashboard](https://github.com/MrTomRocker/homeassistant-necromancer/tree/main/docs/dashboard)**.
 - 🩹 **Self-diagnosing config** — a guard pointed at a missing or disabled health entity, a health template that reads only missing entities (or silently defaults one), a broken recovery action, an assigned device that no longer exists, or a PoE port with no id or a missing actuator surfaces in **Settings → Repairs** — event-driven and self-clearing.
-- 🤖 **Actions for your automations** — `necromancer.snooze` / `snooze_all` / `reset` / `repair_poe_port` / `notify_guard` / `check_health` / `wait_for_health`, callable from any automation or script (snooze everything before a mass reboot, cycle a PoE port on demand, or let a recovery script re-use a guard's Health Check).
+- 🤖 **Actions for your automations** — `necromancer.snooze` / `snooze_all` / `reset` / `repair_poe_port` / `notify_guard` / `check_health` / `wait_for_health` / `heartbeat_ping` / `heartbeat_url`, callable from any automation or script (snooze everything before a mass reboot, cycle a PoE port on demand, let a recovery script re-use a guard's Health Check, mark a heartbeat as received when a ping got lost, or fetch a guard's URL for a deploy script).
 - 😴 **Maintenance mode** — `snooze` one guard or `snooze_all` before planned work; they go quiet and auto-resume.
 - 🧰 **Wizard-built & reconfigurable** — create and edit guards entirely in the UI; no YAML to hand-write.
-- 🏠 **Local & dependency-free** — no cloud, no extra Python packages; it orchestrates the entities you already have, and its verdicts (escalated, snooze) survive a restart.
+- 🏠 **Local & dependency-free** — no cloud, no extra Python packages; it orchestrates the entities you already have, and its verdicts (escalated, snooze) and each heartbeat's last ping survive a restart.
 - 🌍 **Localized** — full English and German UI.
 
-👉 **Real-world use cases:** see the **[Cookbook](#cookbook)** — PoE access points, Hue / Zigbee / Z-Wave bridges, Docker containers, pool pumps, solar inverters, Node-RED watchdogs and more.
+👉 **Real-world use cases:** see the **[Cookbook](#cookbook)** — PoE access points, Hue / Zigbee / Z-Wave bridges, Docker containers, pool pumps, solar inverters, Node-RED watchdogs, nightly backups & cron jobs and more.
 
 ## Installation
 
@@ -163,8 +187,10 @@ watched.
 
 1. Go to **Settings → Devices & Services**, click **+ Add Integration** and search for
    **Necromancer**. Confirm — it's added with no devices yet.
-2. On the Necromancer entry, click **Add device** to create a guard. The wizard walks you through:
+2. On the Necromancer entry, click **Add Necromancer guard** to create a guard. The wizard walks you through:
    **Health Source → device & check → what to do (notify-only or a recovery strategy) → its settings**.
+   For a **Heartbeat** guard the wizard ends by showing the guard's secret URL — see
+   [Heartbeat](#heartbeat).
 
 <div align="center">
   <img width="480px" alt="Add a guarded device" src="https://raw.githubusercontent.com/MrTomRocker/homeassistant-necromancer/main/img/add_device.png">
@@ -186,9 +212,11 @@ Everything is built on one idea:
 
 > **A guard pairs one health signal with one recovery and runs both through a fixed lifecycle.**
 
-The Health Source — an entity's state or a Jinja template — is evaluated continuously, so the
-*same* check that detects a fault also confirms the fix. The recovery is whatever you choose.
-Around that, the engine runs a deliberately conservative lifecycle:
+The Health Source — an entity's state, a Jinja template, or a heartbeat a job sends — decides
+whether the thing is healthy, and the *same* check that detects a fault also confirms the fix. State
+and template are re-read continuously; a heartbeat is judged on every ping and when its deadline
+passes, so after a repair it confirms the fix when the job pings again. The recovery is whatever
+you choose. Around that, the engine runs a deliberately conservative lifecycle:
 
 - **Detect → confirm.** A fault must persist for the *debounce* window before anything happens —
   transient blips are ignored.
@@ -233,24 +261,30 @@ Two guarantees fall out of this design:
   not a blind success.
 
 State that matters across a Home Assistant restart — the escalation verdict, attempt counters,
-recovery stats and the per-guard auto-recovery switch — is **persisted** independently of the
-display entities.
+recovery stats, the per-guard auto-recovery switch and a heartbeat guard's last ping — is
+**persisted** independently of the display entities.
 
 ## Health Sources
 
-How a guard decides whether a device is alive. Both are continuous, checkable expressions, so the
-verify step always works:
+How a guard decides whether a device — or a job — is alive. The wizard's first step picks one of
+three:
 
 | Source | What it is | Healthy when |
 |---|---|---|
 | **State-based** | one entity's state or attribute, compared to on/off value lists | the value is in the *on* list (e.g. a ping / reachability sensor reads `on`) |
 | **Template-based** | an inline Jinja template returning `true`/`false` | the template renders `true`/`on`/`1`/`yes` (anything else — `false`/`off`/`0`/`no` is faulty, the rest is *unknown*) |
+| **Heartbeat (ping URL)** | a job outside Home Assistant `POST`s to the guard's secret URL | the last ping reported success and arrived within the **period** — see [Heartbeat](#heartbeat) |
+
+State and template are continuous, checkable expressions: the verify step can re-read them at any
+moment, so a recovery is confirmed as soon as the device is back. A heartbeat can't be re-read — it
+only changes when the job pings. After a repair, the verify step therefore waits for the job's
+**next successful ping** within the boot window.
 
 By default `unavailable`/`unknown` count as *unknown* (no false alarm). If "the entity is gone"
-*is* the failure you want to act on, list `unavailable` in the **off** values — then it triggers
-recovery like any other fault.
+*is* the failure you want to act on, list `unavailable` in the **off** values of a state-based guard
+— then it triggers recovery like any other fault.
 
-Both the **on** and **off** sides accept a *list* of values, so several states can count as healthy
+Both the state-based **on** and **off** sides accept a *list* of values, so several states can count as healthy
 (e.g. `home` **and** `on`) or as faulty — not just a single value.
 
 ## Recovery strategies
@@ -310,7 +344,7 @@ the collapsed *Behaviour* section of the wizard.
 
 | Setting | Default | What it controls |
 |---|---|---|
-| **Debounce** | 120 s | How long a fault must persist before recovery starts. Absorbs short blips. |
+| **Debounce** (*Wait before reacting*) | 120 s (1 h for a heartbeat guard) | How long a fault must persist before recovery starts. Absorbs short blips. Up to 1 day. For a heartbeat guard this is the **grace** after a missed ping; a reported failure skips it. |
 | **Boot window** | 180 s | How long to wait for the device to report healthy again after the recovery action, before counting the attempt as failed. Set it to the slowest your device takes to come back. |
 | **Cooldown** | 600 s | The pause after a *successful* recovery before the guard returns to `ok`. Prevents tight loops; if the device is still (or again) faulty when the cooldown elapses, the guard re-enters `suspect` (debounce) rather than looping straight back into recovery. |
 | **Max attempts** | 2 | How many times to retry before escalating. (With the Health Check on, every attempt re-verifies. With it off, an attempt is only retried if the recovery *reports* failure — a clean run is one-shot.) |
@@ -346,16 +380,17 @@ either direction. Deleting the guard instead removes its configuration for good.
 Every guard gets its own device, named after the guard. Assign a device to the guard and Home
 Assistant nests the guard under it — the guard's device page then shows *Connected via* that
 hardware — without Necromancer ever claiming ownership of a device that belongs to another
-integration. Recover guards get all five entities, notify-only guards just the status sensor
-+ health:
+integration. Recover guards get the full set below, notify-only guards just the status sensor
++ health; heartbeat guards add the *Last heartbeat* sensor:
 
 | Entity | Purpose |
 |---|---|
-| `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `blind` / `recovering` / `verify` / `cooldown` / `escalated` / `snoozed`. Attributes include `guard_name` (the guard's name), `recover_count` / `fail_count`, `last_recover` / `last_fail`, the `recover_driver` and its last verdict, `snooze_until`, plus the guard's resolved sibling entity_ids (`health_entity`, `auto_recovery_entity`, …). |
-| `binary_sensor.<guard>_health` | The raw health verdict from the HealthSource. Its `health_source` attribute names what's watched — the partner `entity_id`, or `template`. |
+| `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `blind` / `recovering` / `verify` / `cooldown` / `escalated` / `snoozed`. Attributes include `guard_name` (the guard's name), `health_type`, `recover_count` / `fail_count`, `last_recover` / `last_fail`, the `recover_driver` and its last verdict, `snooze_until`, plus the guard's resolved sibling entity_ids (`health_entity`, `auto_recovery_entity`, …). |
+| `binary_sensor.<guard>_health` | The raw health verdict from the HealthSource. Its `health_source` attribute names what's watched — the partner `entity_id`, `template`, or `heartbeat`. |
 | `switch.<guard>_auto_recovery` | Arm/disarm automatic recovery for this guard (a configuration entity). |
 | `button.<guard>_revive` | Trigger a recovery cycle manually. |
 | `event.<guard>_recovery` | Fires on each recovery outcome — `recovered` / `escalated` / `blocked` — for dashboards, automations and history. |
+| `sensor.<guard>_last_heartbeat` | **Heartbeat guards only.** *Last heartbeat* — when the last ping arrived (success or failure), shown as *"12 minutes ago"*. See [Heartbeat](#heartbeat). |
 
 <div align="center">
   <img width="320px" alt="Necromancer guard entities" src="https://raw.githubusercontent.com/MrTomRocker/homeassistant-necromancer/main/img/guard_entities.png">
@@ -379,7 +414,7 @@ lifecycle:
 |---|---|
 | `ok` | Healthy, watching. |
 | `suspect` | Unhealthy — waiting out the **debounce** before acting (filters blips). |
-| `blind` | Health **unknown** — the source is unavailable or its template errored, so the guard can't read the device. No recovery (unknown is never a fault); it returns to `ok` / `suspect` once health reads again. |
+| `blind` | Health **unknown** — the source is unavailable or its template errored, so the guard can't read the device. No recovery (unknown is never a fault); it returns to `ok` / `suspect` once health reads again. A **new heartbeat guard** is also `blind` until its first successful ping (`awaiting_first_success: true`) — that's waiting, not a fault. |
 | `recovering` | A recovery cycle is running (the driver is acting). |
 | `verify` | Recovery done — waiting (up to the **boot window**) for health to come back. |
 | `cooldown` | Recovered — a short pause before re-arming. |
@@ -393,7 +428,16 @@ labeling guards generically on a dashboard), `attempt` (retries in the current c
 `recover_driver` (what gets cycled — the switch / port / actions),
 `last_recover_driver_result` / `last_recover_driver_time` (the recovery driver's own
 last verdict — `good` / `failed` — and when, distinct from the overall state above),
-`snooze_until` (when a snooze auto-resumes).
+`snooze_until` (when a snooze auto-resumes),
+`health_type` (which source the guard uses — `entity_state` / `template` / `heartbeat`),
+`health_detail` (why the source judged as it did, in words — e.g. *"No heartbeat for 25 hours,
+expected every 24 hours."*; set while there is something to say).
+
+Heartbeat guards add `last_status` (`ok` / `fail`, the last ping's verdict), `last_code` (the code a
+failure ping sent, e.g. `3` or `TERM`) and `awaiting_first_success` (`true` while a new guard waits
+for its first successful ping). They change only when a ping changes one of them — a different
+status or code, or the first success — not on every ping, so a regular job adds no recorder rows
+here; the time of each ping is on the *Last heartbeat* sensor.
 
 Plus the guard's **sibling entity_ids** — `health_entity`, `auto_recovery_entity`,
 `revive_entity`, `recovery_event_entity` — each resolved live from its `unique_id`, so they
@@ -427,10 +471,15 @@ vs "the device is dead").
   (see *Turning a guard off*).
 - `button.<guard>_revive` — force a recovery cycle right now, bypassing the debounce and
   the auto-off gate, and lifting an active `snooze`.
+- `sensor.<guard>_last_heartbeat` *(heartbeat guards)* — a timestamp sensor: when the last ping
+  arrived. Attributes `next_due` (the deadline for the next successful ping; `null` after a failure
+  ping, which stays unhealthy until the next success whatever the time), `period` and `grace`
+  (seconds). It writes one recorder row per ping — that's its job; exclude it from the recorder if
+  a job pings very often.
 
 ### On your dashboard & in automations
 
-The five entities are plain Home Assistant entities — no custom card needed:
+A guard's entities are plain Home Assistant entities — no custom card needed:
 
 - **Overview:** an `entities` (or `auto-entities`) card over every `sensor.*_status`. It's a proper
   enum sensor, so each state shows its localized label.
@@ -452,6 +501,273 @@ Automate on the recovery event — e.g. alert only when a guard actually gives u
       data:
         message: "Necromancer gave up on {{ trigger.to_state.name }}"
 ```
+
+Or tell yourself when an escalated guard is **back to normal** — e.g. the backup finally pinged
+again, or you fixed the device by hand. Trigger on the status sensor:
+
+```yaml
+- triggers:
+    - trigger: state
+      entity_id: sensor.nightly_backup_status
+      from: escalated
+      to: ok
+  actions:
+    - action: notify.mobile_app_phone
+      data:
+        message: "{{ state_attr(trigger.entity_id, 'guard_name') }} is back to normal."
+```
+
+## Heartbeat
+
+For jobs that run **outside** Home Assistant and have no entity: backups, cron and systemd jobs,
+NAS tasks, Windows scheduled tasks, a script on a Raspberry Pi. The job reports to Necromancer
+instead of Necromancer asking — a *heartbeat*. When the heartbeat doesn't come, or the job reports
+a failure, the guard reacts like any other guard: it notifies you, or it **repairs** — wakes the
+server, restarts the service, re-runs the job — and counts the repair as done only once the job
+pings again.
+
+**Which one do I need?**
+
+| The thing you watch … | Use |
+|---|---|
+| has an entity in Home Assistant (a sensor, a switch, a Node-RED value) | a **state** or **template** guard — for "has it stopped updating?" see the [freshness watchdog](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/nodered-heartbeat.md) |
+| runs outside Home Assistant and has no entity (cron, systemd, NAS task, script) | a **heartbeat** guard |
+| is Home Assistant itself | an external check — a guard inside Home Assistant can't report that Home Assistant is down |
+
+### Set it up
+
+1. **Add Necromancer guard** on the Necromancer entry and pick the Health Source **Heartbeat (ping URL)**.
+2. Give it a name, a **Period** — how often the job reports success, e.g. *1 day* for a nightly
+   backup (at least 1 minute) — and leave **Local network only** on.
+3. Choose **Notify only** or a recovery strategy (see [Repair a job](#repair-a-job) below) and
+   its settings. *Wait before reacting* is the **grace** after a missed ping (1 h by default).
+4. The last step shows the guard's **URL** and three ready-made commands. The dialog has no copy
+   button — **triple-click** a line to select it. To see the URL again later, reconfigure the guard
+   or call [`necromancer.heartbeat_url`](#services).
+
+The URL looks like this:
+
+```text
+POST http://<home-assistant>:8123/api/necromancer/heartbeat/<name>_<token>
+```
+
+`<token>` is 64 hex characters and the only secret. `<name>` is just the guard's name for
+readability — Necromancer ignores it, so renaming the guard keeps old URLs working.
+
+The job calls the URL when it finishes and passes its exit code:
+
+```bash
+/usr/local/bin/backup.sh; curl -fsS -X POST "http://192.168.1.8:8123/api/necromancer/heartbeat/nightly_backup_<token>?status=$?"
+```
+
+**This one-liner sends once and does not retry**: a ping sent while Home Assistant restarts is lost.
+It also puts the token on the command line, where every user of that machine can read it in the
+process list. Use it to try the guard out.
+For real jobs, use one of the ready-made senders in
+[`docs/examples/heartbeat`](https://github.com/MrTomRocker/homeassistant-necromancer/tree/main/docs/examples/heartbeat)
+— [Bash](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.sh),
+[Python](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.py),
+[JavaScript](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.cjs),
+[PowerShell](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.ps1).
+They retry for about 10 minutes when it makes sense and stop when it doesn't, and they read the URL
+from an environment variable so the token stays off the command line (`ping.sh` hands it to curl
+on stdin). The
+[job heartbeat recipe](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/job-heartbeat.md)
+shows crontab, Synology and systemd setups.
+
+### Success or failure
+
+Only `POST` counts (a `GET` gets `405`, so a link preview never passes for a heartbeat). The body is
+never read; only the `status` in the query matters:
+
+| `status` | Counts as |
+|---|---|
+| missing, `ok`, `0` (any case) | **success** |
+| anything else — `fail`, an exit code like `3`, a signal name like `TERM`, also empty (`status=`) | **failure**; a short code shows up in the alert (*"Failure reported, exit code 3."*) |
+
+**Always pass the status.** A job that calls the URL without one reports success even when it
+failed. An empty `status=` counts as a failure on purpose: it's almost always an unset variable in
+the sender.
+
+### Answers
+
+Every answer is honest, so a sender can tell "done" from "try again":
+
+| Answer | When | The sender should |
+|---|---|---|
+| `200` `{"health": "ok"}` (or `unhealthy` / `unknown`) | ping accepted | stop — done |
+| `200` `{"dormant": true}` | the guard's device is disabled: the ping is stored, not judged | stop — done |
+| `400` | Home Assistant itself refused the request: odd characters in the query, or a proxy sends `X-Forwarded-For` that Home Assistant isn't set up for | stop, log an error |
+| `403` | the caller isn't on a local network and the guard has *Local network only* | stop, log an error |
+| `404` | unknown token (wrong URL, token regenerated, guard deleted) — **or** Necromancer isn't loaded yet during Home Assistant's start | retry |
+| `429` | more than 5 pings in 10 s for this guard | retry |
+| `503` | Necromancer is reloading, or Home Assistant is shutting down | retry |
+| `500` | an error in Necromancer | retry |
+| no connection | Home Assistant is down or restarting | retry |
+
+The ready-made senders follow exactly this table: retry on no connection, `404`, `429` and `5xx`
+every 60 s for about 10 minutes, stop on `2xx`, and stop with an error on `400` / `403`.
+
+### Timing: period, grace and a failed job
+
+- **Deadline** = the last successful ping (or, for a new guard, its creation) **+ period**.
+- When the deadline passes, the guard turns `suspect` for its **Wait before reacting** — that's the
+  **grace** (1 h by default for a heartbeat guard, up to 1 day). A successful ping inside the grace
+  ends it silently. After the grace, the guard notifies or starts its repair.
+- The grace counts **from the deadline**, so a reload or a Home Assistant restart doesn't postpone
+  the alarm. Necromancer doesn't guess what happened while Home Assistant was down: short outages
+  are bridged by the sender's retries.
+- **A failure ping reacts at once** — the job says itself that it failed, there's nothing to wait
+  for. The next successful ping makes the guard healthy again right away.
+- **A new guard waits grey**: it's `blind` with *"Waiting for the first heartbeat."* until the
+  first successful ping, and turns red only after period + grace without one.
+- Changing the period keeps the last ping; only the deadline moves. *Generate a new token* (in the
+  guard's reconfigure) or switching the source type starts over grey — and the old URL answers
+  `404`.
+
+*Example:* a nightly backup runs at 03:00 and pings at 03:05; period 1 day, grace 2 h. One night
+it hangs. The deadline is 03:05 the next day, the alarm (or the repair) comes at 05:05.
+
+### Repair a job
+
+A heartbeat guard can use every [recovery strategy](#recovery-strategies). Keep the **Health
+Check** on (the default): after the repair, the guard waits up to the **boot window** (at most
+1 h) for the job's next **successful** ping. So the repair should make the job run again, and the
+job — which pings at its end — must finish within the boot window. A job that runs longer than an
+hour is a case for **Notify only**.
+
+| Job goes silent because … | Repair | Strategy |
+|---|---|---|
+| the nightly backup didn't run | re-run it over SSH (`shell_command`, start it in the background) | Run an action |
+| the backup server or NAS is asleep or off | send **Wake-on-LAN** (`wake_on_lan.send_magic_packet`), then start the job | Run an action |
+| the service or container that runs the job hangs | restart the service or container (SSH `systemctl restart …`, `docker restart …`) | Run an action |
+| a Raspberry Pi with a cron job froze | **power-cycle it via its smart plug** | Power-cycle a switch |
+| the VM that runs the job hangs | restart the VM (SSH `qm reboot <id>` on a Proxmox host, or your hypervisor integration's restart action) | Run an action |
+| a Home Assistant add-on's task stopped | restart the add-on (`hassio.addon_restart`) | Run an action |
+
+For example, wake the NAS and re-run its backup. The repair must start the job **together with
+its ping** — re-running only `backup.sh` sends no ping, and the guard escalates although the backup
+ran. So both cron and the repair start one small wrapper that runs the backup and then the sender
+(the [job heartbeat recipe](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/job-heartbeat.md)
+explains it):
+
+```bash
+#!/bin/bash
+# /usr/local/bin/run-backup — run the backup once, then report
+exec 9>/run/lock/nightly-backup.lock
+flock -n 9 || exit 0     # already running: that run will report
+set -a; . /etc/heartbeat/nightly-backup.env; set +a    # HEARTBEAT_URL=… (chmod 600)
+/usr/local/bin/backup.sh
+/usr/local/bin/ping.sh $?
+```
+
+```bash
+# crontab
+0 3 * * *  /usr/local/bin/run-backup
+```
+
+The wrapper's ping verifies the repair:
+
+```yaml
+# Recovery: Run an action (Health Check on, boot window 1 h)
+- action: wake_on_lan.send_magic_packet
+  data:
+    mac: "00:11:32:aa:bb:cc"
+- delay: "00:02:00"
+- action: shell_command.rerun_backup
+```
+
+```yaml
+# configuration.yaml — shell_command stops after 60 s, so start the job in the background
+shell_command:
+  rerun_backup: >-
+    ssh -i /config/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new root@192.168.1.10
+    'nohup /usr/local/bin/run-backup >/dev/null 2>&1 &'
+```
+
+Heartbeat guards don't take part in [linked guards](#linked-guards-groups).
+
+### What you see
+
+- `sensor.<guard>_last_heartbeat` (*Last heartbeat*) — when the last ping arrived, shown as
+  *"12 minutes ago"*. Attributes `next_due` (the deadline; `null` after a failure ping — there is no
+  deadline then, the guard stays red until the next success), `period` and `grace` (seconds). One
+  recorder row per ping; exclude it from the recorder if a job pings very often.
+- `sensor.<guard>_status` — the usual lifecycle state, plus `health_type: heartbeat`,
+  `last_status`, `last_code`, `awaiting_first_success` and `health_detail` (e.g. *"No heartbeat
+  for 25 hours, expected every 24 hours."*).
+- Alerts carry the reason as a second sentence (*"Nightly Backup: Problem detected. Failure
+  reported, exit code 3."*) and as the [notify variable](#notifications) `{{ health_detail }}`.
+
+### A ping got lost
+
+The job ran, but its ping didn't arrive (Home Assistant was down longer than the sender retried)?
+Call **`necromancer.heartbeat_ping`** on the guard: it records a successful heartbeat as if the job
+had pinged, the deadline starts again, and an overdue or escalated guard returns to `ok`.
+`necromancer.reset` doesn't help here — the heartbeat would still be overdue. A dashboard button:
+
+```yaml
+type: button
+name: Backup ran — mark as OK
+icon: mdi:heart-pulse
+tap_action:
+  action: perform-action
+  perform_action: necromancer.heartbeat_ping
+  target:
+    entity_id: sensor.nightly_backup_status
+  confirmation:
+    text: Record a successful heartbeat for the nightly backup now?
+```
+
+Each manual ping is logged at `info` level with the user who sent it. Home Assistant logs only
+`warning` and above by default; to see these lines:
+
+```yaml
+# configuration.yaml
+logger:
+  logs:
+    custom_components.necromancer.sensor: info
+```
+
+### Network: local only, http and https
+
+**Local network only** (on by default) accepts pings only from private networks: loopback,
+link-local, the private IPv4 ranges (also other VLANs and Docker networks) and IPv6 ULA. Global
+IPv6 addresses, `100.64.0.0/10` (e.g. Tailscale) and Home Assistant Cloud are **not** local and get
+`403`. Put Home Assistant's **IPv4 address** in the sender's URL: a host name may resolve to a
+global IPv6 address and be refused. Turn the option off only if a sender outside your network
+must report.
+
+**Why the URL shows `http`, not `https`.** The URL is built from Home Assistant's own URL settings
+(*Settings → System → Network*). With *Local network only* the wizard shows the **internal** URL —
+usually `http://…:8123`, because Home Assistant itself speaks no TLS there. For https inside your
+LAN, put a reverse proxy in front (e.g. Nginx Proxy Manager), set `use_x_forwarded_for` and
+`trusted_proxies` in Home Assistant's `http:` config and enter the https address as the *local*
+URL; *Local network only* then judges the client's forwarded address. Without *Local network only*
+the wizard shows the same internal URL — the external URL (or the Home Assistant Cloud URL) appears
+only when Home Assistant has no internal one: none set under *Local network* and none it can detect
+(it detects none when it serves https itself). For a sender outside your network, put your external
+address in its URL yourself. If the URL starts with `/api`, Home Assistant has no usable URL — put
+`http://<home-assistant-ip>:8123` in front.
+
+### Security
+
+**The token is the only secret.** The endpoint has no login — whoever knows a guard's URL can
+report success or failure for it. Treat the URL like a password: keep it out of command lines,
+scripts in git and screenshots, pass it as an environment variable. If it leaked, reconfigure the
+guard and tick *Generate a new token*; the old URL answers `404` from then on.
+
+**Plain http in your LAN.** Over `http://` anyone who can read your network traffic can read the
+token. If that matters, go through an https proxy (see above).
+
+**Logs.** Necromancer never logs a full token (at most its first 6 characters), and it isn't in any
+attribute, event or notification. Home Assistant itself logs the full path only at DEBUG level
+(`homeassistant.helpers.http`), with `aiohttp.access` at INFO, and in the warning of its security
+filter when it refuses a query (`400`).
+
+**Limits.** Each guard accepts at most 5 pings in 10 s; the body is never read. A guard inside
+Home Assistant can't tell you that Home Assistant itself is down. There are no cron schedules and
+no "job started" signal: a job that hangs shows up at its deadline.
 
 ## Linked guards (groups)
 
@@ -476,6 +792,10 @@ alone they'd both power-cycle the same port. Link them into a **group** instead 
   same as any auto-off guard. Off stays off.
 - A guard whose **device is disabled** is not in the group at all: it neither leads nor follows
   nor re-verifies, and the remaining members form the group without it.
+- **Heartbeat guards can't be linked.** As a leader, a job re-run would hold every partner for its
+  whole cycle (up to max attempts × boot window), hiding a real outage of a partner meanwhile — and
+  re-running a job rarely fixes a cause it shares with a device. The *Linked guards* section doesn't
+  appear for them.
 
 Linking is **mutual and transitive**: link A to B, and if B already links to C the whole
 `{A, B, C}` becomes one group, shown in full on the next edit. To leave a group, clear *all* of its
@@ -601,6 +921,7 @@ variables, so you decide whether and how to be notified:
 | `{{ event }}` | the event key (`recovery_attempt`, `recovery_success`, `recovery_failed`, `recovery_blocked`, `no_auto_recovery`, `problem_detected`, `linked_repair_failed`) |
 | `{{ attempt }}` / `{{ max }}` / `{{ attempts }}` | recovery attempt count, max, and the plural-correct phrase (e.g. *"3 attempts"*) — where applicable |
 | `{{ reason }}` | why recovery was **blocked** or **failed** (e.g. a missing PoE port) — set for `recovery_blocked` / `recovery_failed`, empty otherwise |
+| `{{ health_detail }}` | why the Health Source judged as it did, as a sentence (e.g. *"No heartbeat for 25 hours, expected every 24 hours."* or *"Failure reported, exit code 3."*) — empty when the source has nothing to add. It is also appended to `message` and `event_text` as a second sentence |
 
 Variables that don't apply to an event arrive as an **empty string** (never undefined), so a
 template can reference `{{ attempt }}` directly without a `| default` guard.
@@ -654,24 +975,27 @@ device, or a whole area (bulk). Recovering *now* and arming auto-recovery stay t
 | `necromancer.unsnooze_all` | Resume every snoozed guard at once. |
 | `necromancer.repair_poe_port` | Resolve a device `id` (MAC / IP / static label) to its PoE port and power-cycle it. It blocks until done and **coalesces per port** — concurrent callers join the one in-flight cycle instead of each cycling the port. This is the exact primitive Auto-PoE uses — call it from your own actions or automations when you want "reboot whatever is on this device's port". |
 | `necromancer.check_health` | **Evaluate a guard's health right now** and get it back (`{health: ok / unhealthy / unknown}`). Pass the guard's status entity as `guard` — typically `{{ guard_entity_id }}` inside a recovery action — and read `response_variable`. For a recovery script that wants to branch on the guard's *own* Health Check instead of rebuilding it. |
-| `necromancer.wait_for_health` | **Wait until a guard reads healthy again** (or a `timeout`, default = the guard's boot window), returning `{health, timed_out, waited_s}`. Lets a *staged* recovery verify between tiers with the guard's definition of healthy: gentle fix → `wait_for_health` → `if timed_out`, escalate to the hard fix. `check_first` (default on) returns at once if it's already healthy. See [Staged recovery, verified by the guard itself](docs/cookbook/verified-staged-recovery.md). |
+| `necromancer.wait_for_health` | **Wait until a guard reads healthy again** (or a `timeout`, default = the guard's boot window), returning `{health, timed_out, waited_s}`. Lets a *staged* recovery verify between tiers with the guard's definition of healthy: gentle fix → `wait_for_health` → `if timed_out`, escalate to the hard fix. `check_first` (default on) returns at once if it's already healthy. See [Staged recovery, verified by the guard itself](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/verified-staged-recovery.md). |
+| `necromancer.heartbeat_ping` | **Record a successful heartbeat by hand** for a heartbeat guard (target like `reset` / `snooze`), as if its job had pinged — for a ping that got lost although the job ran. The deadline starts again and an overdue guard returns to `ok`; logged with the calling user at `info` level. `reset` doesn't do this: it re-checks, and the heartbeat is still overdue. Refused while Necromancer reloads; a guard whose device is disabled has no entities to target. See [A ping got lost](#a-ping-got-lost) for a dashboard button. |
+| `necromancer.heartbeat_url` | **Return a heartbeat guard's URL** — pass its status sensor as `guard`, read `url` (`null` when Home Assistant knows no URL of its own) and `path` from `response_variable`. For deploy scripts that write the URL into a job's config. **Admin only**: the URL contains the token. |
 
 ## Cookbook
 
-Real guards from a live deployment — each a step-by-step recipe under [`docs/cookbook/`](docs/cookbook/). What it does, which Necromancer concepts it shows, and what to use it for:
+Real guards from a live deployment — each a step-by-step recipe under [`docs/cookbook/`](https://github.com/MrTomRocker/homeassistant-necromancer/tree/main/docs/cookbook). What it does, which Necromancer concepts it shows, and what to use it for:
 
 | How-to | What it does | Concepts shown | Use it for |
 |---|---|---|---|
-| [Reboot a PoE access point](docs/cookbook/poe-access-point.md) | Cut PoE on the port to reboot the AP — gated so it never fires mid-flash or fleet-wide | Auto-PoE · firmware-update gate · controller-down gate | PoE APs, cameras, IP phones |
-| [Recover a bridge two ways at once](docs/cookbook/bridge-belt-and-braces.md) | Two detectors (ping + "are the lights there?") share one port reboot + integration reload | linked guards · count health · `repair_poe_port` + reload | Hue / Zigbee / Z-Wave bridges & hubs |
-| [Catch a device that's online but idle](docs/cookbook/inverter-sun-check.md) | Alert when a device is reachable but producing nothing — "is it doing its job?" | semantic health · notify-only | inverters, pumps, heat pumps |
-| [Restart a stalled chlorinator](docs/cookbook/chlorinator-restart.md) | Same semantic health, but with an automatic power-cycle + verify | semantic health · power-cycle + verify · smoothed input | chlorinators, pool pumps, heaters |
-| [Restart a pump, restore its interlocked device](docs/cookbook/pool-pump-restart.md) | Power-cycle a stalled pump and put the chlorinator back — carrying state across the off→on cycle | off/on actions · off→on variable carry · conditional restore · semantic health | pumps & devices behind a safety interlock |
-| [Alert when a Node-RED flow stalls](docs/cookbook/nodered-heartbeat.md) | Watch data freshness (`last_reported`); notify, or auto-redeploy with a Health Check | freshness watchdog (`last_reported`) · notify or auto-redeploy | Node-RED flows, scrape / MQTT feeds |
-| [Escalating recovery](docs/cookbook/escalating-recovery.md) | Graceful restart first, then a sledgehammer (kill-button / add-on restart) if it didn't take | `if/then` escalation · soft→hard restart · Health Check | containers, add-ons, services |
-| [Staged recovery, verified by the guard itself](docs/cookbook/verified-staged-recovery.md) | Gentle fix → ask the guard "healthy yet?" → escalate only if not, re-using the guard's own Health Check | `check_health` / `wait_for_health` · staged `if/then` · one script for many guards | bridges/hubs + the devices behind them |
-| [Recover by poking another system](docs/cookbook/recover-via-another-system.md) | Restart via MQTT / REST / SSH / webhook when HA can't do it directly, verified by health | `action_call` · MQTT / REST / SSH · Health Check | devices HA can't restart directly |
-| [One notification script for every guard](docs/cookbook/notification-fanout.md) | Centralize routing once — time-aware, multi-channel — instead of per-guard config | central notify fanout · time-aware routing | any multi-guard setup |
+| [Reboot a PoE access point](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/poe-access-point.md) | Cut PoE on the port to reboot the AP — gated so it never fires mid-flash or fleet-wide | Auto-PoE · firmware-update gate · controller-down gate | PoE APs, cameras, IP phones |
+| [Recover a bridge two ways at once](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/bridge-belt-and-braces.md) | Two detectors (ping + "are the lights there?") share one port reboot + integration reload | linked guards · count health · `repair_poe_port` + reload | Hue / Zigbee / Z-Wave bridges & hubs |
+| [Catch a device that's online but idle](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/inverter-sun-check.md) | Alert when a device is reachable but producing nothing — "is it doing its job?" | semantic health · notify-only | inverters, pumps, heat pumps |
+| [Restart a stalled chlorinator](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/chlorinator-restart.md) | Same semantic health, but with an automatic power-cycle + verify | semantic health · power-cycle + verify · smoothed input | chlorinators, pool pumps, heaters |
+| [Restart a pump, restore its interlocked device](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/pool-pump-restart.md) | Power-cycle a stalled pump and put the chlorinator back — carrying state across the off→on cycle | off/on actions · off→on variable carry · conditional restore · semantic health | pumps & devices behind a safety interlock |
+| [Alert when an HA sensor stops updating (freshness)](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/nodered-heartbeat.md) | Watch data freshness (`last_reported`); notify, or auto-redeploy with a Health Check | freshness watchdog (`last_reported`) · notify or auto-redeploy | Node-RED flows, scrape / MQTT feeds |
+| [Know when a nightly backup didn't run — and re-run it](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/job-heartbeat.md) | The job pings a secret URL; alert on a missing or failed ping, or wake the server / re-run the job and verify by the next ping | heartbeat source · period + grace · exit code in the alert · repair + Health Check | backups, cron & systemd jobs, NAS tasks |
+| [Escalating recovery](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/escalating-recovery.md) | Graceful restart first, then a sledgehammer (kill-button / add-on restart) if it didn't take | `if/then` escalation · soft→hard restart · Health Check | containers, add-ons, services |
+| [Staged recovery, verified by the guard itself](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/verified-staged-recovery.md) | Gentle fix → ask the guard "healthy yet?" → escalate only if not, re-using the guard's own Health Check | `check_health` / `wait_for_health` · staged `if/then` · one script for many guards | bridges/hubs + the devices behind them |
+| [Recover by poking another system](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/recover-via-another-system.md) | Restart via MQTT / REST / SSH / webhook when HA can't do it directly, verified by health | `action_call` · MQTT / REST / SSH · Health Check | devices HA can't restart directly |
+| [One notification script for every guard](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/notification-fanout.md) | Centralize routing once — time-aware, multi-channel — instead of per-guard config | central notify fanout · time-aware routing | any multi-guard setup |
 
 ## FAQ
 
@@ -724,21 +1048,39 @@ which can mean one premature "recovered" notification.
 **What happens if Home Assistant restarts mid-recovery?** The in-flight cycle is dropped — on startup
 the guard re-evaluates from live health and takes it from there. Only the lasting verdicts survive a
 restart: an `escalated` alarm and an active `snooze` (with its remaining time), plus the recovery
-stats (`recover_count`, `last_recover`) and the per-guard auto-recovery switch.
+stats (`recover_count`, `last_recover`) and the per-guard auto-recovery switch. A heartbeat guard
+also keeps its last ping, so an overdue job stays overdue and its grace isn't restarted.
+
+**Heartbeat or a template freshness check?** If the thing has an entity in Home Assistant (a
+Node-RED value, a sensor, an MQTT feed), check its `last_reported` with a template — see the
+[freshness watchdog](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cookbook/nodered-heartbeat.md).
+If it runs outside Home Assistant and has no entity (cron, systemd, a NAS task), use a
+[heartbeat](#heartbeat) guard.
+
+**My sender logs 404, 403 or 400 — why?** `404`: the URL is wrong, the token was regenerated or the
+guard deleted — or Necromancer wasn't loaded yet (the senders retry for ~10 min, so a 404 that stays
+is a wrong URL). `403`: the sender isn't on a local network — use Home Assistant's IPv4 address,
+not a host name that resolves to IPv6. `400`: Home Assistant refused the request — odd characters in
+the status, or a proxy sends `X-Forwarded-For` without `use_x_forwarded_for`. See
+[Answers](#answers).
+
+**Can Necromancer tell me when Home Assistant itself is down?** No — it runs inside Home Assistant,
+so it stops with it. Keep one check outside Home Assistant for that; Necromancer covers everything
+Home Assistant can see and every job that pings it.
 
 ## Architecture & internals
 
 This README is the user's guide. For the design — the full state machine, the health/driver/strategy
 matrix, the PoE fabric and the guard-linking internals — see
-[`docs/arch/architecture.md`](./docs/arch/architecture.md). Every timer and every behavioural case
-(with its timing) is catalogued in [`docs/arch/timing.md`](./docs/arch/timing.md), and the test
-concept lives in [`docs/arch/testing.md`](./docs/arch/testing.md).
+[`docs/arch/architecture.md`](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/arch/architecture.md). Every timer and every behavioural case
+(with its timing) is catalogued in [`docs/arch/timing.md`](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/arch/timing.md), and the test
+concept lives in [`docs/arch/testing.md`](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/arch/testing.md).
 
 ## Contributing
 
-Contributions are welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md). In short: fork, lint &
+Contributions are welcome — see [CONTRIBUTING.md](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/CONTRIBUTING.md). In short: fork, lint &
 format with `ruff`, run the P0 regression block, and open a focused pull request.
 
 ## License
 
-Released under the [MIT License](./LICENSE).
+Released under the [MIT License](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/LICENSE).
