@@ -186,7 +186,7 @@
             "off_value": "z. B. `off`, `unavailable`.",
             "template": "Gib `true`, `on`, `1` oder `yes` für „in Ordnung“ zurück; `false`, `off`, `0` oder `no` für „gestört“ – z. B. ein Vergleich wie „CPU < 90“ oder `is_state(...)`. Alles andere (`unavailable`, `unknown`, `none`, ein leeres Ergebnis oder ein Render-Fehler) gilt als `unknown` und löst nichts aus (kein Fehlalarm). Wird neu ausgewertet, sobald sich referenzierte Entitäten ändern. Richte es auf das überwachte Gerät – nicht auf die eigenen Status-/Health-Entitäten dieses Guards, sonst entsteht eine Rückkopplungsschleife.",
             "period": "Wie oft der Job Erfolg meldet, z. B. 1 Tag für eine nächtliche Sicherung. Mindestens 1 Minute.",
-            "local_only": "An (Standard): Nur Absender aus privaten Netzen (LAN, VPN, dieser Rechner) werden angenommen, andere bekommen 403. Nur ausschalten, wenn ein Absender außerhalb deines Netzes melden muss.",
+            "local_only": "An (Standard): Nur Absender aus privaten Netzen (LAN, VPNs mit privaten Adressen, dieser Rechner; nicht Tailscales 100.64.x) werden angenommen, andere bekommen 403. Nur ausschalten, wenn ein Absender außerhalb deines Netzes melden muss.",
             "regenerate_token": "Erzeugt eine neue geheime URL. Die alte URL wird mit dem Speichern ungültig (404) — sinnvoll, wenn die URL in falsche Hände geraten ist.",
             "device_id": "Optional. Verknüpft das eigene Gerät dieses Guards mit dem gewählten Home-Assistant-Gerät, sodass der Guard dort als „verbunden über\" auftaucht. Schaltet außerdem frei, die Integration dieses Geräts nach einer Reparatur neu zu laden."
           }
@@ -674,7 +674,7 @@
       "message": "{entity_id} ist keine Necromancer-Guard-Status-Entity — übergib den Status-Sensor des Guards, das guard_entity_id, das eine Reparatur-Aktion erhält."
     },
     "not_a_heartbeat_guard": {
-      "message": "{entity_id} ist kein Lebenszeichen-Guard — diese Aktion braucht einen Guard mit dem Lebenszeichen als Health-Quelle."
+      "message": "{entity_id} ist kein Lebenszeichen-Guard — diese Aktion braucht einen Guard mit dem Lebenszeichen als Health Source."
     },
     "heartbeat_not_running": {
       "message": "Das Lebenszeichen von {name} läuft gerade nicht (Necromancer lädt neu) — versuche es gleich noch einmal."

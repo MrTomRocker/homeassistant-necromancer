@@ -3,7 +3,6 @@
 [![GitHub release](https://img.shields.io/github/release/MrTomRocker/homeassistant-necromancer?include_prereleases=&sort=semver&color=blue)](https://github.com/MrTomRocker/homeassistant-necromancer/releases/)
 [![License](https://img.shields.io/badge/License-MIT-blue)](#license)
 [![issues](https://img.shields.io/github/issues/MrTomRocker/homeassistant-necromancer)](https://github.com/MrTomRocker/homeassistant-necromancer/issues)
-[![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5)](https://github.com/hacs/default)
 [![Downloads](https://img.shields.io/github/downloads/MrTomRocker/homeassistant-necromancer/total)](https://github.com/MrTomRocker/homeassistant-necromancer/releases)
 
 <div align="center">
@@ -136,10 +135,10 @@ smart plug, a PoE camera, a cloud bridge or a nightly backup — all guarded wit
 
 ⚙️ **Operate & integrate**
 
-- 🎛️ **Full operator surface** — per-guard status & health entities (with recover & fail counts and the recovery driver's own last result), a revive button, an arm/disarm switch, and recovery `event`s for dashboards and automations.
+- 🎛️ **Full operator surface** — per-guard status & health entities (with recover & fail counts and the recovery driver's own last result), a revive button, an arm/disarm switch, recovery `event`s for dashboards and automations, and a *Last heartbeat* sensor for heartbeat guards.
 - 🖥️ **Ready-made dashboard** — a generic, copy-paste fleet overview (status banner, live-incident list, and a per-guard pop-up with one-tap revive/snooze) that auto-discovers every guard via `guard_name` and is fully responsive — see **[docs/dashboard](https://github.com/MrTomRocker/homeassistant-necromancer/tree/main/docs/dashboard)**.
 - 🩹 **Self-diagnosing config** — a guard pointed at a missing or disabled health entity, a health template that reads only missing entities (or silently defaults one), a broken recovery action, an assigned device that no longer exists, or a PoE port with no id or a missing actuator surfaces in **Settings → Repairs** — event-driven and self-clearing.
-- 🤖 **Actions for your automations** — `necromancer.snooze` / `snooze_all` / `reset` / `repair_poe_port` / `notify_guard` / `check_health` / `wait_for_health` / `heartbeat_ping` / `heartbeat_url`, callable from any automation or script (snooze everything before a mass reboot, cycle a PoE port on demand, let a recovery script re-use a guard's Health Check, mark a heartbeat as received when a ping got lost, or fetch a guard's URL for a deploy script).
+- 🤖 **Actions for your automations** — `necromancer.snooze` / `unsnooze` / `snooze_all` / `unsnooze_all` / `reset` / `repair_poe_port` / `notify_guard` / `check_health` / `wait_for_health` / `heartbeat_ping` / `heartbeat_url`, callable from any automation or script (snooze everything before a mass reboot, cycle a PoE port on demand, let a recovery script re-use a guard's Health Check, mark a heartbeat as received when a ping got lost, or fetch a guard's URL for a deploy script).
 - 😴 **Maintenance mode** — `snooze` one guard or `snooze_all` before planned work; they go quiet and auto-resume.
 - 🧰 **Wizard-built & reconfigurable** — create and edit guards entirely in the UI; no YAML to hand-write.
 - 🏠 **Local & dependency-free** — no cloud, no extra Python packages; it orchestrates the entities you already have, and its verdicts (escalated, snooze) and each heartbeat's last ping survive a restart.
@@ -149,23 +148,18 @@ smart plug, a PoE camera, a cloud bridge or a nightly backup — all guarded wit
 
 ## Installation
 
-### HACS (Home Assistant Community Store)
+### Install via the Marketplace
 
-Necromancer is in the **HACS default store** — no custom repository needed.
+Necromancer is in the **Home Assistant Marketplace** (Home Assistant **2026.11** or newer).
 
-<details open>
-<summary>Install via HACS</summary>
-
-1. Open **HACS** in Home Assistant.
-2. Search for **Necromancer** and click **Download**.
+1. Go to **Settings → Marketplace**.
+2. Search for **Necromancer** and click **Install**.
 3. Restart Home Assistant.
-4. Add the integration via **Settings → Devices & Services**.
+4. Go to **Settings → Devices & Services** and add **Necromancer** (see [Getting started](#getting-started)).
 
-</details>
+Or open it straight in your Home Assistant:
 
-Or use this shortcut:
-
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MrTomRocker&repository=homeassistant-necromancer&category=integration)
+[![Open your Home Assistant instance and show Necromancer in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=MrTomRocker&repository=homeassistant-necromancer&category=integration)
 
 <details>
 <summary>Manual installation</summary>
@@ -173,12 +167,13 @@ Or use this shortcut:
 1. Copy the `custom_components/necromancer` directory from this repository into your Home
    Assistant `config/custom_components/` folder.
 2. Restart Home Assistant.
+3. Go to **Settings → Devices & Services** and add **Necromancer**.
+
+A manual installation needs Home Assistant **2026.8** or newer — that release reworked the device
+registry (one device per config entry, `via_device_id` in `DeviceInfo`), which is what Necromancer
+builds its guard devices on.
 
 </details>
-
-**Requires** Home Assistant **2026.8** or newer — that release reworked the device registry
-(one device per config entry, `via_device_id` in `DeviceInfo`), which is what Necromancer builds
-its guard devices on.
 
 ## Getting started
 
@@ -199,7 +194,7 @@ watched.
 Along the way you set the **timing** (debounce / boot window / cooldown / max attempts — see
 [Timing & behaviour](#timing--behaviour)), an optional **notify action** (see
 [Notifications](#notifications)), an optional **restart-device-integration** toggle (when a device
-is assigned), and optionally link the guard to others. The defaults are sensible; tune them per
+is assigned), and optionally link the guard to others (except a heartbeat guard). The defaults are sensible; tune them per
 device.
 
 That's a complete guard. For the **Auto-PoE** strategy you also configure your switch's ports
@@ -219,36 +214,19 @@ passes, so after a repair it confirms the fix when the job pings again. The reco
 you choose. Around that, the engine runs a deliberately conservative lifecycle:
 
 - **Detect → confirm.** A fault must persist for the *debounce* window before anything happens —
-  transient blips are ignored.
+  transient blips are ignored. (A heartbeat job that reports a failure itself skips it — there's
+  nothing to wait for.)
 - **Recover → verify.** After the recovery action, the guard waits up to the *boot window* for
   health to read OK again. A recovery counts as successful only when the device *actually* reports
   back — not when the action merely ran.
 - **Settle.** A *cooldown* follows a success; repeated failures *escalate* after a few attempts
   instead of looping forever.
 
-```mermaid
-stateDiagram-v2
-    [*] --> OK
-    OK --> SUSPECT: health turns faulty
-    OK --> BLIND: health unknown
-    SUSPECT --> OK: recovers within debounce (blip)
-    SUSPECT --> BLIND: health unknown
-    SUSPECT --> ESCALATED: auto-recovery off
-    SUSPECT --> RECOVERING: still faulty after debounce
-    BLIND --> OK: health returns
-    BLIND --> SUSPECT: faulty again
-    RECOVERING --> VERIFY: action ran (Health Check on)
-    RECOVERING --> COOLDOWN: action ran ok (Health Check off)
-    RECOVERING --> ESCALATED: blocked, or driver reports failed
-    VERIFY --> COOLDOWN: healthy within boot window
-    VERIFY --> RECOVERING: retry (attempts left)
-    VERIFY --> ESCALATED: out of attempts
-    COOLDOWN --> OK: healthy after cooldown
-    COOLDOWN --> SUSPECT: faulty again
-    ESCALATED --> OK: health returns
-    OK --> SNOOZED: necromancer.snooze (from any state)
-    SNOOZED --> OK: unsnooze / snooze elapsed
-```
+<div align="center">
+  <img width="100%" alt="Necromancer's guard lifecycle: OK, suspect, recovering, verify, cooldown, escalated, plus blind and snoozed" src="https://raw.githubusercontent.com/MrTomRocker/homeassistant-necromancer/main/img/state_machine.png">
+</div>
+
+<p align="center"><a href="https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/arch/architecture.md#3-the-engine-state-machine">Full state machine →</a></p>
 
 Two guarantees fall out of this design:
 
@@ -271,8 +249,8 @@ three:
 
 | Source | What it is | Healthy when |
 |---|---|---|
-| **State-based** | one entity's state or attribute, compared to on/off value lists | the value is in the *on* list (e.g. a ping / reachability sensor reads `on`) |
-| **Template-based** | an inline Jinja template returning `true`/`false` | the template renders `true`/`on`/`1`/`yes` (anything else — `false`/`off`/`0`/`no` is faulty, the rest is *unknown*) |
+| **An entity's state** (state-based) | one entity's state or attribute, compared to on/off value lists | the value is in the *on* list (e.g. a ping / reachability sensor reads `on`) |
+| **Jinja template** (template-based) | an inline Jinja template returning `true`/`false` | the template renders `true`/`on`/`1`/`yes` (anything else — `false`/`off`/`0`/`no` is faulty, the rest is *unknown*) |
 | **Heartbeat (ping URL)** | a job outside Home Assistant `POST`s to the guard's secret URL | the last ping reported success and arrived within the **period** — see [Heartbeat](#heartbeat) |
 
 State and template are continuous, checkable expressions: the verify step can re-read them at any
@@ -414,7 +392,7 @@ lifecycle:
 |---|---|
 | `ok` | Healthy, watching. |
 | `suspect` | Unhealthy — waiting out the **debounce** before acting (filters blips). |
-| `blind` | Health **unknown** — the source is unavailable or its template errored, so the guard can't read the device. No recovery (unknown is never a fault); it returns to `ok` / `suspect` once health reads again. A **new heartbeat guard** is also `blind` until its first successful ping (`awaiting_first_success: true`) — that's waiting, not a fault. |
+| `blind` | Health **unknown** — the source is unavailable or its template errored, so the guard can't read the device. No recovery (unknown is never a fault); it returns to `ok` / `suspect` once health reads again. A **new heartbeat guard** is also `blind` (`awaiting_first_success: true`) while it waits for its first successful ping — up to its first deadline (creation + period); that's waiting, not a fault. |
 | `recovering` | A recovery cycle is running (the driver is acting). |
 | `verify` | Recovery done — waiting (up to the **boot window**) for health to come back. |
 | `cooldown` | Recovered — a short pause before re-arming. |
@@ -434,8 +412,8 @@ last verdict — `good` / `failed` — and when, distinct from the overall state
 expected every 24 hours."*; set while there is something to say).
 
 Heartbeat guards add `last_status` (`ok` / `fail`, the last ping's verdict), `last_code` (the code a
-failure ping sent, e.g. `3` or `TERM`) and `awaiting_first_success` (`true` while a new guard waits
-for its first successful ping). They change only when a ping changes one of them — a different
+failure ping sent, e.g. `3` or `TERM`) and `awaiting_first_success` (`true` while a new guard has
+neither succeeded nor reported a failure yet). They change only when a ping changes one of them — a different
 status or code, or the first success — not on every ping, so a regular job adds no recorder rows
 here; the time of each ping is on the *Last heartbeat* sensor.
 
@@ -619,8 +597,9 @@ every 60 s for about 10 minutes, stop on `2xx`, and stop with an error on `400` 
   are bridged by the sender's retries.
 - **A failure ping reacts at once** — the job says itself that it failed, there's nothing to wait
   for. The next successful ping makes the guard healthy again right away.
-- **A new guard waits grey**: it's `blind` with *"Waiting for the first heartbeat."* until the
-  first successful ping, and turns red only after period + grace without one.
+- **A new guard waits grey**: it's `blind` with *"Waiting for the first heartbeat."* while it waits
+  for the first successful ping. Without one it turns `suspect` at its first deadline (creation +
+  period) and red only after period + grace.
 - Changing the period keeps the last ping; only the deadline moves. *Generate a new token* (in the
   guard's reconfigure) or switching the source type starts over grey — and the old URL answers
   `404`.
@@ -774,7 +753,7 @@ no "job started" signal: a job that hangs shows up at its deadline.
 Several guards often share one root cause. A Hue **bridge** behind a PoE port might be watched by
 both a *ping* guard and a *lamps-unavailable* guard; when the bridge dies, **both** detect it. Left
 alone they'd both power-cycle the same port. Link them into a **group** instead (the collapsed
-*Linked guards* section on any recover guard):
+*Linked guards* section on any recover guard, except a heartbeat guard):
 
 - When any member starts a recovery, the others **follow**: they pause their own logic, wait for the
   repair to finish, then re-check their own health. Whoever trips first leads — even on a
@@ -1034,7 +1013,8 @@ outage instead (cut power, unplug), or override the state — don't disable the 
 
 **Where's the option to link guards?** The *Linked guards* section only appears once there's
 another recover guard to link to — so your very first guard has nothing to offer there. Add the
-second guard, then link them from either guard's **Reconfigure**.
+second guard, then link them from either guard's **Reconfigure**. Heartbeat guards never link: they
+don't show the section and aren't offered as partners.
 
 **When should I leave the Health Check on?** Keep it on (the default) whenever the recovery can fail
 *silently* — for example Auto-PoE/`repair_poe_port` with an id that might not resolve, or an action
@@ -1079,7 +1059,7 @@ concept lives in [`docs/arch/testing.md`](https://github.com/MrTomRocker/homeass
 ## Contributing
 
 Contributions are welcome — see [CONTRIBUTING.md](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/CONTRIBUTING.md). In short: fork, lint &
-format with `ruff`, run the P0 regression block, and open a focused pull request.
+format with `ruff`, run the test suites, and open a focused pull request.
 
 ## License
 

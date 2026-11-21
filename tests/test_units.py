@@ -950,6 +950,32 @@ async def test_heartbeat_evaluate_table(hass, _):
     )
 
 
+async def test_heartbeat_no_basis_and_datetime_values(hass, _):
+    """No basis at all -> no deadline, waiting; datetimes count like ISO strings."""
+    for state in ({}, {"last_status": "ok"}, {"armed_at": None, "last_ok": None}):
+        assert hb.next_deadline(state, _HB_CFG) is None, state
+        assert hb.evaluate(state, _HB_CFG, _hb_at(10**7)) == (
+            Health.UNKNOWN,
+            ("heartbeat_waiting", {}),
+        ), state
+    # A state holding datetime objects (not yet through the Store's JSON).
+    as_dt = {"armed_at": _HB_T0, "last_ok": _hb_at(10), "last_status": "ok"}
+    as_iso = hb.apply_ping(_hb_armed(), True, None, _hb_at(10))
+    assert hb.next_deadline(as_dt, _HB_CFG) == _hb_at(10 + 86400)
+    assert hb.next_deadline(as_dt, _HB_CFG) == hb.next_deadline(as_iso, _HB_CFG)
+    late = _hb_at(10 + 86400 + 3600)
+    assert hb.evaluate(as_dt, _HB_CFG, late) == hb.evaluate(as_iso, _HB_CFG, late)
+    assert hb.evaluate(as_dt, _HB_CFG, late)[1] == (
+        "heartbeat_overdue",
+        {"since": 86400 + 3600, "period": 86400},
+    )
+    never = {"armed_at": _HB_T0}
+    assert hb.evaluate(never, _HB_CFG, _hb_at(86401))[1] == (
+        "heartbeat_never",
+        {"since": 86401},
+    )
+
+
 async def test_heartbeat_restart_has_no_grace(hass, _):
     """Evaluation knows no restart: overdue stays overdue, a late retry makes it OK."""
     state = hb.apply_ping(_hb_armed(), True, None, _HB_T0)
@@ -1159,6 +1185,28 @@ async def test_heartbeat_source_lifecycle(hass, _):
     assert plain.snapshot() == {} and plain.restore({"x": 1}) is False
     assert plain.detail() is None and plain.bind_persist(print) is None
     assert plain.confirmed() is False
+
+
+async def test_heartbeat_closed_source_arms_and_reports_nothing(hass, _):
+    """After its unsub the source arms no timer and no longer calls the engine.
+
+    A deadline callback already queued when the source closed (reload) must not
+    reach the stopped engine nor leave a new timer behind.
+    """
+    src = create_health(hass, {**_HB_CFG, "token": "c7" * 32})
+    src._arm()  # closed until async_setup
+    assert src._unsub_timer is None
+    changes = []
+    unsub = await src.async_setup(lambda: changes.append(1))
+    assert src._unsub_timer is not None
+    unsub()
+    assert src._unsub_timer is None
+    src._arm()
+    assert src._unsub_timer is None
+    late = dt_util.utcnow() + timedelta(seconds=86400 + 5)
+    with patch("homeassistant.util.dt.utcnow", return_value=late):
+        src._deadline_passed(late)
+    assert changes == [] and src._unsub_timer is None
 
 
 async def test_heartbeat_fault_since(hass, _):

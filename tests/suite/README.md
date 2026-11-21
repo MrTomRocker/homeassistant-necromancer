@@ -21,18 +21,19 @@ component). They are reached by pytest through two symlinks **in the ha-core
 checkout** (not committed here):
 
 ```
-<ha-core>/tests/components/necromancer            -> <repo>/tests/suite
+<ha-core>/tests/necromancer                       -> <repo>/tests/suite
 <ha-core>/tests/testing_config/custom_components/necromancer
                                                   -> <ha-core>/config/custom_components/necromancer
 ```
 
 The first puts the tests where ha-core's `tests/conftest.py` (the `hass` fixture)
-applies; the second lets the `enable_custom_integrations` fixture load the
+applies — under `tests/` but not `tests/components/`, so pytest skips
+`tests/components/conftest.py` and its many integration imports (as in CI); the second lets the `enable_custom_integrations` fixture load the
 component. Recreate them after a fresh checkout:
 
 ```bash
 ln -sfn <repo>/tests/suite \
-        <ha-core>/tests/components/necromancer
+        <ha-core>/tests/necromancer
 ln -sfn <ha-core>/config/custom_components/necromancer \
         <ha-core>/tests/testing_config/custom_components/necromancer
 ```
@@ -45,7 +46,7 @@ ln -sfn <ha-core>/config/custom_components/necromancer \
 ```bash
 # from the ha-core checkout, with its venv (has homeassistant + test deps)
 cd <ha-core>
-<venv>/bin/python -m pytest tests/components/necromancer/ -p no:cacheprovider -q -o addopts=""
+<venv>/bin/python -m pytest tests/necromancer/ -p no:cacheprovider -q -o addopts=""
 ```
 
 ## Coverage (this suite + the legacy scripts = full automated picture)
@@ -53,7 +54,7 @@ cd <ha-core>
 ```bash
 cd <ha-core>
 SRC=<ha-core>/config/custom_components/necromancer
-python -m coverage run --source=$SRC -m pytest tests/components/necromancer/ -o addopts=""
+python -m coverage run --source=$SRC -m pytest tests/necromancer/ -o addopts=""
 for s in test_units test_poe test_engine test_integration; do
   PYTHONPATH=<ha-core>:<ha-core>/config \
     python -m coverage run --source=$SRC -a <repo>/tests/$s.py

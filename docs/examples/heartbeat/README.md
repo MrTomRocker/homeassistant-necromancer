@@ -60,7 +60,7 @@ anyway, and Home Assistant would refuse odd characters in the query with `400`.
 | Environment variable | Default | |
 |---|---|---|
 | `HEARTBEAT_URL` | — | the guard's URL (required) |
-| `HEARTBEAT_ATTEMPTS` | `11` | attempts in all (at least 1) |
+| `HEARTBEAT_ATTEMPTS` | `11` | attempts in all, a whole number (at least 1); a fraction is cut off (`1.5` → 1), except in `ping.sh`, where it is invalid and means the default |
 | `HEARTBEAT_DELAY` | `60` | seconds between attempts (`0` or more) |
 
 An invalid value, or one below the minimum, means the default.

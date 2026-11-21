@@ -24,7 +24,7 @@ it discovers every guard automatically (no per-device wiring).
 - **necromancer ≥ 0.2.2** — the cards read the status-sensor attributes `guard_name`,
   `health_entity`, `auto_recovery_entity`, `revive_entity`, `recover_count`, `fail_count`,
   `recover_driver`, `attempt`, `snooze_until`.
-- **HACS frontend cards:**
+- **Custom frontend cards:**
   [Mushroom](https://github.com/piitaya/lovelace-mushroom) ·
   [bubble-card](https://github.com/Clooos/Bubble-Card) ·
   [auto-entities](https://github.com/thomasloven/lovelace-auto-entities) ·
@@ -34,13 +34,13 @@ it discovers every guard automatically (no per-device wiring).
 
 ## Use it
 
-1. Install the HACS cards above and make sure necromancer ≥ 0.2.2 is running.
+1. Install the custom cards above and make sure necromancer ≥ 0.2.2 is running.
 2. Open a dashboard → **Edit** → add a **Section** (or any vertical-stack).
 3. Switch it to the **YAML / code editor** and paste the cards from
    [`necromancer-dashboard.yaml`](necromancer-dashboard.yaml) (or add the individual cards 01–06).
-4. Done — nothing to configure. The cards filter on `integration_entities('necromancer')` and the
-   `guard_name` attribute, so they work with **any number of guards** (including multi-subentry
-   devices) out of the box.
+4. Done — nothing to configure. Every card filters on `integration_entities('necromancer')` and the
+   `guard_name` attribute (only a guard's status sensor has it), so they work with **any number of
+   guards** (including multi-subentry devices) out of the box.
 
 ## Customise
 
@@ -52,5 +52,10 @@ it discovers every guard automatically (no per-device wiring).
 ## Good to know
 
 - **Fully generic** — no hardcoded entity IDs; immune to renames and the `_status_N` suffix.
+- **Every state, including `blind`** — a guard whose health is unknown (or a new heartbeat guard
+  still waiting for its first ping) shows as *Blind* in the banner, the chips and the live
+  incidents, and hides the green "all OK" card.
+- **Heartbeat guards** appear like any other guard; their *Last heartbeat* sensor has no
+  `guard_name`, so it is never counted as a guard.
 - **Responsive** — pop-up grid 2→1 column; per-guard buttons reflow into a 2nd row on small screens.
 - Code is intentionally **multi-line / readable** so it's legible in the HA card editor.

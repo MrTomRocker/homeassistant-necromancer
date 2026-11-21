@@ -1,18 +1,20 @@
 # necromancer dashboard - Fleet status banner
 #
 # mushroom-template-card. Shows the WORST state across all guards.
-# Jinja iterates integration_entities('necromancer') | select('match','sensor'), ranks the states
-# (ok < cooldown < verify < suspect < recovering < escalated) and picks icon / colour / text.
+# Jinja iterates the guards' status sensors (integration_entities('necromancer'), sensors with a
+# guard_name attribute - a heartbeat guard's Last heartbeat sensor has none and is not counted),
+# ranks the states (ok < cooldown < blind < verify < suspect < recovering < escalated) and picks
+# icon / colour / text. 'blind' = health unknown (also a new heartbeat guard before its first ping).
 # Snooze count on the 2nd line; pulse animation on 'escalated' (card_mod).
 # Tap -> opens the pop-up (#necro-guards).
 
 type: custom:mushroom-template-card
 primary: |-
-  {%- set guards = integration_entities('necromancer') | select('match', 'sensor') | list -%}
-  {%- set rank = {'ok': 0, 'snoozed': 0, 'cooldown': 1, 'verify': 2, 'suspect': 3, 'recovering': 4, 'escalated': 5} -%}
+  {%- set guards = integration_entities('necromancer') | select('match', 'sensor') | expand | selectattr('attributes.guard_name', 'defined') | list -%}
+  {%- set rank = {'ok': 0, 'snoozed': 0, 'cooldown': 1, 'blind': 2, 'verify': 3, 'suspect': 4, 'recovering': 5, 'escalated': 6} -%}
   {%- set ns = namespace(worst='ok', maxr=0, snoozed=0, alarm=false) -%}
-  {%- for e in guards -%}
-    {%- set s = states(e) -%}
+  {%- for g in guards -%}
+    {%- set s = g.state -%}
     {%- if s == 'snoozed' -%}{%- set ns.snoozed = ns.snoozed + 1 -%}{%- endif -%}
     {%- if s == 'escalated' -%}{%- set ns.alarm = true -%}{%- endif -%}
     {%- set r = rank.get(s, 0) -%}
@@ -22,17 +24,18 @@ primary: |-
   {{ {
     'ok':         'Alle Systeme nominal',
     'cooldown':   'Stabilisiert sich',
+    'blind':      'Blind - Zustand unbekannt',
     'verify':     'Verifiziere Wiederherstellung',
     'suspect':    'Verdacht erkannt',
     'recovering': 'Reparatur läuft',
     'escalated':  'ALARM eskaliert'
   }.get(ns.worst, 'Beobachtung') }}
 secondary: |-
-  {%- set guards = integration_entities('necromancer') | select('match', 'sensor') | list -%}
-  {%- set rank = {'ok': 0, 'snoozed': 0, 'cooldown': 1, 'verify': 2, 'suspect': 3, 'recovering': 4, 'escalated': 5} -%}
+  {%- set guards = integration_entities('necromancer') | select('match', 'sensor') | expand | selectattr('attributes.guard_name', 'defined') | list -%}
+  {%- set rank = {'ok': 0, 'snoozed': 0, 'cooldown': 1, 'blind': 2, 'verify': 3, 'suspect': 4, 'recovering': 5, 'escalated': 6} -%}
   {%- set ns = namespace(worst='ok', maxr=0, snoozed=0, alarm=false) -%}
-  {%- for e in guards -%}
-    {%- set s = states(e) -%}
+  {%- for g in guards -%}
+    {%- set s = g.state -%}
     {%- if s == 'snoozed' -%}{%- set ns.snoozed = ns.snoozed + 1 -%}{%- endif -%}
     {%- if s == 'escalated' -%}{%- set ns.alarm = true -%}{%- endif -%}
     {%- set r = rank.get(s, 0) -%}
@@ -41,11 +44,11 @@ secondary: |-
   {%- set display = 'snoozed' if (ns.worst == 'ok' and ns.snoozed > 0) else ns.worst -%}
   {{ (ns.snoozed ~ ' im Wartungsmodus') if ns.snoozed > 0 else '' }}
 icon: |-
-  {%- set guards = integration_entities('necromancer') | select('match', 'sensor') | list -%}
-  {%- set rank = {'ok': 0, 'snoozed': 0, 'cooldown': 1, 'verify': 2, 'suspect': 3, 'recovering': 4, 'escalated': 5} -%}
+  {%- set guards = integration_entities('necromancer') | select('match', 'sensor') | expand | selectattr('attributes.guard_name', 'defined') | list -%}
+  {%- set rank = {'ok': 0, 'snoozed': 0, 'cooldown': 1, 'blind': 2, 'verify': 3, 'suspect': 4, 'recovering': 5, 'escalated': 6} -%}
   {%- set ns = namespace(worst='ok', maxr=0, snoozed=0, alarm=false) -%}
-  {%- for e in guards -%}
-    {%- set s = states(e) -%}
+  {%- for g in guards -%}
+    {%- set s = g.state -%}
     {%- if s == 'snoozed' -%}{%- set ns.snoozed = ns.snoozed + 1 -%}{%- endif -%}
     {%- if s == 'escalated' -%}{%- set ns.alarm = true -%}{%- endif -%}
     {%- set r = rank.get(s, 0) -%}
@@ -55,6 +58,7 @@ icon: |-
   {{ {
     'ok':         'mdi:check-circle',
     'cooldown':   'mdi:timer-sand',
+    'blind':      'mdi:eye-off-outline',
     'verify':     'mdi:heart-pulse',
     'suspect':    'mdi:alert-circle-outline',
     'recovering': 'mdi:loading',
@@ -62,11 +66,11 @@ icon: |-
     'snoozed':    'mdi:sleep'
   }.get(display, 'mdi:help') }}
 icon_color: |-
-  {%- set guards = integration_entities('necromancer') | select('match', 'sensor') | list -%}
-  {%- set rank = {'ok': 0, 'snoozed': 0, 'cooldown': 1, 'verify': 2, 'suspect': 3, 'recovering': 4, 'escalated': 5} -%}
+  {%- set guards = integration_entities('necromancer') | select('match', 'sensor') | expand | selectattr('attributes.guard_name', 'defined') | list -%}
+  {%- set rank = {'ok': 0, 'snoozed': 0, 'cooldown': 1, 'blind': 2, 'verify': 3, 'suspect': 4, 'recovering': 5, 'escalated': 6} -%}
   {%- set ns = namespace(worst='ok', maxr=0, snoozed=0, alarm=false) -%}
-  {%- for e in guards -%}
-    {%- set s = states(e) -%}
+  {%- for g in guards -%}
+    {%- set s = g.state -%}
     {%- if s == 'snoozed' -%}{%- set ns.snoozed = ns.snoozed + 1 -%}{%- endif -%}
     {%- if s == 'escalated' -%}{%- set ns.alarm = true -%}{%- endif -%}
     {%- set r = rank.get(s, 0) -%}
@@ -76,6 +80,7 @@ icon_color: |-
   {{ {
     'ok':         '#4caf50',
     'cooldown':   '#78909c',
+    'blind':      '#78909c',
     'verify':     '#00bcd4',
     'suspect':    '#ff9800',
     'recovering': '#2196f3',
@@ -89,11 +94,11 @@ tap_action:
 card_mod:
   style:
     .: |-
-      {%- set guards = integration_entities('necromancer') | select('match', 'sensor') | list -%}
-      {%- set rank = {'ok': 0, 'snoozed': 0, 'cooldown': 1, 'verify': 2, 'suspect': 3, 'recovering': 4, 'escalated': 5} -%}
+      {%- set guards = integration_entities('necromancer') | select('match', 'sensor') | expand | selectattr('attributes.guard_name', 'defined') | list -%}
+      {%- set rank = {'ok': 0, 'snoozed': 0, 'cooldown': 1, 'blind': 2, 'verify': 3, 'suspect': 4, 'recovering': 5, 'escalated': 6} -%}
       {%- set ns = namespace(worst='ok', maxr=0, snoozed=0, alarm=false) -%}
-      {%- for e in guards -%}
-        {%- set s = states(e) -%}
+      {%- for g in guards -%}
+        {%- set s = g.state -%}
         {%- if s == 'snoozed' -%}{%- set ns.snoozed = ns.snoozed + 1 -%}{%- endif -%}
         {%- if s == 'escalated' -%}{%- set ns.alarm = true -%}{%- endif -%}
         {%- set r = rank.get(s, 0) -%}
@@ -103,6 +108,7 @@ card_mod:
       {%- set rgb = {
         'ok':         '76,175,80',
         'cooldown':   '120,144,156',
+        'blind':      '120,144,156',
         'verify':     '0,188,212',
         'suspect':    '255,152,0',
         'recovering': '33,150,243',

@@ -101,11 +101,17 @@ The **button + event** carry the Necromancer „revive" flavour (EN „Revive" /
    Stunden.") — `""` when there is none; it is also appended to `message`/`event_text` as a second
    sentence and shown as the status sensor's `health_detail` attribute. Its placeholders (`since`,
    `period`, `code`) are resolved by the engine and are **not** action variables.
+6. **Health Source stays the proper noun in running text too** — „whose Health Source is the
+   heartbeat" / „als Health Source", never „health source" / „Health-Quelle" in UI strings.
+7. **Installation wording.** Public docs describe installing only via the Home Assistant
+   Marketplace (Home Assistant 2026.11+): „Install via the Marketplace" (never „new"), plus the
+   manual copy into `custom_components/` (Home Assistant 2026.8+). No third-party stores and no
+   third-party monitoring services by name.
 
 ## Quick check
 
 ```
-grep -nE "Wächter|Gesundheitszustand|Zustands-Template|Health-Prüfung|fixed id" translations/*.json   # → empty
+grep -nE "Wächter|Gesundheitszustand|Zustands-Template|Health-Prüfung|Health-Quelle|fixed id" translations/*.json   # → empty
 grep -nE "Recovery|Cooldown" translations/de.json   # → only in §3 display names, not in descriptions
 grep -niE "heartbeat \(webhook\)|Lebenszeichen \(Webhook\)" translations/*.json   # → empty
 ```

@@ -5,7 +5,7 @@ POSTs `/api/necromancer/heartbeat/<name>_<token>[?status=<s>]` when it ran. The
 verdict is "was there a success within the period" — a continuous judgement like
 the other sources, so the recovery VERIFY step and `check_health` keep working.
 
-There is no grace here: the grace of healthchecks.io is the engine's normal
+There is no grace here: the grace after a missed ping is the engine's normal
 debounce. An overdue guard turns UNHEALTHY at `basis + period`, the engine waits
 out its debounce in SUSPECT, and a late ping in that window ends it silently. The
 debounce counts from that deadline (`fault_since()`), so a reload or restart in
@@ -148,7 +148,7 @@ def apply_ping(state: dict, ok: bool, code: str | None, now: datetime) -> dict:
     """Return the state after a ping received at `now` (input left untouched).
 
     A success clears the code; a failure keeps `last_ok` (the deadline basis) so
-    the next success simply makes the guard OK again, as on healthchecks.io.
+    the next success simply makes the guard OK again.
     """
     new = dict(state)
     new["last_ping"] = now.isoformat()

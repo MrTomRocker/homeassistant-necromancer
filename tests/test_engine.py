@@ -1306,7 +1306,7 @@ async def test_hb_failure_ping_from_ok_reacts_at_once(hass, _):
         assert [(v["event"], v["health_detail"]) for v in sent] == [
             ("problem_detected", "Failure reported, exit code 3.")
         ], sent
-        # a success afterwards makes it OK again, as on healthchecks.io
+        # a success afterwards makes the guard OK again
         await src.async_handle_ping(True, None)
         assert eng.state is GState.OK
         await eng.async_stop()
@@ -1892,6 +1892,50 @@ async def test_hb_snooze_keeps_pings(hass, _):
         eng.unsnooze()
         assert eng.state is GState.OK and sent == []
         await eng.async_stop()
+
+
+async def test_hb_grace_ran_out_during_snooze_alarms_on_unsnooze(hass, _):
+    """Decision 22: the grace ran out while snoozed -> alarm right after the snooze.
+
+    The grace counts from the deadline, a snooze does not stop it: still broken
+    afterwards is broken (no fresh debounce). Both ways out of a snooze: lifted
+    early by unsnooze, and elapsed on its own while the grace was running.
+    """
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "a8")
+        eng = _hb_engine(hass, src)
+        await eng.async_start()
+        await src.async_handle_ping(True, None)
+        eng.snooze(timedelta(hours=10))
+        await clock.advance(hass, _HB_PERIOD + _HB_GRACE + 5)  # grace used up
+        assert eng.state is GState.SNOOZED and sent == []
+        eng.unsnooze()
+        assert eng.state is GState.ESCALATED
+        await hass.async_block_till_done()
+        assert [(v["event"], v["health_detail"]) for v in sent] == [
+            (
+                "problem_detected",
+                "No heartbeat for 70 minutes, expected every 60 minutes.",
+            )
+        ], sent
+        await eng.async_stop()
+
+        # Snoozed in the middle of the grace; the snooze outlasts it and elapses.
+        sent.clear()
+        src2 = _hb_source(hass, "a9")
+        eng2 = _hb_engine(hass, src2)
+        await eng2.async_start()
+        await src2.async_handle_ping(True, None)
+        await clock.advance(hass, _HB_PERIOD + 1)
+        assert eng2.state is GState.SUSPECT
+        eng2.snooze(timedelta(seconds=_HB_GRACE + 60))
+        await clock.advance(hass, _HB_GRACE + 59)
+        assert eng2.state is GState.SNOOZED and sent == []
+        await clock.advance(hass, 1)  # the snooze ends -> no fresh debounce
+        assert eng2.state is GState.ESCALATED
+        await hass.async_block_till_done()
+        assert [v["event"] for v in sent] == ["problem_detected"], sent
+        await eng2.async_stop()
 
 
 async def test_hb_persistence_overdue_escalated_stays(hass, _):

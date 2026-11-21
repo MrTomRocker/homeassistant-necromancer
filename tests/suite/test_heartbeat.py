@@ -12,16 +12,17 @@ from __future__ import annotations
 from datetime import timedelta
 import logging
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
+from aiohttp import web
 from aiohttp.test_utils import TestClient
 from freezegun.api import FrozenDateTimeFactory
 import pytest
 
-from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-from homeassistant.core import CoreState, HomeAssistant, ServiceCall
-from homeassistant.helpers import device_registry as dr
+from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, MATCH_ALL
+from homeassistant.core import CoreState, Event, HomeAssistant, ServiceCall, callback
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 
@@ -226,6 +227,39 @@ async def test_unparsable_remote_is_not_local(hass: HomeAssistant) -> None:
     assert not _caller_is_local(hass, _Req("2001:db8::1"))
 
 
+@pytest.mark.parametrize(
+    ("remote", "code"),
+    [
+        ("100.64.0.1", 403),  # CGNAT (RFC 6598), e.g. a Tailscale address
+        ("100.127.255.254", 403),
+        ("2606:4700:4700::1111", 403),  # global IPv6
+        ("not-an-ip", 403),
+        ("192.168.1.9", 200),  # RFC 1918
+        ("fd00::9", 200),  # ULA
+    ],
+)
+async def test_local_only_over_http_by_caller_address(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    hass_client_no_auth: ClientFactory,
+    remote: str,
+    code: int,
+) -> None:
+    """Over HTTP: CGNAT, global IPv6 and an unparsable address are not local.
+
+    The test client always connects from 127.0.0.1, so the connection's address
+    (`request.remote`) is patched; the real `is_local` decides.
+    """
+    entry = await setup_guards(_hb())
+    client = await hass_client_no_auth()
+    with patch.object(
+        web.BaseRequest, "remote", new_callable=PropertyMock, return_value=remote
+    ):
+        assert (await _ping(client))[0] == code
+    expected = "ok" if code == 200 else "blind"
+    assert entry.runtime_data.engines["guard0"].state.value == expected
+
+
 async def test_sixth_ping_in_ten_seconds_is_429(
     hass: HomeAssistant,
     setup_guards: SetupGuards,
@@ -299,6 +333,26 @@ async def test_exception_is_500_and_token_truncated_in_log(
     )
     assert f"{HEARTBEAT_TOKEN[:6]}…" in ours
     assert HEARTBEAT_TOKEN not in ours
+
+
+async def test_http_exception_passes_through_not_500(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    hass_client_no_auth: ClientFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An aiohttp HTTPException keeps its own answer; it is no error to log as 500."""
+    entry = await setup_guards(_hb())
+    client = await hass_client_no_auth()
+    source = entry.runtime_data.engines["guard0"].health
+
+    with patch.object(source, "async_handle_ping", side_effect=web.HTTPConflict()):
+        assert (await _ping(client))[0] == 409
+    assert not [
+        r
+        for r in caplog.records
+        if r.name.startswith(_OWN_LOGGER) and r.levelno >= logging.ERROR
+    ]
 
 
 async def test_endpoint_needs_no_auth_other_api_stays_protected(
@@ -395,6 +449,28 @@ async def test_unload_closed_source_refuses_ping_without_timer(
     assert (await _ping(client))[0] == 503
     assert source.state == before
     assert source._unsub_timer is None
+
+
+async def test_heartbeat_guard_without_token_is_skipped(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    hass_client_no_auth: ClientFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A heartbeat subentry without a token gets no route and no engine.
+
+    Only broken stored data looks like this (the flow always generates a token);
+    the entry still loads and the other guards keep working.
+    """
+    broken = _hb("Broken")
+    del broken["health"]["token"]
+    entry = await setup_guards(broken, _hb("Other", token=TOKEN_B))
+    client = await hass_client_no_auth()
+
+    assert _registry(hass).tokens(entry.entry_id) == [TOKEN_B]
+    assert set(entry.runtime_data.engines) == {"guard1"}
+    assert "Failed to set up guard 'Broken'" in caplog.text
+    assert await _ping(client, TOKEN_B) == (200, {"health": "ok"})
 
 
 async def test_failed_start_is_waiting_and_keeps_stored_state(
@@ -952,6 +1028,86 @@ async def test_reload_in_the_grace_a_late_ping_is_still_silent(
     assert sink == []
 
 
+def _set_period(hass: HomeAssistant, entry: Any, period: int) -> None:
+    """Change the period as the reconfigure step saves it (the entry reloads)."""
+    subentry = entry.subentries["guard0"]
+    hass.config_entries.async_update_subentry(
+        entry,
+        subentry,
+        data={
+            **subentry.data,
+            "health": {**subentry.data["health"], "period": period},
+        },
+    )
+
+
+async def test_shorter_period_keeps_last_ping_and_alarms_at_once(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    hass_client_no_auth: ClientFactory,
+    freezer: FrozenDateTimeFactory,
+    sink: list[ServiceCall],
+) -> None:
+    """Decision 22: period 3600 -> 60 with deadline and grace already passed.
+
+    Saving only moves the deadline: the last ping stays (no reset, not blind),
+    the grace counted from the new deadline is used up, so the alarm goes out
+    as soon as the change is saved.
+    """
+    entry = await setup_guards(_hb(period=3600, debounce=60))
+    client = await hass_client_no_auth()
+    assert (await _ping(client))[0] == 200
+    kept = entry.runtime_data.engines["guard0"].health.state
+    await _advance(hass, freezer, 300)  # new deadline +60, its grace ends at +120
+    assert entry.runtime_data.engines["guard0"].state.value == "ok"
+
+    _set_period(hass, entry, 60)
+    await hass.async_block_till_done()
+
+    engine = entry.runtime_data.engines["guard0"]
+    assert engine.health.period == 60
+    assert engine.health.state == kept
+    assert engine.state.value == "escalated"
+    assert [c.data["event"] for c in sink] == ["problem_detected"]
+    attrs = hass.states.get(
+        entity_id_for(hass, "guard0", "sensor", "status")
+    ).attributes
+    assert attrs["awaiting_first_success"] is False
+    assert attrs["health_detail"] == (
+        "No heartbeat for 5 minutes, expected every 1 minute."
+    )
+
+
+async def test_shorter_period_within_grace_waits_only_its_rest(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    hass_client_no_auth: ClientFactory,
+    freezer: FrozenDateTimeFactory,
+    sink: list[ServiceCall],
+) -> None:
+    """Period shortened so only the deadline passed: SUSPECT, alarm at its grace end.
+
+    Deadline +60 after the change, debounce 600 -> alarm at +660, not 600 s
+    after saving.
+    """
+    entry = await setup_guards(_hb(period=3600, debounce=600))
+    client = await hass_client_no_auth()
+    assert (await _ping(client))[0] == 200
+    await _advance(hass, freezer, 300)
+
+    _set_period(hass, entry, 60)
+    await hass.async_block_till_done()
+    engine = entry.runtime_data.engines["guard0"]
+    assert engine.state.value == "suspect"
+
+    await _advance(hass, freezer, 359)
+    assert engine.state.value == "suspect"
+    assert sink == []
+    await _advance(hass, freezer, 1)
+    assert engine.state.value == "escalated"
+    assert [c.data["event"] for c in sink] == ["problem_detected"]
+
+
 async def test_restart_in_the_grace_waits_only_its_rest(
     hass: HomeAssistant,
     setup_guards: SetupGuards,
@@ -1115,3 +1271,135 @@ async def test_heartbeat_guard_never_links(
     engines = entry.runtime_data.engines
     assert engines["guard0"].links._linked == []
     assert engines["guard1"].links._linked == []
+
+
+# ---------------- security: the token stays secret ----------------
+
+
+def _hb_repair(name: str = "Fixer", **kwargs: Any) -> dict[str, Any]:
+    """A heartbeat guard that repairs by an action (recovery events + texts)."""
+    return make_guard(
+        name,
+        source="heartbeat_based",
+        strategy="action",
+        period=60,
+        debounce=0,
+        cooldown=1,
+        action=[{"action": "test.restart_job"}],
+        notify_action=[{"action": "test.sink", "data": {"event": "{{ event }}"}}],
+        **kwargs,
+    )
+
+
+def _assert_no_token_in_states(hass: HomeAssistant, step: str) -> int:
+    """No Necromancer entity's state or attributes carry a token; return the count."""
+    entities = [e for e in er.async_get(hass).entities.values() if e.platform == DOMAIN]
+    states = [s for e in entities if (s := hass.states.get(e.entity_id)) is not None]
+    for state in states:
+        text = repr(state.as_dict())
+        for token in (HEARTBEAT_TOKEN, TOKEN_B):
+            assert token not in text, (step, state.entity_id)
+    return len(states)
+
+
+async def test_token_never_in_attributes_events_or_notifications(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    hass_client_no_auth: ClientFactory,
+    hass_storage: dict[str, Any],
+    freezer: FrozenDateTimeFactory,
+    sink: list[ServiceCall],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The token reaches no state, event, notification, Store or own log line.
+
+    Two heartbeat guards — notify-only and repairing — go through creation (one
+    added at runtime), success and failure pings over HTTP and by service, an
+    overdue alarm, a recovery cycle and a reload. Every Necromancer state is
+    checked after each step; every bus event (state changes, service calls,
+    recovery events) and the variables of every notification at the end.
+    """
+    from custom_components.necromancer.core import notify as notify_mod
+
+    restart = async_mock_service(hass, "test", "restart_job")
+    events: list[Event] = []
+
+    @callback
+    def _capture(event: Event) -> None:
+        events.append(event)
+
+    hass.bus.async_listen(MATCH_ALL, _capture)
+
+    with (
+        caplog.at_level(logging.DEBUG),
+        patch.object(notify_mod, "async_run", wraps=notify_mod.async_run) as run,
+    ):
+        # Creation: one guard at setup, the second added to the running entry.
+        entry = await setup_guards(_hb())
+        assert _assert_no_token_in_states(hass, "created") > 0
+        hass.config_entries.async_add_subentry(
+            entry,
+            ConfigSubentry(
+                data=_hb_repair(token=TOKEN_B),
+                subentry_type="device",
+                title="Fixer",
+                unique_id=None,
+            ),
+        )
+        await hass.async_block_till_done()
+        assert len(entry.runtime_data.engines) == 2
+        n_states = _assert_no_token_in_states(hass, "added")
+        client = await hass_client_no_auth()
+
+        # Success, then failure pings (notify-only: alarm; repairing: a cycle).
+        for token in (HEARTBEAT_TOKEN, TOKEN_B):
+            assert await _ping(client, token) == (200, {"health": "ok"})
+        _assert_no_token_in_states(hass, "ping ok")
+        for token in (HEARTBEAT_TOKEN, TOKEN_B):
+            assert (await _ping(client, token, status="3"))[0] == 200
+        await _advance(hass, freezer, 1)
+        assert len(restart) >= 1
+        _assert_no_token_in_states(hass, "ping fail")
+
+        # Success by service, then overdue -> alarm (and a repair) after the period.
+        status_eids = [
+            entity_id_for(hass, sid, "sensor", "status") for sid in entry.subentries
+        ]
+        assert None not in status_eids
+        await hass.services.async_call(
+            DOMAIN, "heartbeat_ping", {"entity_id": status_eids}, blocking=True
+        )
+        await hass.async_block_till_done()
+        _assert_no_token_in_states(hass, "service ping")
+        sink.clear()
+        await _advance(hass, freezer, 62)
+        await _advance(hass, freezer, 1)
+        assert "problem_detected" in [c.data["event"] for c in sink]
+        _assert_no_token_in_states(hass, "overdue")
+
+        # Reload: the restored guards come back without the token anywhere either.
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+        assert _assert_no_token_in_states(hass, "reloaded") == n_states
+        await _advance(hass, freezer, 6)  # flush the delayed Store save
+
+    for event in events:
+        text = repr(event.as_dict())
+        for token in (HEARTBEAT_TOKEN, TOKEN_B):
+            assert token not in text, event.event_type
+    assert {"state_changed", "call_service"} <= {e.event_type for e in events}
+
+    notified = [c.args[3] for c in run.call_args_list]
+    sent = {v["event"] for v in notified}
+    assert {"problem_detected", "recovery_attempt"} <= sent, sent
+    for variables in notified:
+        for token in (HEARTBEAT_TOKEN, TOKEN_B):
+            assert token not in repr(variables), variables["event"]
+
+    stored = repr(hass_storage[STORE_KEY]["data"])
+    ours = "\n".join(
+        r.getMessage() for r in caplog.records if r.name.startswith(_OWN_LOGGER)
+    )
+    for token in (HEARTBEAT_TOKEN, TOKEN_B):
+        assert token not in stored
+        assert token not in ours

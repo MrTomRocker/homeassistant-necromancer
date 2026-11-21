@@ -9,6 +9,7 @@ from freezegun.api import FrozenDateTimeFactory
 import pytest
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_component import async_update_entity
 from homeassistant.util import dt as dt_util
 
 from ._compat import MockConfigEntry, async_fire_time_changed
@@ -187,6 +188,31 @@ async def test_heartbeat_attributes_follow_the_verdict_not_each_ping(
     assert failed.attributes["last_code"] == "3"
     assert failed.attributes["awaiting_first_success"] is False
     assert failed.attributes["health_detail"] == "Failure reported, exit code 3."
+
+
+async def test_health_detail_attribute_stays_as_time_passes(
+    hass: HomeAssistant, setup_guards: SetupGuards, freezer: FrozenDateTimeFactory
+) -> None:
+    """The reason on the status sensor is the one at the finding; it does not drift.
+
+    An hour later the source would word it differently ("for 62 minutes"), but a
+    re-rendered sensor (any later state write) still shows the text of the alarm.
+    """
+    entry = await setup_guards(_hb())
+    eid = entity_id_for(hass, "guard0", "sensor", "status")
+    await _ping(hass, entry)
+    await _tick(hass, freezer, 62)  # overdue -> SUSPECT
+    await _tick(hass, freezer, 30)  # grace (debounce 30) over -> ESCALATED
+    state = hass.states.get(eid)
+    assert state.state == "escalated"
+    detail = "No heartbeat for 2 minutes, expected every 1 minute."
+    assert state.attributes["health_detail"] == detail
+
+    await _tick(hass, freezer, 3600)
+    await async_update_entity(hass, eid)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.engines["guard0"].health.detail()[1]["since"] > 3600
+    assert hass.states.get(eid).attributes["health_detail"] == detail
 
 
 async def test_only_failures_is_not_awaiting_first_success(

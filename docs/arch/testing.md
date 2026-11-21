@@ -55,7 +55,8 @@ one of them:
     the guard/port is removed. Reconciliation is event-driven (startup/reload + a
     state-change listener), never polled.
 11. **The token stays secret.** Necromancer never writes a heartbeat token in full
-    into attributes, events, notifications, logs or diagnostics (`describe()` is
+    into attributes, events, notifications or logs (there is no diagnostics
+    platform; `describe()` is
     just `heartbeat`, the Store keeps only its fingerprint `token_fp`). It is shown
     only where it is the point: the flow's URL info step and the admin-only
     `heartbeat_url` service response.
@@ -70,16 +71,20 @@ one of them:
 ## 2. Level 1 — unit (pure logic / real `hass`)
 
 Fast, deterministic. Three runnable in-process modules cover this level today (run
-them with the dev venv, see §5): **`tests/test_units.py`** (44), **`tests/test_poe.py`**
-(22), **`tests/test_engine.py`** (61). On top sits a **pytest suite on HA's native test
-harness** (`tests/suite/`, run via `pytest tests/components/necromancer/`) that automates
-Level 2 in-process — see §3. Each row maps to an invariant:
+them with the dev venv, see §5): **`tests/test_units.py`** (51), **`tests/test_poe.py`**
+(22), **`tests/test_engine.py`** (80); a fourth script, **`tests/test_integration.py`**
+(12 checks), covers the health-registry robustness path (disable / rename / remove)
+and PoE pre-flight blocking against a real `hass` (§3). On top sits a **pytest suite
+on HA's native test harness** (`tests/suite/`, 181 tests) that automates Level 2
+in-process — see §3. In a core checkout it is linked to `tests/necromancer/` (under
+`tests/` but not `tests/components/`, so only core's `tests/conftest.py` applies) and
+run via `pytest tests/necromancer/`, as CI does. Each row maps to an invariant:
 
 | Module | What to assert | Covered by |
 |---|---|---|
 | `core/health/entity_state.py` | value-list mapping → OK/UNHEALTHY/UNKNOWN; unavailable/unknown → UNKNOWN; explicit-off-wins; legacy `healthy_state` fallback. | `test_units` |
 | `core/health/template.py` | whitelist: `true`/`on`/`1`/`yes` → OK, `false`/`off`/`0`/`no` → UNHEALTHY; everything else (`unavailable`, `none`, blank, unrecognized, render error) → UNKNOWN. | `test_units` |
-| `core/health/heartbeat.py` + `core/heartbeat_registry.py` | evaluation table in order, deadline = basis + period (failure → UNHEALTHY; waiting → UNKNOWN before and exactly on the deadline; never; overdue; OK; OK after a failure); a stored `grace` is ignored; no startup grace across a restart; `confirmed()` only while the last ping is a failure (not while waiting or overdue), `False` for other sources; `fault_since()` = the passed deadline while overdue (also never succeeded), `None` on the deadline itself, while waiting/OK, after a failure ping and for other sources; `parse_status` (missing/`ok`/`0` = success, empty/`fail`/`start`/anything else = failure, code kept only if `^[A-Za-z0-9_-]{1,16}$` and not `fail`); `token_fp` stable and token-free; slug → token after the last `_`; `reconcile_token` resets on a missing/other fingerprint; source lifecycle (active + timer on setup, ping persists + notifies, unsub → waiting + closed, refused pings); registry: 5 pings per 10 s per token, rebuild/activate/deactivate/unload/remove. | `test_units` |
+| `core/health/heartbeat.py` + `core/heartbeat_registry.py` | evaluation table in order, deadline = basis + period (failure → UNHEALTHY; waiting → UNKNOWN before and exactly on the deadline; never; overdue; OK; OK after a failure); a stored `grace` is ignored; no startup grace across a restart; `confirmed()` only while the last ping is a failure (not while waiting or overdue), `False` for other sources; `fault_since()` = the passed deadline while overdue (also never succeeded), `None` on the deadline itself, while waiting/OK, after a failure ping and for other sources; `parse_status` (missing/`ok`/`0` = success, empty/`fail`/`start`/anything else = failure, code kept only if `^[A-Za-z0-9_-]{1,16}$` and not `fail`); `token_fp` stable and token-free; slug → token after the last `_`; `reconcile_token` resets on a missing/other fingerprint; no basis at all → no deadline, waiting; `datetime` values count like ISO strings; source lifecycle (active + timer on setup, ping persists + notifies, unsub → waiting + closed, refused pings, a closed source arms no timer and no longer calls the engine); registry: 5 pings per 10 s per token, rebuild/activate/deactivate/unload/remove. | `test_units` |
 | `core/drivers/*.can_recover` | missing switch / missing+invalid action → `(False, reason)`; the poe_port adapter blocks on no/ambiguous match. | `test_units`, `test_poe` |
 | `config_flow` helpers | `_flatten_sections` (nested→flat, duration dicts stay whole), `_as_list`, `_build_data` (health block per source type incl. heartbeat token/seconds and never `linked_guards`, behaviour per check), `_current_strategy`, `_source_type_of` (three types), `_as_duration`/`_as_seconds`, debounce default per source type (heartbeat 3600 s = the grace) and its replacement on a switch across heartbeat (`_behavior_defaults`); the debounce box goes up to 86400 s for every source type; `_health_defaults` carries no `grace`. | `test_units` |
 | `config_flow` ports YAML | `_parse_ports_yaml`/`_normalize_imported_port`: required `label`/`actuator`/`status_entity`; reject not-a-list / empty / `null` / list-of-scalar / malformed YAML / non-numeric **or negative** timing; trim, scalar→list, missing/empty status→default, int→str. `_ports_to_yaml` round-trips; import **merge** = upsert by `label`, **replace** = overwrite. `_validate_port_identity`: a port gives its id ONE way — an entity (+ optional attribute) or a static label — setting both is rejected (`id_conflict`), and an attribute with no id-entity is rejected (`attribute_needs_entity`). | `test_units` |
@@ -136,7 +141,9 @@ exploratory and true end-to-end live checks. Drive the real flows and the engine
   `recovery_failed` and `no_auto_recovery`, never on `recovery_success` or
   `recovery_blocked`; strategy action + Health Check: a ping within `boot_window` →
   `COOLDOWN`, a job that keeps failing → `ESCALATED` after `max_attempts`; a ping
-  during a snooze is stored and saved while the snooze holds.
+  during a snooze is stored and saved while the snooze holds; a grace that ran out
+  during a snooze alarms right after it (lifted by `unsnooze` or elapsed), with no
+  fresh debounce.
 - **Persistence across restart** *(automated: `tests/test_engine.py`)*: ESCALATED
   stays (still unhealthy) / auto-clears (healthy again); `recover_count`, `fail_count`,
   `last_fail`, `last_recover_driver_result`/`_time`, `last_cycle_start` and `auto` survive; snapshot
@@ -150,13 +157,20 @@ exploratory and true end-to-end live checks. Drive the real flows and the engine
   - *Endpoint*: POST is a success, `GET` and `PUT` → `405` (nothing stored); a bare
     token or another name before the last `_` reach the same guard; unknown token →
     `404`, also before setup (no route); `status=` empty → failure, `TERM` kept as
-    code; `local_only` + non-local (also a cloud connection, an unparsable,
-    `100.64.0.0/10` or global IPv6 address) → `403` and nothing changes, without
-    `local_only` → `200`; the sixth ping in 10 s → `429`; **order**: unknown token from
+    code; `local_only` + a non-local caller → `403` over HTTP and nothing changes —
+    also a cloud connection, an unparsable, a `100.64.0.0/10` (CGNAT, e.g. Tailscale)
+    or a global IPv6 address (the connection's address patched, the real `is_local`
+    decides), while an RFC 1918 or ULA caller gets `200`; without `local_only` → `200`; the sixth ping in 10 s → `429`; **order**: unknown token from
     outside → `404`, a valid token from outside over the limit → `403` with the rate
     counter untouched; a 64 KiB body is not read (same `200`); an exception in
-    `async_handle_ping` → `500` with only 6 token characters in our log; the URL needs
-    no auth while `/api/services/…` still does.
+    `async_handle_ping` → `500` with only 6 token characters in our log, while an
+    aiohttp `HTTPException` keeps its own status (no `500`); the URL needs no auth while
+    `/api/services/…` still does.
+  - *Token secrecy* (invariant 11): two heartbeat guards (notify-only and repairing)
+    go through creation (one at runtime), success and failure pings over HTTP and by
+    service, an overdue alarm, a recovery cycle and a reload; after every step no
+    Necromancer state, no bus event, no notification, no Store blob and no own log
+    line contains the token.
   - *Lifecycle*: two reloads register the view once and leave the token `active`;
     unloaded → `503`, set up again → `200`, entry removed → `404`; guard removed →
     `404` and its blob gone after the next save; a closed source still in the table
@@ -168,7 +182,9 @@ exploratory and true end-to-end live checks. Drive the real flows and the engine
     wake-up; token regenerated in its sleep → old URL `404`, the stale `ESCALATED`
     dropped, `OK` on wake-up; `ESCALATED` + new token → `BLIND` awaiting the first
     success, after `period` + debounce → `problem_detected`; a heartbeat guard with a
-    stale `linked_guards` never joins a group.
+    stale `linked_guards` never joins a group; a heartbeat subentry without a token
+    (broken stored data) gets no route and no engine while the entry and the other
+    guards still load.
   - *Grace = debounce*: overdue → `SUSPECT` for the debounce, a ping in it → `OK`
     silently, the next miss without a ping → `ESCALATED` + `problem_detected`; a
     failure ping from `OK` → `ESCALATED` at once (before any timer), from `SUSPECT`
@@ -181,6 +197,9 @@ exploratory and true end-to-end live checks. Drive the real flows and the engine
     then → `OK`, one alarm; HA `starting` → at started only the rest; strategy
     action, still overdue after the repair → the next cycle only a full debounce
     after the cooldown, also after a reload during the cooldown (no repair loop).
+    *Shorter period by reconfigure*: the last ping stays (no reset, not `blind`);
+    deadline and grace already passed → the alarm as soon as the change is saved;
+    only the deadline passed → `SUSPECT` and the alarm at the new deadline + debounce.
   - *Persistence*: an OK→OK ping reaches the Store after `SAVE_DELAY` without an
     unload (`bind_persist`); ping → reload → state and deadline timer back; the last
     ping before an unload is in the Store and a ping after it gets `503` without
@@ -195,7 +214,8 @@ exploratory and true end-to-end live checks. Drive the real flows and the engine
   `awaiting_first_success` and `health_detail` "Waiting for the first heartbeat.", first
   success → `ok` without `health_detail`, an OK→OK ping leaves the status sensor's
   attributes and `last_updated` untouched, a failure → `last_status`/`last_code` and the
-  failure detail; only failures → not awaiting; `sensor.*_last_heartbeat` only for
+  failure detail; only failures → not awaiting; the `health_detail` attribute keeps the
+  wording of the finding as time passes (a later state write does not re-render it); `sensor.*_last_heartbeat` only for
   heartbeat guards, value = `last_ping`, `next_due` = basis + period (from `armed_at`
   while waiting, `None` after a failure), `period` and `grace` (= the debounce) in
   seconds, refreshed by every ping; a failure ping escalates without a debounce; removed from the registry
@@ -204,12 +224,13 @@ exploratory and true end-to-end live checks. Drive the real flows and the engine
   `tests/suite/test_subentry_flow.py`)*: three source types offered; create shows
   period/local-only (no grace, no entity, no regenerate toggle), strategy default
   `notify`, debounce default 3600, and the URL info step **before** the entry exists
-  with the example `curl -fsS -X POST …`; `period` < 60 s rejected, a `grace` field
+  with its three example calls `example_ok` (`curl -fsS -X POST …`), `example_fail`
+  (`?status=fail`) and `example` (`?status=$?`); `period` < 60 s rejected, a `grace` field
   refused (`InvalidData`); debounce 86400 accepted, 86401 refused; no HA URL → path
   only;
   `get_url` called with `allow_external=not local_only`, `prefer_external=False`,
   `allow_ip=True`; reconfigure without change keeps the token and shows the same URL
-(a stored `grace` is not offered and dropped on save);
+  (a stored `grace` is not offered and dropped on save);
   "Generate a new token" → `heartbeat_url_new` with the new URL, nothing saved before
   submit, then old URL `404`, new URL `200`, status `blind` with
   `awaiting_first_success`; type switch state → heartbeat (new token, `notify`

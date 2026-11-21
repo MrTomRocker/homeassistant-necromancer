@@ -34,7 +34,7 @@ GitHub issues are used to track public bugs. Report a bug by [opening a new issu
 **Great bug reports** tend to have:
 
 - A quick summary and/or background.
-- Steps to reproduce — be specific, and include the guard configuration (Health Source, strategy, behaviour) when relevant.
+- Steps to reproduce — be specific, and include the guard configuration (Health Source, strategy, behaviour) when relevant. For a heartbeat guard leave out the URL: its token is a secret.
 - The relevant `necromancer` log lines (set the logger to `debug` — see below) and the value of `sensor.<guard>_status`.
 - What you expected to happen.
 - What actually happened.
@@ -66,9 +66,18 @@ Additional house rules:
 ## Testing
 
 See [`docs/arch/testing.md`](./docs/arch/testing.md) for the full test concept. In
-short: run the suites under `tests/` (`test_units`, `test_poe`, `test_engine`,
-`test_integration`) against a Home Assistant core checkout, plus the pre-commit
-gates (ruff check/format, `py_compile`, translation symmetry, `hassfest`).
+short, against a Home Assistant core checkout (CI uses the latest stable release):
+
+- run the **pytest suite** under `tests/suite/` — linked into the core checkout as
+  `tests/necromancer/` and run with `python -m pytest tests/necromancer/` (see
+  [`tests/suite/README.md`](./tests/suite/README.md) and
+  [`.github/workflows/test.yaml`](./.github/workflows/test.yaml));
+- run the **in-process scripts** `tests/test_units.py`, `test_poe.py`, `test_engine.py` and
+  `test_integration.py` — each is a plain `python` script with its own `main()`, run with the
+  core checkout on `PYTHONPATH`;
+- pass the pre-commit gates (ruff check/format, `py_compile`, translation symmetry, `hassfest`).
+
+The agent-runnable live checklist is [`docs/arch/AGENT_REGRESSION.md`](./docs/arch/AGENT_REGRESSION.md).
 
 This custom component is developed inside a Home Assistant Core **dev container** with the package mounted live, so edits take effect without a redeploy. The container ships a standalone Home Assistant instance pre-configured for development.
 

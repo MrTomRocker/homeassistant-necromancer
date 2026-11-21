@@ -19,14 +19,17 @@ Diese Checkliste ist dafür gemacht, von einem **Agenten** ausgeführt zu werden
   Persistenz-Kernpfade, Health-Registry-Events, PoE-Pre-Flight. Die `[ ]`-Punkte hier sind der
   Live-Smoke-Test obendrauf.
 - **pytest-Suite** (wie CI in ha-core eingehängt): `cd <ha-core> && python -m pytest tests/necromancer/ -q`
-  — **137 grün**. Deckt Setup/Lifecycle, alle vier Platform-Entities, Config-/Options-/Subentry-Flows,
+  — **181 grün**. Deckt Setup/Lifecycle, alle fünf Platform-Entities (inkl. Last-heartbeat-Sensor), Config-/Options-/Subentry-Flows,
   Operator-Services, die Dormanz von Guards mit deaktiviertem Gerät (DLN7–DLN9) und den
   Heartbeat-Endpunkt über HTTP ab (Antwortcodes, Reihenfolge der Prüfungen, Lebenszyklus, Persistenz).
 - **Test-Helfer-Entities** (Dev-Setup): `input_boolean.test_1..6`, `sim_poe_port`, `sim_device_power`,
   `input_select.test_state`, `input_text.test_note`, `switch.test_template_switch`,
   `binary_sensor.test_reachable`, `sensor.test_device_info`.
-- **Entity-Slugs** (de-Instanz): `sensor.<slug>_status`, `binary_sensor.<slug>_gesundheit`,
-  `switch.<slug>_auto_reparatur`, `button.<slug>_reparieren`; `slug = Name.lower()`.
+- **Entity-Slugs** (de-Instanz): `sensor.<slug>_status`, `binary_sensor.<slug>_health` (der
+  Name ist auch auf Deutsch „Health"), `switch.<slug>_auto_reparatur`, `button.<slug>_reparieren`,
+  `event.<slug>_wiederbelebung`, bei Heartbeat-Guards zusätzlich `sensor.<slug>_letztes_lebenszeichen`;
+  `slug = Name.lower()`. (Englische Instanz: `_health`, `_auto_recovery`, `_revive`, `_recovery`,
+  `_last_heartbeat` — Sprache vorher prüfen.)
 - **Beobachten:** schnelle States (RECOVERING/VERIFY) im **Log** asserten (`N.log()`), langsame
   (SUSPECT/BLIND/COOLDOWN/OK/ESCALATED) per `N.guard("<slug>")`. **Heil-Trick:** Recovery-Aktion macht die
   Health-Entity wieder gesund → VERIFY gelingt; schreibt sie nur `input_text.test_note` → VERIFY-Timeout →
@@ -315,13 +318,13 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
 
 ### Automatisiert statt manuell
 
-- [ ] **AUTO-1 — Automatisierte Suiten laufen grün (33/22/50/12)** · `P0`
+- [ ] **AUTO-1 — Automatisierte Suiten laufen grün (51/22/80/12)** · `P0`
   - **Prüft:** Die vier Real-HA-core-Suiten (`tests.common.async_test_home_assistant`) sind grün und decken PoE resolve/cycle/coalescing/Platzhalter, Engine-State-Machine + Persistenz, Health-Registry-Events inkl. Template-Blind-Erkennung (B3), Linking-Koordination ab.
-  - **Files:** `tests/test_units.py` (33), `test_poe.py` (22), `test_engine.py` (50), `test_integration.py` (7 Test-Funktionen / 12 `ok(...)`-Checks). Health-Tests u. a. `test_health_self_reference_warns`, `test_health_template_all_missing_is_blind`, `test_health_template_partial_missing_warns_only`. Linking-Tests u. a. `test_engine.py::test_linked_follower_recovers_with_leader`, `test_linked_follower_escalates_when_leader_fails`, `test_linked_auto_off_follower_escalates`, `test_leader_stop_does_not_escalate_follower`, `test_debounce_arbitration_second_follows`.
-  - **Treiber:** Aus `<ha-core>`: `PYTHONPATH=<ha-core>:<ha-core>/config python -m pytest tests -q` (in-process, kein laufender Server nötig).
-  - **Assert:** `test_units` 33, `test_poe` 22, `test_engine` 50 passed; `test_integration` grün (7 Test-Funktionen → `12/12 checks passed`). Gesamt **kein** FAIL/ERROR.
+  - **Files:** `tests/test_units.py` (51), `test_poe.py` (22), `test_engine.py` (80), `test_integration.py` (7 Test-Funktionen / 12 `ok(...)`-Checks). Health-Tests u. a. `test_health_self_reference_warns`, `test_health_template_all_missing_is_blind`, `test_health_template_partial_missing_warns_only`. Linking-Tests u. a. `test_engine.py::test_linked_follower_recovers_with_leader`, `test_linked_follower_escalates_when_leader_fails`, `test_linked_auto_off_follower_escalates`, `test_leader_stop_does_not_escalate_follower`, `test_debounce_arbitration_second_follows`.
+  - **Treiber:** Die Skripte haben ein eigenes `main()` (kein pytest): aus dem Repo `for f in test_units test_poe test_engine test_integration; do PYTHONPATH=<ha-core>:<ha-core>/packages/pytest-home-assistant:<repo> <ha-venv>/bin/python tests/$f.py; done` (in-process, kein laufender Server nötig; wie CI).
+  - **Assert:** Schlusszeilen `51 passed, 0 failed` (`test_units`), `22 passed, 0 failed` (`test_poe`), `80 passed, 0 failed` (`test_engine`), `12/12 checks passed` (`test_integration`, 7 Test-Funktionen). Gesamt **kein** FAIL/ERROR.
   - **Cleanup:** —
-  - *Hinweis: Zähler am 2026-10-07 nachgemessen → 33/22/50/12. Die pytest-Suite (137) wird separat in den Voraussetzungen geführt.*
+  - *Hinweis: Zähler am 2026-11-21 nachgemessen → 51/22/80/12. Die pytest-Suite (181) wird separat in den Voraussetzungen geführt.*
 
 - [ ] **AUTO-2 — Gates grün (ruff/format)** · `P1`
   - **Prüft:** Lint-/Format-Gates bestehen für das Necromancer-Paket.
@@ -333,7 +336,7 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
 
 ## Health-Quellen (state/template/heartbeat) · 4 Strategien + Health-Check-Toggle
 
-### Health-Quellen: state_based vs template_based
+### Health-Quellen: state_based vs template_based / heartbeat_based
 
 - [ ] **HQ1 — Source-Step zeigt Radio state/template/heartbeat** · `P0`
   - **Prüft:** Der erste Schritt der Gerät-hinzufügen-Subentry bietet die Zustandsquelle als List-Radio `state_based`/`template_based`/`heartbeat_based` („Lebenszeichen (Ping-URL)“).
@@ -418,7 +421,7 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
 > Slugs (de): `sensor.hbtest_status`, `sensor.hbtest_letztes_lebenszeichen`. Der Aufrufer (Dev-Container) zählt als lokal.
 
 - [ ] **HB1 — Anlegen zeigt die URL vor dem Speichern** · `P0`
-  - **Prüft:** Nach dem notify-Schritt kommt der Info-Schritt `heartbeat_url` mit `url` = `<interne URL>/api/necromancer/heartbeat/hbtest_<64 hex>` und `example` = `curl -fsS -X POST "<url>?status=$?"`; erst dessen Submit legt den Subentry an. Der Device-Step hat **kein** `grace`-Feld; der notify-Schritt schlägt Debounce `3600` vor. Gespeichert: `health={type:heartbeat, token, period:60, local_only:true}` (ohne `grace`), kein `linked_guards`, Debounce `30`.
+  - **Prüft:** Nach dem notify-Schritt kommt der Info-Schritt `heartbeat_url` mit `url` = `<interne URL>/api/necromancer/heartbeat/hbtest_<64 hex>` und den drei Beispielen `example_ok` = `curl -fsS -X POST "<url>"`, `example_fail` = `curl -fsS -X POST "<url>?status=fail"` und `example` = `curl -fsS -X POST "<url>?status=$?"`; erst dessen Submit legt den Subentry an. Der Device-Step hat **kein** `grace`-Feld; der notify-Schritt schlägt Debounce `3600` vor. Gespeichert: `health={type:heartbeat, token, period:60, local_only:true}` (ohne `grace`), kein `linked_guards`, Debounce `30`.
   - **Files:** `config_flow.py` → `async_step_heartbeat_url`, `_heartbeat_url`; `core/health/heartbeat.py` → `ping_path`; pytest `test_heartbeat_create_shows_url_before_creating`.
   - **Treiber:** HB-Setup, vor dem letzten `P(fid,{})` `N.list_subentries(N.hub_id())` prüfen.
   - **Assert:** Vor dem Submit kein Subentry `HBtest`; danach `N.st("sensor.hbtest_status")["state"]=="blind"` mit `attributes.awaiting_first_success==True`, `health_type=="heartbeat"`, `health_detail` = „Wartet auf das erste Lebenszeichen.“ (de); `sensor.hbtest_letztes_lebenszeichen` = `unknown` mit `period==60`, `grace==30` und `next_due` = Anlage + 60 s. Das Token steht in keinem Attribut und nicht in `N.log()` (nur die ersten Zeichen).
@@ -643,7 +646,7 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
   - **Prüft:** Whitelist: `true`/`on`/`1`/`yes`→OK · `false`/`off`/`0`/`no`/`is_state→False`→UNHEALTHY · alles übrige (`'banana'`, `42`, `states(missing)`, `none`, leer, Render-Fehler)→UNKNOWN (kein Recover, kein SUSPECT).
   - **Files:** `core/health/template.py` `_HEALTHY_RESULTS={"true","on","1","yes"}` / `_FAULTY_RESULTS={"false","off","0","no"}`; `evaluate()`: `TemplateError`→UNKNOWN, sonst `str(result).strip().lower()` gegen die zwei Sets, alles übrige→UNKNOWN.
   - **Treiber:** Guard `TplUnknown` mit `source_type:"template_based"`, `health:{template:"{{ states('sensor.does_not_exist') }}"}`, `strategy:"switch"`, `switch_entity:"switch.test_template_switch"`, `behavior:{debounce:5, cooldown:5}`. `N.wait(8)` → `N.guard("tplunknown")`.
-  - **Assert:** `N.guard("tplunknown")[0] == "ok"` (UNKNOWN bleibt OK, kein `suspect`); `binary_sensor.tplunknown_gesundheit` ist NICHT `off`. Gegenprobe: Reconfigure auf `{{ false }}` → nach Debounce `suspect`/`escalated`.
+  - **Assert:** `N.guard("tplunknown")[0] == "ok"` (UNKNOWN bleibt OK, kein `suspect`); `binary_sensor.tplunknown_health` ist NICHT `off`. Gegenprobe: Reconfigure auf `{{ false }}` → nach Debounce `suspect`/`escalated`.
   - **Cleanup:** `N.delete_subentry(entry, sub)`
 
 - [ ] **CC3 — Health-Entität unavailable/unknown (state_based) → UNKNOWN, kein Recover** · `P0`
@@ -732,7 +735,7 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
   - **Prüft:** Submit-Form `{section:{feld:…}}` wird vor Verwendung flachgezogen, sodass der Guard real entsteht (Recover-Step-Sektionen + die noch verschachtelt postenden Testkit-Device-Keys verarbeitet).
   - **Files:** `config_flow_helpers/schemas.py` → `_flatten_sections` `out.update(value)` für jedes dict; aufgerufen in `config_flow.py` `async_step_device` und `async_step_add_port` sowie in `config_flow_helpers/schemas.py` `_build_data`.
   - **Treiber:** `hub,sub=N.create_guard({"source_type":"state_based","name":"FlatDev","health":{"entity_id":"binary_sensor.test_reachable","on_value":["on"],"off_value":["off"]},"mode":"recover","strategy":"switch","switch_entity":"switch.test_template_switch","behavior":{"debounce":5,"cooldown":5}})` — der Device-Step ist FLACH, aber das Testkit postet aus Altgründen noch verschachtelt (`state_check`/`assigned_device`), was `_flatten_sections` hochzieht; die Switch-Step-Sektionen `behavior`/`notification` werden ebenso geflattet.
-  - **Assert:** `N.st("sensor.flatdev_status")` ist nicht `None` (Guard entstand → verschachtelte Werte wurden geflattet/verarbeitet). Der Switch-Wert kam aus der `power`-losen Flat-Form: `N.guard("flatdev")[1]["recover_driver"] == "switch.test_template_switch"` (Status-Sensor-Attr `recover_driver`=`driver.target_info()`). Health beobachtbar: `N.setstate("binary_sensor.test_reachable","off")`; `N.wait(1)`; `N.st("binary_sensor.flatdev_gesundheit")["state"]=="off"`. (Es gibt **kein** `health`-Attribut am Status-Sensor — Attrs sind `attempt/recover_count/fail_count/last_recover/last_fail/recover_driver/last_recover_driver_result/last_recover_driver_time/snooze_until`.)
+  - **Assert:** `N.st("sensor.flatdev_status")` ist nicht `None` (Guard entstand → verschachtelte Werte wurden geflattet/verarbeitet). Der Switch-Wert kam aus der `power`-losen Flat-Form: `N.guard("flatdev")[1]["recover_driver"] == "switch.test_template_switch"` (Status-Sensor-Attr `recover_driver`=`driver.target_info()`). Health beobachtbar: `N.setstate("binary_sensor.test_reachable","off")`; `N.wait(1)`; `N.st("binary_sensor.flatdev_health")["state"]=="off"`. (Es gibt **kein** `health`-Attribut am Status-Sensor — Attrs sind `guard_name`, die Geschwister-Verweise `health_entity/auto_recovery_entity/revive_entity/recovery_event_entity`, `attempt/recover_count/fail_count/last_recover/last_fail/recover_driver/last_recover_driver_result/last_recover_driver_time/snooze_until`, `health_type`, `health_detail` (nur wenn die Quelle eins liefert); bei Heartbeat-Guards zusätzlich `last_status/last_code/awaiting_first_success`.)
   - **Cleanup:** `N.delete_subentry(hub,sub)`; `N.setstate("binary_sensor.test_reachable","on")`.
 
 - [ ] **SF3 — _flatten_sections beim Port-Add (Options-Flow)** · `P1`
@@ -763,8 +766,8 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
 - [ ] **MS1 — Health on/off als Listen: booting∈on→OK, error∈off→UNHEALTHY** · `P1`
   - **Prüft:** Mehrwertige `on_value`/`off_value`-Listen werden korrekt zu Verdikten gemappt.
   - **Files:** `config_flow_helpers/selectors.py` → `_HEALTH_VALUE_SELECTOR=_LiveStateSelector(...,multiple=True)` (genutzt in `config_flow_helpers/schemas.py`), `_watch_fields` (schemas.py) baut `on_value`/`off_value` als Listen; Auswertung in `core/health/entity_state.py` → `evaluate`: `off`-Treffer→`UNHEALTHY`, `on`-Treffer→`OK`, sonst `UNKNOWN`.
-  - **Treiber:** `hub,sub=N.create_guard({"source_type":"state_based","name":"MultiSel","health":{"entity_id":"input_select.test_state","on_value":["online","booting"],"off_value":["offline","error"]},"mode":"notify","behavior":{"debounce":0}})`. Dann `N.call("input_select","select_option",entity_id="input_select.test_state",option="booting")`; `N.wait(1)`; `N.st("binary_sensor.multisel_gesundheit")`. Danach `N.call("input_select","select_option",entity_id="input_select.test_state",option="error")`; `N.wait(1)`; erneut lesen.
-  - **Assert:** `N.st("binary_sensor.multisel_gesundheit")["state"]=="on"` bei `booting` (booting∈on→OK→connectivity-`is_on`); `=="off"` bei `error` (error∈off→UNHEALTHY). (Der Status-Sensor hat **kein** `health`-Attribut; nur das Gesundheit-Binary-Sensor-State ist die Quelle.)
+  - **Treiber:** `hub,sub=N.create_guard({"source_type":"state_based","name":"MultiSel","health":{"entity_id":"input_select.test_state","on_value":["online","booting"],"off_value":["offline","error"]},"mode":"notify","behavior":{"debounce":0}})`. Dann `N.call("input_select","select_option",entity_id="input_select.test_state",option="booting")`; `N.wait(1)`; `N.st("binary_sensor.multisel_health")`. Danach `N.call("input_select","select_option",entity_id="input_select.test_state",option="error")`; `N.wait(1)`; erneut lesen.
+  - **Assert:** `N.st("binary_sensor.multisel_health")["state"]=="on"` bei `booting` (booting∈on→OK→connectivity-`is_on`); `=="off"` bei `error` (error∈off→UNHEALTHY). (Der Status-Sensor hat **kein** `health`-Attribut; nur der State des Health-Binary-Sensors ist die Quelle.)
   - **Cleanup:** `N.delete_subentry(hub,sub)`; `N.call("input_select","select_option",entity_id="input_select.test_state",option="online")`.
 
 - [ ] **MS2 — Port-Status status_on/status_off als Listen** · `P1`
@@ -1014,11 +1017,9 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
 
 ### Hinweis zum doc-internen Zählerstand
 
-- [ ] **DOC-1 — Suite-Zählerstand im Regressions-Doc aktualisieren** · `P2`
-  - **Prüft:** Der Header von REGRESSION.md nennt veraltete Testzahlen und veraltete „lock"-Formulierung.
-  - **Files:** REGRESSION.md Header („51 automatisierte Tests grün") + die Suite-Aufschlüsselungszeile („test_units (18) · test_poe (15) · test_engine (10) · test_integration (8) = 51 grün") + die Zeile mit dem Wort „lock". Aktuell: `test_units=33 · test_poe=20 · test_engine=47 · test_integration=12-checks (7 Funktionen)` → Summe 112; PoE-Per-Port-`Lock` wurde ENTFERNT → durch **Coalescing** (`_inflight`-Task + `asyncio.shield`) ersetzt → „lock/Platzhalter" auf „Coalescing/Platzhalter" umtexten.
-  - **Assert:** Header-/Suite-Aufschlüsselungszeilen auf die aktuellen Zahlen korrigiert (29/16/34/12-checks = 91); die „lock"-Zeile ersetzt „lock" durch „coalescing".
-  - **Cleanup:** —
+- [x] **DOC-1 — erledigt** (2026-11-21): Das frühere `REGRESSION.md` gibt es nicht mehr; die
+  Suite-Zähler stehen nur noch in AUTO-1, GAP-SUITE und den Voraussetzungen oben (51/22/80/12,
+  pytest 181), und „lock" ist dort überall durch **Coalescing** ersetzt (s. GAP-CC6).
 
 ---
 
@@ -1041,7 +1042,7 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
   - **Prüft:** Reconfigure von „Gerät zugewiesen" → „kein Gerät" lässt Gerät und Entities bestehen und setzt lediglich `via_device_id` auf `None`. Kein Geräte-Neuaufbau, keine Namensakrobatik — das Guard-Gerät gehörte immer uns.
   - **Files:** `entity.py` → `NecromancerEntity.__init__` (`via_device_id` nur bei auflösbarem `linked`).
   - **Treiber:** Guard mit zugewiesenem Gerät anlegen (s. DLN1), `device.id` merken, dann Reconfigure-Flow ohne Gerät (`device_id` leer) durchlaufen. `N.wait(3)`; `device_registry/list` + `entity_registry/list`.
-  - **Assert:** Dasselbe Gerät `(necromancer,<sid>)` mit **unveränderter `id`**, jetzt `via_device_id==None`, `name` weiterhin der Guard-Name; die 4–5 Entities hängen unverändert daran (gleiche `entity_id`s).
+  - **Assert:** Dasselbe Gerät `(necromancer,<sid>)` mit **unveränderter `id`**, jetzt `via_device_id==None`, `name` weiterhin der Guard-Name; die 3–6 Entities hängen unverändert daran (gleiche `entity_id`s).
   - **Cleanup:** `N.delete_subentry(eid, sid)`
 
 - [ ] **DLN3 — Guard-Rename zieht den Device-Namen nach** · `P0`
@@ -1279,7 +1280,7 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
 - [ ] **SVC-4 — Response-Services `check_health`/`wait_for_health`** · `P1`
   - **Prüft:** `necromancer.check_health` liefert (response-only) den aktuellen Health State des Guards (`{"health": ...}` via `engine.current_health()`); `necromancer.wait_for_health` wartet bis Health=OK oder Timeout und liefert `{"health", "timed_out", "waited_s"}` (eigener Waiter, nicht das VERIFY-Event). `wait_for_health` re-nutzt den Health Check des Guards; `check_first` (default an) prüft sofort, ohne Default-Timeout greift `boot_window`.
   - **Files:** `__init__.py` → `_check_health` (`SupportsResponse.ONLY`), `_wait_for_health` (`SupportsResponse.ONLY`); `core/engine.py` → `current_health` `async_service_wait_health`; `services.yaml` `check_health`/`wait_for_health`.
-  - **Treiber:** `N.call("necromancer","check_health",entity_id="sensor.<slug>_status",return_response=True)`; Health brechen + heilbares `*_check`-Guard → `N.call("necromancer","wait_for_health",entity_id="sensor.<slug>_status",timeout=30,return_response=True)`.
+  - **Treiber:** `N.call("necromancer","check_health",guard="sensor.<slug>_status",return_response=True)`; Health brechen + heilbares `*_check`-Guard → `N.call("necromancer","wait_for_health",guard="sensor.<slug>_status",timeout=30,return_response=True)` (das Schema verlangt `guard`, nicht `entity_id`).
   - **Assert:** `check_health`-Response `health` in `("ok","unhealthy","unknown")`; `wait_for_health`-Response hat `health`/`timed_out`/`waited_s`; pytest `test_check_health_returns_verdict`, `test_wait_for_health_already_ok_returns_at_once`, `test_wait_for_health_heals_during_wait`, `test_wait_for_health_timeout_defaults_to_boot_window`.
 - [ ] **EVT-1 — Recovery-Event** · `P1`
   - **Prüft:** `event.<slug>_…` feuert `recovered` (Erfolg), `escalated` (Aufgabe nach max_attempts), `blocked` (Pre-Flight, Ziel fehlt). Nur Recover-Guards; notify-only hat keins.
@@ -1432,7 +1433,7 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
   - **Cleanup:** —
 
 - [ ] **GAP-SUITE — Aktuelle Suite-Zählungen stimmen (Doc-Drift gegen Code)** · `P2`
-  - **Prüft:** Die vier In-Process-Suiten melden die aktuellen Counts (units=29, poe=16, engine=34, integration=12-Checks); zusätzlich die pytest-Suite `tests/components/necromancer/` (72) via `pytest tests/components/necromancer/`.
-  - **Treiber:** je `python tests/test_units.py`, `…/test_poe.py`, `…/test_engine.py`, `…/test_integration.py` (aus `<ha-core>`, PYTHONPATH gesetzt); `<ha-venv>/bin/python -m pytest tests/components/necromancer/`.
-  - **Assert:** Schlusszeilen `33 passed`, `20 passed`, `47 passed`, `12/12 checks passed`, `81 passed` (jeweils 0 failed).
+  - **Prüft:** Die vier In-Process-Suiten melden die aktuellen Counts (units=51, poe=22, engine=80, integration=12 Checks); zusätzlich die pytest-Suite (181), in `<ha-core>` als `tests/necromancer/` eingehängt (wie CI).
+  - **Treiber:** die Skript-Schleife aus AUTO-1; dazu aus `<ha-core>`: `<ha-venv>/bin/python -m pytest tests/necromancer/ -q`.
+  - **Assert:** Schlusszeilen `51 passed`, `22 passed`, `80 passed`, `12/12 checks passed`, `181 passed` (jeweils 0 failed). Bei neuen Tests die Zähler hier, in AUTO-1, in den Voraussetzungen und in `testing.md` §2 nachziehen.
   - **Cleanup:** —

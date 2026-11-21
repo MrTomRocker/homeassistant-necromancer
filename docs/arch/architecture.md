@@ -132,7 +132,8 @@ all along. "Completely silent" and "carried over verbatim" therefore hold for th
 engine part of the blob only.
 
 HA core makes this our job. Disabling a device cascades **only into the entity
-registry** (our five view-entities get `disabled_by: device`); core neither unloads
+registry** (our five view-entities — six for a heartbeat guard — get
+`disabled_by: device`); core neither unloads
 the subentry nor signals the integration, and the developer docs define no mechanism
 for it. Without the handling below an engine keeps running headlessly — still
 power-cycling real hardware, while its `auto` switch and recover button are gone, so
@@ -177,24 +178,34 @@ subscribed entity's `async_write_ha_state`; HA then reads the entity's propertie
 `core/engine.py` runs a fixed state machine per guard. States
 (`sensor.<guard>_status`):
 
+```mermaid
+stateDiagram-v2
+    [*] --> OK
+    OK --> SUSPECT: health turns faulty (heartbeat#58; deadline passed or failure ping)
+    OK --> BLIND: health unknown
+    SUSPECT --> OK: recovers within debounce (blip)
+    SUSPECT --> BLIND: health unknown
+    SUSPECT --> ESCALATED: auto-recovery off, or notify-only
+    SUSPECT --> RECOVERING: still faulty after debounce — a confirmed failure (heartbeat failure ping)#58; at once
+    BLIND --> OK: health returns
+    BLIND --> SUSPECT: faulty again
+    RECOVERING --> VERIFY: action ran (Health Check on)
+    RECOVERING --> COOLDOWN: action ran ok (Health Check off)
+    RECOVERING --> ESCALATED: blocked, or driver reports failed
+    VERIFY --> COOLDOWN: healthy within boot window
+    VERIFY --> RECOVERING: retry (attempts left)
+    VERIFY --> ESCALATED: out of attempts
+    COOLDOWN --> OK: healthy after cooldown
+    COOLDOWN --> SUSPECT: faulty again
+    ESCALATED --> OK: health returns (or necromancer.reset)
+    OK --> SNOOZED: necromancer.snooze (from any state outside a recovery cycle)
+    SNOOZED --> OK: unsnooze / snooze elapsed
 ```
-        ┌──────────────────────────── healthy again ───────────────────────────┐
-        ▼                                                                        │
-   ┌────────┐  unhealthy   ┌─────────┐  debounce   ┌────────────┐  driver.recover()
-   │   OK   │ ───────────▶ │ SUSPECT │ ──────────▶ │ RECOVERING │ ──────────────┐
-   └────────┘              └─────────┘              └────────────┘               │
-        ▲                       │ healthy                                        ▼
-        │                       └─────────▶ OK                          ┌────────────────┐
-        │                                                               │ VERIFY         │
-   ┌──────────┐  cooldown over   ┌──────────┐   health OK ◀─────────────│ (boot_window)  │
-   │ COOLDOWN │ ◀────────────────│ (success)│                           └────────────────┘
-   └──────────┘                  └──────────┘                                  │ timeout
-        │ still unhealthy                                                       ▼
-        └─────────▶ SUSPECT                                   retry  ┌────────────────────┐
-                                                              ◀──────│ attempt < max?     │
-                                          ESCALATED ◀── no ─────────│                    │
-                                                                     └────────────────────┘
-```
+
+A confirmed failure takes the same exits from `SUSPECT` as an elapsed debounce
+(recovery, or `ESCALATED` for notify-only / auto-off), just without the wait — see
+*A confirmed verdict skips the debounce* below. `SNOOZED` can be entered from any
+state while no recovery cycle runs (`snooze` is refused during one).
 
 **Blind (health unknown while idle).** When health reads `UNKNOWN` — the source is
 unavailable or a template render error — while the guard is *idly* monitoring
@@ -214,8 +225,9 @@ never follows a linked-group repair. Recovering *now* stays the `button.<guard>_
 arming the `switch.<guard>_auto_recovery`. A manual recover press **lifts an active snooze**
 (an explicit "fix it now" overrides the suspension) but is **ignored while the guard is
 busy or following a linked partner's repair** — interrupting would reset `attempt`
-mid-flight or start a competing double-cycle. `reset`/`snooze`/`unsnooze`/`notify_guard` are **entity** services
-on the sensor platform (per guard / device / area); `snooze_all` + `unsnooze_all` are
+mid-flight or start a competing double-cycle. `reset`/`snooze`/`unsnooze`/`notify_guard` (and
+`heartbeat_ping` for heartbeat guards, §9) are **entity** services on the sensor platform
+(per guard / device / area); `snooze_all` + `unsnooze_all` are
 **domain** services (no target, every guard — "maintenance mode"; busy guards skipped
 best-effort) registered in `__init__` alongside `repair_poe_port`.
 
@@ -323,7 +335,8 @@ to the source (`bind_persist`), since a source can change state the engine never
 sees as a transition (an OK→OK ping). The fabric's `_poe_cache` is restored too, so a `poe_port` guard
 keeps its last-known fallback port across a reboot. The display entities
 (`sensor.*_status`, `binary_sensor.*_health`, `switch.*_auto_recovery`,
-`button.*_revive`) are **pure view**; the `Store` is the source of truth.
+`button.*_revive`, `event.*_recovery` and a heartbeat guard's `sensor.*_last_heartbeat`)
+are **pure view**; the `Store` is the source of truth.
 
 **The reason behind an alarm.** On every state change the engine reads
 `health.detail()` synchronously and keeps the rendered text (`health_detail`), so
@@ -373,8 +386,8 @@ cancels the timer and closes the source: a ping that races a reload is refused
 retries and the next source gets it. The full token never appears in logs,
 attributes or `describe()` (just `heartbeat`).
 
-**Grace = debounce.** The source has no grace of its own (healthchecks.io's
-"period + grace"): it turns UNHEALTHY at `basis + period`, the engine enters
+**Grace = debounce.** The source has no grace of its own (no separate
+"period + grace" pair): it turns UNHEALTHY at `basis + period`, the engine enters
 `SUSPECT` and waits its normal `debounce`, and a late success in that window ends
 it with no notification; after the debounce the normal reaction follows. The
 debounce counts from the deadline (`fault_since()`, §3), not from the moment the
@@ -587,7 +600,8 @@ follow — e.g. a *ping* guard and a *lamps-unavailable* guard on the same Hue b
 - **Heartbeat guards never link.** `_is_recover` (setup closure) excludes
   `health.type == "heartbeat"`, like notify-only guards, so a stale `linked_guards`
   is ignored at runtime. A heartbeat leader with a job restart would hold every auto
-  partner for up to `max_attempts × boot_window` (up to 2 × 1 h), during which a
+  partner for up to `max_attempts × boot_window` (by default 2 × up to 1 h, at most
+  10 × 1 h), during which a
   real partner outage goes unnoticed — and a job restart rarely fixes a cause shared
   with a device. The flow agrees (§8): `_recover_guards` leaves heartbeat guards out
   of the pick list, the default and the unlink diff, `_with_link` adds no link
@@ -683,10 +697,10 @@ is no separate "mode" field — the notify-vs-recover choice *is* the strategy c
   (`/api/necromancer/heartbeat/<slugify(name)>_<token>`). `prefer_external=False` is
   explicit because with SSL `get_url` would otherwise prefer the external URL,
   which contradicts `local_only`. On `NoURLAvailableError` only the path is shown;
-  the step text says to put the HA address in front. URL and the example call
-  (`curl -fsS -X POST "<url>?status=$?"` — the endpoint takes POST only) are **only
-  placeholders** — a literal brace in the
-  translation would break the ICU rendering.
+  the step text says to put the HA address in front. The URL and three example calls
+  — `example_ok` (`curl -fsS -X POST "<url>"`), `example_fail` (`…?status=fail`) and
+  `example` (`…?status=$?`); the endpoint takes POST only — are **only placeholders**:
+  a literal brace in the translation would break the ICU rendering.
 - **Switching away from heartbeat** needs no extra step: the reconfigure source
   step’s field description says the URL becomes invalid (senders get `404`).
 - **Per-type defaults.** The strategy default is `notify` for a new heartbeat guard
@@ -796,7 +810,10 @@ build a second, competing device. An assigned id that no longer resolves is deli
 `link_device_missing` repair instead. `_reconcile_devices` drops any device of ours that
 no longer belongs to a live guard.
 
-The status sensor's attributes are intentionally lean — `attempt`, `recover_count`,
+The status sensor's attributes are intentionally lean — `guard_name` (the subentry
+title, for generic dashboards), the live-resolved sibling entity_ids `health_entity` /
+`auto_recovery_entity` / `revive_entity` / `recovery_event_entity` (`None` where a
+notify-only guard has none), `attempt`, `recover_count`,
 `last_recover`, `fail_count`, `last_fail`, `recover_driver` (the resolved target),
 `last_recover_driver_result` (the recovery driver's own `good`/`failed` verdict for the
 last attempt, distinct from the overall guard state) and `last_recover_driver_time`,
@@ -874,8 +891,10 @@ Health Check, so a recovery script can poll Health out-of-band — and `heartbea
 ```
 __init__.py        setup: build one DeviceEngine per device subentry, inject
                    ports into poe_port guards, resolve link groups, wire the PoE
-                   fabric + repair_poe_port service, reconcile devices/entities, Store;
-                   heartbeat token table per entry (+ dormant-ping closure)
+                   fabric, reconcile devices/entities, Store; heartbeat token
+                   table per entry (+ dormant-ping closure); domain services
+                   repair_poe_port, snooze_all/unsnooze_all, check_health/
+                   wait_for_health and the admin-only heartbeat_url
 heartbeat_view.py  HeartbeatView: /api/necromancer/heartbeat/{slug}, no auth,
                    token -> local_only -> rate limit -> query, honest status codes
 core/engine.py          the state machine, timing, persistence, health wiring (delegates
@@ -891,8 +910,9 @@ core/links.py           guard-link grouping (connected components / clique closu
 core/poe.py             PoE fabric: shared id→port resolver, per-port status + coalesced
                    in-flight cycle, repair service
 entity.py          base entity (DeviceInfo, unique_id, link handling)
-sensor/binary_sensor/switch/button/event.py   the view entities (+ per-guard
-                   services on the sensor platform: reset/snooze/unsnooze)
+sensor/binary_sensor/switch/button/event.py   the view entities (sensor.py also
+                   holds LastHeartbeatSensor + the per-guard services on the sensor
+                   platform: reset/snooze/unsnooze/notify_guard/heartbeat_ping)
 core/actions.py         validate + run user action sequences (Script helper)
 core/notify.py          resolve localized message + run the notify action (detached)
 core/health/            base, entity_state, template, heartbeat (pure functions +

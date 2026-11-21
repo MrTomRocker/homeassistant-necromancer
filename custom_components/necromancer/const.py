@@ -187,7 +187,7 @@ CONF_NOTIFY_FOLLOWER_SUCCESS = "notify_follower_success"
 
 # defaults (seconds, except counts/bools)
 DEFAULT_DEBOUNCE = 120
-# A heartbeat's debounce is its grace after a missed ping (1 h, as healthchecks.io):
+# A heartbeat's debounce is its grace after a missed ping (1 h by default):
 # a job's runtime varies, and a sender's retries bridge short HA outages.
 DEFAULT_HEARTBEAT_DEBOUNCE = 3600
 # Upper bound of the debounce box for every guard: a day covers a weekly job's

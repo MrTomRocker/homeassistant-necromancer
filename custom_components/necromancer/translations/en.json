@@ -186,7 +186,7 @@
             "off_value": "e.g. `off`, `unavailable`.",
             "template": "Return `true`, `on`, `1` or `yes` for OK; `false`, `off`, `0` or `no` for faulty — e.g. a comparison like CPU below 90, or `is_state(...)`. Anything else (`unavailable`, `unknown`, `none`, a blank result, or a render error) counts as `unknown` and triggers nothing (no false alarm). Re-checked when referenced entities change. Point it at the monitored device — not at this guard's own status/health entities, or you create a feedback loop.",
             "period": "How often the job reports success, e.g. 1 day for a nightly backup. At least 1 minute.",
-            "local_only": "On (default): only senders in private networks (LAN, VPN, this host) are accepted; others get 403. Turn it off only if a sender outside your network must report.",
+            "local_only": "On (default): only senders in private networks (LAN, VPNs with private addresses, this host; not Tailscale's 100.64.x) are accepted; others get 403. Turn it off only if a sender outside your network must report.",
             "regenerate_token": "Issues a new secret URL. The old URL stops working (404) once you save — use this if the URL leaked.",
             "device_id": "Optional. Links this Guard's own device to the chosen Home Assistant device, so the Guard is listed as connected via it. It also unlocks reloading that device's integration after a recovery."
           }
@@ -674,7 +674,7 @@
       "message": "{entity_id} is not a Necromancer guard status entity — pass the guard's status sensor, the guard_entity_id a recovery action receives."
     },
     "not_a_heartbeat_guard": {
-      "message": "{entity_id} is not a heartbeat guard — this action needs a guard whose health source is the heartbeat."
+      "message": "{entity_id} is not a heartbeat guard — this action needs a guard whose Health Source is the heartbeat."
     },
     "heartbeat_not_running": {
       "message": "The heartbeat of {name} is not running right now (Necromancer is reloading) — try again in a moment."

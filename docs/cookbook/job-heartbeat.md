@@ -155,7 +155,8 @@ Errors (`403`, gave up, …) land in `journalctl -u heartbeat-ping-nightly-backu
 ## How it works
 
 - **Deadline** = the last successful ping + **period**. A new guard waits grey (`blind`,
-  *"Waiting for the first heartbeat."*) until its first successful ping.
+  *"Waiting for the first heartbeat."*) for its first successful ping — up to its first deadline
+  (creation + period); without a ping by then it turns `suspect` like an overdue job.
 - When the deadline passes, the guard turns `suspect` for its **Wait before reacting** — the grace
   for a late run. A ping inside the grace ends it silently; after it, the notify action runs:
   *"Nightly Backup: Problem detected. No heartbeat for 26 hours, expected every 24 hours."*
