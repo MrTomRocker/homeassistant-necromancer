@@ -76,7 +76,7 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
   - **Prüft:** Bei 0 Live-Matches vertraut die Fabric dem gecachten Port NUR, wenn dieser gerade nichts meldet; meldet er eine andere Live-id, wird der Cache-Eintrag verworfen und mit „no port matches" abgelehnt (kein Reboot des unschuldigen Nachbarn).
   - **Files:** `custom_components/necromancer/core/poe.py` → `resolve_with_reason`: Zweig `port = self._by_label(self._cache.get(target))` → `occupant = _norm(self._port_id(port))`; `occupant is None` → return cached port (WARNING „not in any port's neighbour data — last-known port"); sonst WARNING „last-known port %r for %r now serves %r — dropping stale cache", `self._cache.pop(target, None)`, return `None, "no port matches '…'"`. Bestätige, dass es KEINEN unbedingten `return port` mehr gibt.
   - **Treiber:** Referenz-Unittest fahren: `Suite `tests/test_poe.py` fahren (Voraussetzungen), Zeile `ok    test_resolve_last_known_skips_occupied_port` suchen`
-  - **Assert:** Zeile `ok    test_resolve_last_known_skips_occupied_port` UND Suite endet mit `20 passed, 0 failed`. Test (test_poe.py) belegt: A war auf P1 gecacht (`cache={"aa:aa":"P1"}`), `sensor.nb1` meldet jetzt `mac=bb:bb` → `p is None`, `"no port matches" in reason`, `f.cache.get("aa:aa") is None` (stale gedroppt).
+  - **Assert:** Zeile `ok    test_resolve_last_known_skips_occupied_port` UND die Suite endet ohne `failed` (Zähler siehe AUTO-1). Test (test_poe.py) belegt: A war auf P1 gecacht (`cache={"aa:aa":"P1"}`), `sensor.nb1` meldet jetzt `mac=bb:bb` → `p is None`, `"no port matches" in reason`, `f.cache.get("aa:aa") is None` (stale gedroppt).
   - **Cleanup:** — (In-Process-Suite, kein Live-Guard)
 
 - [ ] **B1.2 — Live: gecachter, jetzt fremd-belegter Port wird nicht zyklt** · `P1`
@@ -96,7 +96,7 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
   - **Prüft:** Die nach Leader-Repair gestartete `validate_after_repair` läuft als `engine._cycle_task`, sodass der Busy-Guard greift: ein manueller Recover (Button) mitten im Follower-Verify wird verworfen — kein zweiter, konkurrierender Cycle.
   - **Files:** `custom_components/necromancer/core/links.py` → `on_partner_repair_done`: `eng._cycle_task = eng.hass.async_create_task(self.validate_after_repair(...))`; `validate_after_repair` setzt `GState.VERIFY`; im Zweig „Leader ok, noch unhealthy“ gibt es den Slot vor `_evaluate()` frei (`eng._cycle_task = None`), im `finally` nur `if eng._cycle_task is asyncio.current_task(): eng._cycle_task = None` (ein dort per bestätigtem Befund sofort gestarteter eigener Cycle bleibt erhalten, siehe `test_validate_follower_confirmed_fault_*`). `core/engine.py` → `async_manual_recover`: `if self._busy() or self._following: return` (mid-Follower-Verify deckt der Busy-Guard, ein Button mitten im Folgen eines Linked-Repair der `_following`-Guard); `_busy` = `self._cycle_task is not None and not self._cycle_task.done()`.
   - **Treiber:** Referenz-Engine-Test fahren: `Suite `tests/test_engine.py` fahren (Voraussetzungen), Zeile `ok    test_validate_after_repair_blocks_manual_recover` suchen`
-  - **Assert:** Zeile `ok    test_validate_after_repair_blocks_manual_recover` + Suite `47 passed, 0 failed`. Test (test_engine.py) belegt: während VERIFY `e2._busy()` True, `async_manual_recover()` → `d2.calls == 0` (kein konkurrierender Cycle), nach Heilung `e2.state is GState.COOLDOWN`, `recover_count == 1`, `d2.calls == 0`.
+  - **Assert:** Zeile `ok    test_validate_after_repair_blocks_manual_recover` + Suite ohne `failed` (Zähler siehe AUTO-1). Test (test_engine.py) belegt: während VERIFY `e2._busy()` True, `async_manual_recover()` → `d2.calls == 0` (kein konkurrierender Cycle), nach Heilung `e2.state is GState.COOLDOWN`, `recover_count == 1`, `d2.calls == 0`.
   - **Cleanup:** —
 
 - [ ] **B2.2 — async_stop bricht Follower-Verify ab, keine Eskalation** · `P0`
@@ -144,10 +144,10 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
   - **Assert:** Erster grep liefert KEINE Treffer (kein `partner._following`/`partner._on_partner_repair` mehr — Peers nur über `partner.links.*`). Der einzige verbleibende `_following`-Bezug in core/engine.py ist `self._following` (eigene Property im `_evaluate`) bzw. die Delegator-Property selbst (als `self.links.following`) — kein Fremdzugriff. Zweiter grep zeigt die public `partner.links.*`-Aufrufe.
   - **Cleanup:** —
 
-- [ ] **M1.3 — Alle vier Suiten grün (91) = Verhalten unverändert** · `P0`
+- [ ] **M1.3 — Alle vier Suiten grün = Verhalten unverändert** · `P0`
   - **Prüft:** Die Extraktion ist verhaltenserhaltend — die vollständige In-Process-Suite bleibt grün.
   - **Treiber:** `cd <ha-core> && for t in units poe engine integration; do PYTHONPATH=<ha-core>:<ha-core>/config python tests/test_$t.py 2>&1 | tail -1; done`
-  - **Assert:** Genau diese vier Schlusszeilen: `33 passed, 0 failed` · `20 passed, 0 failed` · `47 passed, 0 failed` · `12/12 checks passed` → Summe 112. Kein `failed`/`FAIL`.
+  - **Assert:** Vier Schlusszeilen wie in AUTO-1 (`57 passed, 0 failed` · `22 passed, 0 failed` · `91 passed, 0 failed` · `12/12 checks passed`). Kein `failed`/`FAIL`.
   - **Cleanup:** —
 
 - [ ] **M1.4 — Live-Smoke: Linking-Verhalten nach Extraktion unverändert** · `P2`
@@ -600,9 +600,9 @@ Priorität: **P0** = nach Refactors zwingend · **P1** = wichtig · **P2** = Kü
 
 - [ ] **NA1 — ActionSelector in Section „Benachrichtigung" (optional)** · `P1`
   - **Prüft:** Notify ist eine optionale Aktions-Sequenz (ActionSelector) in der Section `notification`, KEINE Notify-Ziel-Liste.
-  - **Files:** `config_flow_helpers/schemas.py` `_notification_section` → `vol.Optional(CONF_NOTIFY_ACTION …): selector.ActionSelector()`, Section-Name `SECTION_NOTIFY="notification"`; `const.py` `CONF_NOTIFY_ACTION="notify_action"`.
+  - **Files:** `config_flow_helpers/schemas.py` `_notification_section` → `vol.Optional(CONF_NOTIFY_ACTION …): selector.ActionSelector()` + `vol.Required(CONF_NOTIFY_CLEARED, default=…): selector.BooleanSelector()`, Section-Name `SECTION_NOTIFY="notification"`; `const.py` `CONF_NOTIFY_ACTION="notify_action"`.
   - **Treiber:** `grep -n "ActionSelector" config_flow.py` (mind. die Notify-Section + Strategy-Action-Felder); kein `EntitySelector(domain="notify")` o. ä.
-  - **Assert:** `_notification_section` baut genau ein optionales Feld `notify_action` als `ActionSelector`.
+  - **Assert:** `_notification_section` baut das optionale Feld `notify_action` als `ActionSelector` und das Häkchen `notify_cleared` (`vol.Required`, `BooleanSelector`, Default `True` bei neuem Guard, sonst gespeicherter Wert, fehlend = `False`); keine Notify-Ziel-Liste.
   - **Cleanup:** —
 
 - [ ] **NA2 — `{{ message }}`/`{{ name }}`/`{{ event_text }}`/`{{ event }}` als Variablen verfügbar** · `P0`
@@ -837,8 +837,8 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
 ### P0 — Persistenz (Store)
 
 > Store-Datei: `<ha-core>/config/.storage/necromancer.<entry_id>` (`entry_id` via `N.hub_id()`).
-> Snapshot-Felder (core/engine.py `snapshot`): `state, attempt, recover_count, fail_count, last_recover, last_seen, last_fail, last_recover_driver_result, last_recover_driver_time, last_cycle_start, auto, snooze_until, source`.
-> Restore-Regel (core/engine.py `_apply_persisted`): Stats (`recover_count`/`fail_count`/`last_recover`/`last_seen`/`last_fail`/`last_recover_driver_result`/`last_recover_driver_time`/`last_cycle_start`) + `auto` IMMER; `state` NUR wenn `ESCALATED` (bzw. `SNOOZED`); transiente States werden verworfen und aus Live-Health neu abgeleitet.
+> Snapshot-Felder (core/engine.py `snapshot`): `state, attempt, recover_count, fail_count, last_recover, last_seen, last_fail, last_recover_driver_result, last_recover_driver_time, last_cycle_start, escalated_at, auto, snooze_until, source`.
+> Restore-Regel (core/engine.py `_apply_persisted`): Stats (`recover_count`/`fail_count`/`last_recover`/`last_seen`/`last_fail`/`last_recover_driver_result`/`last_recover_driver_time`/`last_cycle_start`) + `auto` IMMER; `state` NUR wenn `ESCALATED` (mit `escalated_at`; fehlt bei Altbestand → None) (bzw. `SNOOZED`); transiente States werden verworfen und aus Live-Health neu abgeleitet.
 > Speicher ist verzögert (`SAVE_DELAY=5`, const.py) → vor Restart `N.wait(7)` bzw. Unload flusht synchron (`async_unload_entry` → `store.async_save(serialize())`, __init__.py).
 > RESTART-Helfer (Code-/Store-Last neu laden): `pkill -9 -f "[h]omeassistant -c"; relaunch; poll /api/config==RUNNING`.
 
@@ -1311,7 +1311,7 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
   - **Prüft:** Der neue PoE-Unit-Test für B1 ist vorhanden und im Lauf grün (Regressionsanker für die Stale-Cache-Logik).
   - **Files:** `tests/test_poe.py` → `test_resolve_last_known_skips_occupied_port` (asserts `p is None`, `"no port matches"`, `f.cache.get("aa:aa") is None`).
   - **Treiber:** `uv run python` aus `<ha-core>` mit `PYTHONPATH=<ha-core>:<ha-core>/config` → `python tests/test_poe.py`.
-  - **Assert:** Ausgabe enthält `ok    test_resolve_last_known_skips_occupied_port` und Schlusszeile `20 passed, 0 failed`.
+  - **Assert:** Ausgabe enthält `ok    test_resolve_last_known_skips_occupied_port` und eine Schlusszeile ohne `failed` (Zähler siehe AUTO-1).
   - **Cleanup:** —
 
 - [ ] **GAP-B2a — Reload mitten im Recovery-Zyklus eskaliert Follower NICHT (Datei-Marker)** · `P0`
@@ -1325,7 +1325,7 @@ DELETED CLAIMS (alle 3 bestätigt obsolet/fehlplatziert — NICHT wiederhergeste
   - **Prüft:** Beim Teardown wird Follower-State (`following`/`leader`) zurückgesetzt, damit ein neu geladener Guard nicht als „hängender Follower" startet.
   - **Files:** `core/engine.py` → `async_stop` `self.links.reset()`; `core/links.py` → `LinkCoordinator.reset` (`following=False; leader=None`).
   - **Treiber:** Engine-Suite ist der Anker — `python tests/test_engine.py`; relevante Fälle `test_async_stop_cancels_validate_no_escalation`, `test_leader_stop_does_not_escalate_follower`.
-  - **Assert:** Ausgabe enthält `ok    test_async_stop_cancels_validate_no_escalation` und `ok    test_leader_stop_does_not_escalate_follower`; `47 passed, 0 failed`.
+  - **Assert:** Ausgabe enthält `ok    test_async_stop_cancels_validate_no_escalation` und `ok    test_leader_stop_does_not_escalate_follower`; Schlusszeile ohne `failed` (Zähler siehe AUTO-1).
   - **Cleanup:** —
 
 - [ ] **GAP-M1a — GState aus core/state.py ausgelagert, engine re-exportiert weiterhin** · `P0`
