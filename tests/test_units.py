@@ -1382,6 +1382,172 @@ async def test_notify_appends_health_detail(hass, _):
     assert plain == "Problem erkannt.", plain
 
 
+# ---------------- problem_cleared: the "back to normal" toggle + text ----------------
+
+
+async def test_notify_problem_cleared_texts(hass, _):
+    """Spoken duration after "nach" (German dative); no duration -> short text."""
+    from custom_components.necromancer.core.notify import _resolve
+
+    day = 86400
+    cases = [
+        ("en", 26 * 3600, "Back to normal after 26 hours."),
+        ("de", 26 * 3600, "Wieder in Ordnung nach 26 Stunden."),
+        ("de", 3 * day, "Wieder in Ordnung nach 3 Tagen."),  # dative, not "3 Tage"
+        ("en", 3 * day, "Back to normal after 3 days."),
+        ("de", 60, "Wieder in Ordnung nach 1 Minute."),
+        ("de", 3600, "Wieder in Ordnung nach 60 Minuten."),
+        ("xx", 26 * 3600, "Back to normal after 26 hours."),  # English fallback
+    ]
+    for lang, seconds, text in cases:
+        params: dict = {}
+        msg, ev = _resolve(lang, "Backup", "problem_cleared", params, duration=seconds)
+        assert ev == text and msg == f"Backup: {text}", (lang, seconds, msg, ev)
+        assert "duration" not in params, params  # never leaks into the variables
+    # unknown start (stored by an older version) -> the no-duration variant
+    assert _resolve("en", "G", "problem_cleared", {})[1] == "Back to normal."
+    assert _resolve("de", "G", "problem_cleared", {})[1] == "Wieder in Ordnung."
+    assert _resolve("xx", "G", "problem_cleared", {})[1] == "Back to normal."
+    # other events are not affected by the variant table
+    assert _resolve("de", "G", "problem_detected", {})[1] == "Problem erkannt."
+
+
+async def test_notify_problem_cleared_variables(hass, _):
+    """The event is problem_cleared with or without a duration; same variables."""
+    import custom_components.necromancer.core.notify as notify_mod
+
+    full = {
+        "message",
+        "name",
+        "event_text",
+        "event",
+        "attempt",
+        "max",
+        "attempts",
+        "reason",
+        "health_detail",
+    }
+    captured: list[dict] = []
+
+    async def _cap(_hass, _action, _name, variables=None):
+        captured.append(dict(variables or {}))
+        return {}
+
+    orig = notify_mod.async_run
+    notify_mod.async_run = _cap
+    try:
+        action = [{"action": "test.sink"}]
+        await notify_mod.async_notify(
+            hass, "G", action, "problem_cleared", duration=26 * 3600
+        )
+        await notify_mod.async_notify(hass, "G", action, "problem_cleared")
+        await hass.async_block_till_done()
+        assert [v["event"] for v in captured] == ["problem_cleared"] * 2, captured
+        assert all(set(v) == full for v in captured), captured
+        assert captured[0]["message"] == "G: Back to normal after 26 hours."
+        assert captured[1]["message"] == "G: Back to normal."
+    finally:
+        notify_mod.async_run = orig
+
+
+def _section_default(schema_dict: dict, section_key: str, field: str):
+    """The default of `field` inside the section `section_key` of a schema dict."""
+    for key, value in schema_dict.items():
+        if str(key) == section_key:
+            for inner in value.schema.schema:
+                if str(inner) == field:
+                    return inner.default()
+    raise AssertionError(f"{section_key}.{field} not in schema")
+
+
+async def test_notify_cleared_form_defaults(hass, _):
+    """On for a new guard; reconfigure shows the stored value, legacy = off."""
+    sec, key = cf.SECTION_NOTIFY, cf.CONF_NOTIFY_CLEARED
+    assert _section_default(cf._notification_section({}), sec, key) is True
+    legacy = {cf.CONF_BEHAVIOR: {cf.CONF_DEBOUNCE: 30}}
+    d = cf._behavior_defaults(legacy)
+    assert d[key] is False
+    assert _section_default(cf._notification_section(d), sec, key) is False
+    stored = {cf.CONF_BEHAVIOR: {cf.CONF_DEBOUNCE: 30, key: True}}
+    d = cf._behavior_defaults(stored)
+    assert _section_default(cf._notification_section(d), sec, key) is True
+    # every strategy form carries the toggle (None = create -> on)
+    for schema in (
+        cf._switch_schema(),
+        cf._action_schema(),
+        cf._actions_schema(),
+        cf._poe_schema(),
+        cf._notify_schema(),
+    ):
+        assert _section_default(schema.schema, sec, key) is True
+
+
+async def test_build_data_stores_notify_cleared(hass, _):
+    """Always stored as a bool: recover, notify-only and heartbeat guards."""
+    state1 = {
+        cf.CONF_NAME: "N",
+        cf.CONF_SOURCE_TYPE: cf.SOURCE_TEMPLATE,
+        cf.CONF_TEMPLATE: "{{ true }}",
+    }
+    hb1 = {
+        cf.CONF_NAME: "Job",
+        cf.CONF_SOURCE_TYPE: cf.SOURCE_HEARTBEAT,
+        cf.CONF_TOKEN: _HB_TOKEN,
+        cf.CONF_PERIOD: 3600,
+    }
+    recover2 = {
+        cf.CONF_DEBOUNCE: 30,
+        cf.CONF_COOLDOWN: 60,
+        cf.CONF_BOOT_WINDOW: 90,
+        cf.CONF_MAX_ATTEMPTS: 2,
+        cf.CONF_ACTION: [{"action": "test.x"}],
+    }
+    for step1, strategy in (
+        (state1, cf.MODE_NOTIFY),
+        (state1, cf.STRATEGY_ACTION),
+        (hb1, cf.MODE_NOTIFY),
+        (hb1, cf.STRATEGY_ACTION),
+    ):
+        for value in (True, False):
+            step2 = {
+                **recover2,
+                cf.SECTION_NOTIFY: {cf.CONF_NOTIFY_CLEARED: value},
+            }
+            behavior = cf._build_data(step1, step2, strategy)[cf.CONF_BEHAVIOR]
+            assert behavior[cf.CONF_NOTIFY_CLEARED] is value, (strategy, behavior)
+    # a submission without the field (never from the form) stores off, not missing
+    behavior = cf._build_data(state1, {cf.CONF_DEBOUNCE: 30}, cf.MODE_NOTIFY)[
+        cf.CONF_BEHAVIOR
+    ]
+    assert behavior[cf.CONF_NOTIFY_CLEARED] is False
+
+
+async def test_translations_notify_cleared(hass, _):
+    """Every notification section names the toggle and the back-to-normal case."""
+    from pathlib import Path
+
+    base = Path(cf.__file__).resolve().parent.parent / "translations"
+    expect = {
+        "en": ("or is back to normal", "Also notify when it's back to normal"),
+        "de": (
+            "Eskalation oder Entwarnung",
+            "Auch melden, wenn es wieder in Ordnung ist",
+        ),
+    }
+    for lang, (phrase, label) in expect.items():
+        tr = json.loads((base / f"{lang}.json").read_text(encoding="utf-8"))
+        steps = tr["config_subentries"]["device"]["step"]
+        for step in ("switch", "action", "actions", "poe_port", "notify"):
+            sec = steps[step]["sections"]["notification"]
+            desc = sec["description"]
+            assert phrase in desc and "health_detail" in desc, (lang, step)
+            assert sec["data"][cf.CONF_NOTIFY_CLEARED] == label, (lang, step)
+            help_text = sec["data_description"][cf.CONF_NOTIFY_CLEARED]
+            assert "problem_cleared" in help_text, (lang, step)
+            for text in (desc, help_text):
+                assert "{" not in text and "}" not in text, (lang, step)
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 

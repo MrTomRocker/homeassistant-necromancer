@@ -1403,3 +1403,40 @@ async def test_token_never_in_attributes_events_or_notifications(
     for token in (HEARTBEAT_TOKEN, TOKEN_B):
         assert token not in stored
         assert token not in ours
+
+
+@pytest.mark.parametrize("notify_cleared", [True, False])
+async def test_success_ping_after_failure_reports_back_to_normal(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    hass_client_no_auth: ClientFactory,
+    freezer: FrozenDateTimeFactory,
+    sink: list[ServiceCall],
+    notify_cleared: bool,
+) -> None:
+    """Escalated by a failure ping, healthy by a success ping: problem_cleared if on."""
+    guard = _hb(notify_cleared=notify_cleared)
+    guard["behavior"]["notify_action"] = [
+        {
+            "action": "test.sink",
+            "data": {"event": "{{ event }}", "message": "{{ message }}"},
+        }
+    ]
+    entry = await setup_guards(guard)
+    client = await hass_client_no_auth()
+    engine = entry.runtime_data.engines["guard0"]
+    assert (await _ping(client))[0] == 200
+    assert await _ping(client, status="3") == (200, {"health": "unhealthy"})
+    assert engine.state.value == "escalated"
+    await _advance(hass, freezer, 2 * 3600)
+    assert engine.state.value == "escalated"
+
+    assert await _ping(client) == (200, {"health": "ok"})
+    await hass.async_block_till_done()
+    assert engine.state.value == "ok"
+    events = [c.data["event"] for c in sink]
+    if notify_cleared:
+        assert events == ["problem_detected", "problem_cleared"], events
+        assert sink[1].data["message"] == "Job: Back to normal after 2 hours."
+    else:
+        assert events == ["problem_detected"], events

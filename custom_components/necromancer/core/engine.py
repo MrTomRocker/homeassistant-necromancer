@@ -40,6 +40,7 @@ from ..const import (
     CONF_HEALTH_CHECK,
     CONF_MAX_ATTEMPTS,
     CONF_NOTIFY_ACTION,
+    CONF_NOTIFY_CLEARED,
     CONF_NOTIFY_FOLLOWER_SUCCESS,
     CONF_RELOAD_DELAY,
     CONF_RELOAD_ENTRY,
@@ -70,17 +71,18 @@ def reset_engine_verdict(stored: dict) -> dict:
     """Drop a stored verdict judged under a source identity that no longer exists.
 
     Returns a copy of a guard's stored blob with `state` -> ok and `attempt` -> 0
-    (stats, `auto` and `source` kept). A deliberate snooze is kept as is. Used by
-    `_apply_persisted` when `HealthSource.restore()` reports a new identity (a
-    regenerated heartbeat token), and by the heartbeat endpoint for a dormant guard
-    whose token changed in its sleep — there is no engine then, so without this the
-    stale ESCALATED would survive the wake-up (restore() would see a matching
-    fingerprint by then) and the new token would never go grey.
+    and no `escalated_at` (stats, `auto` and `source` kept). A deliberate snooze is
+    kept as is. Used by `_apply_persisted` when `HealthSource.restore()` reports a
+    new identity (a regenerated heartbeat token), and by the heartbeat endpoint for
+    a dormant guard whose token changed in its sleep — there is no engine then, so
+    without this the stale ESCALATED would survive the wake-up (restore() would see
+    a matching fingerprint by then) and the new token would never go grey.
     """
     new = dict(stored)
     if new.get("state") != GState.SNOOZED.value:
         new["state"] = GState.OK.value
         new["attempt"] = 0
+        new.pop("escalated_at", None)
     return new
 
 
@@ -134,6 +136,10 @@ class DeviceEngine:
         # RECOVERING/VERIFY it starts are not: it is the only trace across a
         # reload or restart that we already reacted (see _debounce_anchor).
         self.last_cycle_start: datetime | None = None
+        # When the guard entered ESCALATED (None outside it): the "back to normal
+        # after ..." duration. Persisted with the restored ESCALATED; set and
+        # cleared in _set_state, so every path in or out keeps it right.
+        self.escalated_at: datetime | None = None
         self.auto = bool(behavior.get(CONF_AUTO_RESTART, DEFAULT_AUTO_RESTART))
         # Operator snooze (necromancer.snooze): health ignored until `snooze_until`
         # (re-armed on restart) or unsnooze. Reuses `_unsub_timer` (states are
@@ -146,6 +152,8 @@ class DeviceEngine:
         self._unsub_source: CALLBACK_TYPE | None = None
         self._unsub_driver: CALLBACK_TYPE | None = None
         self._unsub_timer: CALLBACK_TYPE | None = None
+        # A "back to normal" found during bootstrap, sent once HA has started.
+        self._unsub_cleared: CALLBACK_TYPE | None = None
         self._verify_event: asyncio.Event | None = None
         # Independent waiters for the wait_for_health service (kept separate from the
         # engine's own VERIFY event so a service call never clobbers an active cycle).
@@ -199,6 +207,8 @@ class DeviceEngine:
         if data.get("state") == GState.ESCALATED.value:
             self.state = GState.ESCALATED
             self.attempt = int(data.get("attempt", 0) or 0)
+            # None when stored by an older version: the clear then has no duration.
+            self.escalated_at = dt_util.parse_datetime(data.get("escalated_at") or "")
         elif data.get("state") == GState.SNOOZED.value:
             # A snooze is deliberate — restore it; async_start re-arms the
             # remaining time (or resumes immediately if it already elapsed).
@@ -224,6 +234,9 @@ class DeviceEngine:
             else None,
             "last_cycle_start": self.last_cycle_start.isoformat()
             if self.last_cycle_start
+            else None,
+            "escalated_at": self.escalated_at.isoformat()
+            if self.escalated_at
             else None,
             "auto": self.auto,
             "snooze_until": self._snooze_until.isoformat()
@@ -430,6 +443,9 @@ class DeviceEngine:
             self._unsub_driver()
             self._unsub_driver = None
         self._cancel_timer()
+        if self._unsub_cleared:
+            self._unsub_cleared()
+            self._unsub_cleared = None
         if self._cycle_task and not self._cycle_task.done():
             self._cycle_task.cancel()
 
@@ -507,6 +523,10 @@ class DeviceEngine:
         updates).
         """
         if state != self.state:
+            if state == GState.ESCALATED:
+                self.escalated_at = dt_util.utcnow()
+            elif self.state == GState.ESCALATED:
+                self.escalated_at = None
             self.state = state
             LOGGER.debug("%s entered state %s", self.name, state)
             # Read the reason synchronously at the transition, so an alarm sent
@@ -742,10 +762,40 @@ class DeviceEngine:
             self._cancel_timer()
             self._set_state(GState.OK)
         elif self.state == GState.ESCALATED and h == Health.OK:
+            # Health came back by itself (a reset, a repair or a snooze never gets
+            # here): the only place that reports "back to normal", if opted in.
+            since = self.escalated_at
             self.attempt = 0
             self._set_state(GState.OK)
+            if self.behavior.get(CONF_NOTIFY_CLEARED):
+                self._notify_cleared(since)
         else:
             self._emit()
+
+    def _notify_cleared(self, since: datetime | None) -> None:
+        """Send `problem_cleared`, with how long the alarm lasted when known."""
+        params: dict[str, object] = {}
+        if since is not None:
+            params["duration"] = max((dt_util.utcnow() - since).total_seconds(), 0.0)
+        LOGGER.info("%s healthy again, escalation cleared", self.name)
+        if self.hass.state is CoreState.running:
+            self.hass.async_create_task(self._notify("problem_cleared", **params))
+            return
+        # Cleared during bootstrap (restored ESCALATED, health already back): the
+        # notify action may not be registered yet, and a failed send is never
+        # retried. The duration is fixed now; only the send waits for the start.
+        if self._unsub_cleared:
+            self._unsub_cleared()
+
+        @callback
+        def _send_at_started(_hass: HomeAssistant) -> None:
+            self._unsub_cleared = None
+            self.hass.async_create_task(self._notify("problem_cleared", **params))
+
+        LOGGER.debug(
+            "%s: HA not started yet, back-to-normal sent once it is", self.name
+        )
+        self._unsub_cleared = async_at_started(self.hass, _send_at_started)
 
     # ---------- transitions ----------
     def _enter_suspect(self) -> None:

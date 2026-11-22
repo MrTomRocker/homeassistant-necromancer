@@ -44,6 +44,7 @@ from ..const import (
     CONF_LOCAL_ONLY,
     CONF_MAX_ATTEMPTS,
     CONF_NOTIFY_ACTION,
+    CONF_NOTIFY_CLEARED,
     CONF_NOTIFY_FOLLOWER_SUCCESS,
     CONF_OFF_ACTION,
     CONF_OFF_ON_DELAY,
@@ -353,10 +354,12 @@ def _strategy_schema(default: str) -> vol.Schema:
 
 
 def _notification_section(d: dict) -> dict:
-    """The optional alert action, in its own section.
+    """The optional alert action + the "back to normal" toggle, in their own section.
 
     The section heading + description carry the variable hint the ActionSelector
-    can't render itself; the user decides whether/how to notify.
+    can't render itself; the user decides whether/how to notify. The toggle is on
+    for a new guard (`d` is empty then); a reconfigure passes the stored value,
+    which `_behavior_defaults` reads as off for a guard stored without it.
     """
     return _section(
         SECTION_NOTIFY,
@@ -364,7 +367,10 @@ def _notification_section(d: dict) -> dict:
             vol.Optional(
                 CONF_NOTIFY_ACTION,
                 description={"suggested_value": d.get(CONF_NOTIFY_ACTION)},
-            ): selector.ActionSelector()
+            ): selector.ActionSelector(),
+            vol.Required(
+                CONF_NOTIFY_CLEARED, default=d.get(CONF_NOTIFY_CLEARED, True)
+            ): selector.BooleanSelector(),
         },
     )
 
@@ -612,6 +618,7 @@ def _build_data(step1: dict, step2: dict, strategy: str) -> dict:
     behavior = {
         CONF_DEBOUNCE: int(step2[CONF_DEBOUNCE]),
         CONF_NOTIFY_ACTION: step2.get(CONF_NOTIFY_ACTION),
+        CONF_NOTIFY_CLEARED: bool(step2.get(CONF_NOTIFY_CLEARED, False)),
     }
     heartbeat = step1.get(CONF_SOURCE_TYPE) == SOURCE_HEARTBEAT
     if heartbeat:
@@ -737,6 +744,8 @@ def _behavior_defaults(data: dict, source_type: str | None = None) -> dict:
         CONF_COOLDOWN: b.get(CONF_COOLDOWN, DEFAULT_COOLDOWN),
         CONF_MAX_ATTEMPTS: b.get(CONF_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS),
         CONF_NOTIFY_ACTION: b.get(CONF_NOTIFY_ACTION),
+        # Stored without the key = a guard from before the toggle: it stays silent.
+        CONF_NOTIFY_CLEARED: bool(b.get(CONF_NOTIFY_CLEARED, False)),
     }
 
 

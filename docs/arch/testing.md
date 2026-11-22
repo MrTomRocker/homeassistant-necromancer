@@ -71,11 +71,11 @@ one of them:
 ## 2. Level 1 — unit (pure logic / real `hass`)
 
 Fast, deterministic. Three runnable in-process modules cover this level today (run
-them with the dev venv, see §5): **`tests/test_units.py`** (52), **`tests/test_poe.py`**
-(22), **`tests/test_engine.py`** (80); a fourth script, **`tests/test_integration.py`**
+them with the dev venv, see §5): **`tests/test_units.py`** (57), **`tests/test_poe.py`**
+(22), **`tests/test_engine.py`** (91); a fourth script, **`tests/test_integration.py`**
 (12 checks), covers the health-registry robustness path (disable / rename / remove)
 and PoE pre-flight blocking against a real `hass` (§3). On top sits a **pytest suite
-on HA's native test harness** (`tests/suite/`, 181 tests) that automates Level 2
+on HA's native test harness** (`tests/suite/`, 188 tests) that automates Level 2
 in-process — see §3. In a core checkout it is linked to `tests/necromancer/` (under
 `tests/` but not `tests/components/`, so only core's `tests/conftest.py` applies) and
 run via `pytest tests/necromancer/`, as CI does. Each row maps to an invariant:

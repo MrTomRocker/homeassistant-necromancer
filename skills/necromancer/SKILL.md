@@ -56,7 +56,7 @@ to do in the UI. Read the matching reference before you act:
 | `recovering` | the recovery is running |
 | `verify` | waiting up to the boot window for health to come back |
 | `cooldown` | recovered, short pause |
-| `escalated` | needs a human: attempts used up, recovery blocked, auto-recovery off, a linked repair failed, or a notify-only guard found a problem. Clears itself to `ok` when health returns |
+| `escalated` | needs a human: attempts used up, recovery blocked, auto-recovery off, a linked repair failed, or a notify-only guard found a problem. Clears itself to `ok` when health returns (and reports `problem_cleared` if the guard's back-to-normal checkbox is on) |
 | `snoozed` | suspended by `necromancer.snooze`, resumes at `snooze_until` |
 
 An unknown verdict is never a fault. Exception by design: an entity-state guard that lists
@@ -118,7 +118,14 @@ actions:
       message: "{{ state_attr('sensor.hue_bridge_status', 'guard_name') }} needs attention."
 ```
 
-**Back to normal:** a state trigger `from: escalated` `to: ok`. There is no separate event.
+**Back to normal:** for a message on the guard's own notify channel, tick *Also notify when it's
+back to normal* in the guard's *Notification* section (`notification.notify_cleared`). An
+escalated guard whose health returns **by itself** then sends `event: problem_cleared`,
+"<name>: Back to normal after 26 hours." (the time since the escalation; "Back to normal." when
+that is unknown). On for new guards, off for existing guards until ticked. No such message after
+`necromancer.reset`, after a successful repair (that sends `recovery_success`) or when a snooze
+ends. For anything else (a light, another channel) use a state trigger `from: escalated`
+`to: ok`. There is no recovery event for it.
 
 **Outcome of a recovery cycle:** `event.received` on the recovery event entity (read it from
 `recovery_event_entity`) with `options: {event_type: [...]}`. Types: `recovered`, `escalated`
@@ -128,9 +135,9 @@ not found; a config problem). It does not fire when the guard escalates without 
 **The guard's notify action** gets `message`, `name`, `event_text`, `event`, `attempt`, `max`,
 `attempts`, `reason`, `health_detail`; unused ones are `""`. For built-in alerts `event` is
 `problem_detected`, `recovery_attempt`, `recovery_success`, `recovery_failed`,
-`recovery_blocked`, `no_auto_recovery` or `linked_repair_failed`, and `message` is
-"<name>: <event_text>". For `necromancer.notify_guard` `event` is the caller's value and
-`message` is the caller's text without the name, so a notify action that branches on `event`
+`recovery_blocked`, `no_auto_recovery`, `linked_repair_failed` or `problem_cleared`, and
+`message` is "<name>: <event_text>". For `necromancer.notify_guard` `event` is the caller's value
+and `message` is the caller's text without the name, so a notify action that branches on `event`
 needs a default branch.
 
 **A recovery action** (strategies *Run an action*, *Off/on actions*) gets `attempt`, `max`,

@@ -27,7 +27,12 @@ import voluptuous as vol
 
 from homeassistant.core import HomeAssistant
 
-from ..const import DETAIL_CODE_PHRASES, DETAIL_MESSAGES, NOTIFY_MESSAGES
+from ..const import (
+    DETAIL_CODE_PHRASES,
+    DETAIL_MESSAGES,
+    NOTIFY_MESSAGES,
+    NOTIFY_MESSAGES_NO_DURATION,
+)
 from .actions import async_run
 
 LOGGER = logging.getLogger(__name__)
@@ -74,7 +79,7 @@ def _format_duration(lang: str, seconds: float, *, dative: bool = False) -> str:
     """A TTS-friendly duration: minutes under 2 h, hours under 2 days, else days.
 
     Rounded to the unit, at least 1. German needs the case of the preposition in
-    front of it: `dative` for "seit"/"vor" ("seit 3 Tagen", "vor 1 Tag"), the
+    front of it: `dative` for "seit"/"vor"/"nach" ("seit 3 Tagen", "vor 1 Tag"), the
     default accusative for "alle" ("alle 7 Tage"). Like `_add_attempts`.
     """
     seconds = max(float(seconds), 0.0)
@@ -132,14 +137,21 @@ def detail_text(hass: HomeAssistant, detail: tuple[str, dict] | None) -> str:
     return render_detail(_lang(hass), detail)
 
 
-def _resolve(lang: str, name: str, key: str, params: dict) -> tuple[str, str]:
+def _resolve(
+    lang: str, name: str, key: str, params: dict, *, duration: float | None = None
+) -> tuple[str, str]:
     """Return (message, event_text) for `key` in `lang` (adds the `attempts` phrase).
 
     A non-empty `health_detail` is appended as a second sentence; the `event` key
     itself stays unchanged, so automations branching on it see no difference.
+    `duration` (raw seconds) fills a `{duration}` as spoken text; without one, an
+    event that has a no-duration text (`NOTIFY_MESSAGES_NO_DURATION`) uses that.
     """
-    messages = NOTIFY_MESSAGES.get(lang, NOTIFY_MESSAGES["en"])
-    template = messages.get(key) or NOTIFY_MESSAGES["en"].get(key, key)
+    table = NOTIFY_MESSAGES
+    if duration is None and key in NOTIFY_MESSAGES_NO_DURATION["en"]:
+        table = NOTIFY_MESSAGES_NO_DURATION
+    messages = table.get(lang, table["en"])
+    template = messages.get(key) or table["en"].get(key, key)
     _add_attempts(lang, params)
     # German needs the dative after "nach" ("nach 2 Versuchen"); the `attempts`
     # action variable keeps the plain form, so this stays a template-only key.
@@ -151,6 +163,9 @@ def _resolve(lang: str, name: str, key: str, params: dict) -> tuple[str, str]:
             if lang == "de"
             else params["attempts"]
         )
+    if duration is not None:
+        # After "nach" ("Wieder in Ordnung nach 26 Stunden"): dative in German.
+        fmt["duration"] = _format_duration(lang, duration, dative=True)
     try:
         event_text = template.format(name=name, **fmt)
     except (KeyError, IndexError):
@@ -167,9 +182,14 @@ async def async_notify(
     key: str,
     **params: object,
 ) -> None:
-    """Resolve the message for `key` in the active language and run the action."""
+    """Resolve the message for `key` in the active language and run the action.
+
+    A `duration` param (raw seconds) only feeds the text and is never passed to
+    the action, so the documented variable set stays the same for every event.
+    """
     lang = _lang(hass)
-    message, event_text = _resolve(lang, name, key, params)
+    duration = params.pop("duration", None)
+    message, event_text = _resolve(lang, name, key, params, duration=duration)
     LOGGER.debug("Notify %s: %s", name, message)
 
     if not action:

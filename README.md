@@ -131,7 +131,7 @@ smart plug, a PoE camera, a cloud bridge or a nightly backup — all guarded wit
 🤝 **Coordinate & alert**
 
 - 🔗 **Guards cooperate** — link guards that share a root cause (one repairs, the rest follow), or stage cheap fixes under a **supervisor** guard that escalates to a heavier one.
-- 🛎️ **Notifications are yours** — every problem / recovery / escalation runs an action *you* define (push, TTS, a script); a guard can even push its own progress messages mid-recovery via `necromancer.notify_guard`.
+- 🛎️ **Notifications are yours** — every problem / recovery / escalation (and, if you like, the all-clear) runs an action *you* define (push, TTS, a script); a guard can even push its own progress messages mid-recovery via `necromancer.notify_guard`.
 
 ⚙️ **Operate & integrate**
 
@@ -333,7 +333,9 @@ A few consequences worth knowing:
 - Retries are **back-to-back** — only the recovery action's own runtime separates them. The
   "pause after an attempt" is the cooldown, which happens *after success*, not between retries.
 - **Escalation** (`escalated`) is the dead end: the guard has given up (or recovery was blocked, or
-  auto-recovery is off). It clears itself back to `ok` automatically the moment health returns.
+  auto-recovery is off). It clears itself back to `ok` automatically the moment health returns —
+  with *Also notify when it's back to normal* ticked, the guard tells you (see
+  [Notifications](#notifications)).
 - **Auto-recovery off** (the per-guard switch) means *off*: the guard still detects and escalates,
   but never touches anything — not its own recovery, and not following a linked partner (see below).
 - The **manual recover button** forces a cycle right now, bypassing both the debounce and the
@@ -486,7 +488,10 @@ trying — auto-recovery off, a notify-only guard, a failed linked repair — fi
 every escalation, use a state trigger on `sensor.<guard>_status` `to: escalated`.
 
 Or tell yourself when an escalated guard is **back to normal** — e.g. the backup finally pinged
-again, or you fixed the device by hand. Trigger on the status sensor:
+again, or you fixed the device by hand. For a message on the guard's own notify channel, the
+simplest way is the checkbox *Also notify when it's back to normal* (see
+[Notifications](#notifications)). For anything else — a light, a different channel — trigger on
+the status sensor:
 
 ```yaml
 - triggers:
@@ -893,16 +898,17 @@ nothing changes.
 
 ## Notifications
 
-Each guard can optionally run a **notify action** on problem / recovery / escalation. There are no
-fixed targets — you provide an action and Necromancer hands it the resolved, localized text as
-variables, so you decide whether and how to be notified:
+Each guard can optionally run a **notify action** on problem / recovery / escalation, and when it's
+**back to normal** if you want that too. There are no fixed targets — you provide an action and
+Necromancer hands it the resolved, localized text as variables, so you decide whether and how to be
+notified:
 
 | Variable | What it is |
 |---|---|
 | `{{ message }}` | the full ready-made line — `"<name>: <event_text>"` (e.g. *"Hue Bridge: Recovery succeeded."*) |
 | `{{ name }}` | the guard name (e.g. *"Hue Bridge"*) |
 | `{{ event_text }}` | just the event text, **without** the name (e.g. *"Recovery succeeded."*) |
-| `{{ event }}` | the event key (`recovery_attempt`, `recovery_success`, `recovery_failed`, `recovery_blocked`, `no_auto_recovery`, `problem_detected`, `linked_repair_failed`) |
+| `{{ event }}` | the event key (`recovery_attempt`, `recovery_success`, `recovery_failed`, `recovery_blocked`, `no_auto_recovery`, `problem_detected`, `linked_repair_failed`, `problem_cleared`) |
 | `{{ attempt }}` / `{{ max }}` / `{{ attempts }}` | recovery attempt count, max, and the plural-correct phrase (e.g. *"3 attempts"*) — where applicable |
 | `{{ reason }}` | why recovery was **blocked** or **failed** (e.g. a missing PoE port) — set for `recovery_blocked` / `recovery_failed`, empty otherwise |
 | `{{ health_detail }}` | why the Health Source judged as it did, as a sentence (e.g. *"No heartbeat for 25 hours, expected every 24 hours."* or *"Failure reported, exit code 3."*) — empty when the source has nothing to add. It is also appended to `message` and `event_text` as a second sentence |
@@ -933,6 +939,19 @@ repeating the name when you also set a title). The texts are phrased to read nat
 ```
 
 The action runs **detached**, so a deliberate delay in your notify flow never stalls the engine.
+
+**Back to normal.** The *Notification* section has a checkbox **Also notify when it's back to
+normal**. Ticked, an escalated guard whose health comes back **by itself** reports that with
+`event: problem_cleared` and how long the alarm lasted, counted from the escalation — e.g.
+*"Nightly Backup: Back to normal after 26 hours."* (just *"Back to normal."* when the start isn't
+known, e.g. an alarm raised by an older version).
+
+- **New guards:** on. **Existing guards:** off until you tick it (reconfigure the guard) — an
+  update doesn't start announcing all-clears at 3 a.m.
+- No such message after `necromancer.reset`, after a successful repair (that's
+  `recovery_success`) or when a snooze ends — only when health returns while the guard is
+  `escalated`.
+- A linked follower that escalated and later recovers by itself follows the same rule.
 
 ## Services
 

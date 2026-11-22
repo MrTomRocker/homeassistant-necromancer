@@ -81,11 +81,12 @@ is the **cooldown** (post-success), not a retry gap.
 | `RECOVERING` | cycle starts (or claimed) | none (driver runs) | → `VERIFY` (with check) · → `COOLDOWN`/`OK` (no check, driver `True`) · → `RECOVERING` (no check, driver `False`, retry) · → `ESCALATED` (blocked / out of attempts) |
 | `VERIFY` | after the action, Health Check on | **boot_window** | → `COOLDOWN` (healthy) · → `RECOVERING` (retry) · → `ESCALATED` (out of attempts) |
 | `COOLDOWN` | success | **cooldown** | → `OK` (healthy) · → `SUSPECT` (unhealthy) |
-| `ESCALATED` | gave up / blocked / auto-off | none | → `OK` automatically once health returns (clears the verdict) |
+| `ESCALATED` | gave up / blocked / auto-off (`escalated_at` = now) | none | → `OK` automatically once health returns (clears the verdict; `problem_cleared` with the duration if `notify_cleared` is on) |
 | `SNOOZED` | operator `necromancer.snooze` / `snooze_all` | **remaining snooze duration** | → `OK` (auto-resume on elapse, re-derives from health) · → `OK` (`unsnooze` / `unsnooze_all`, early). Health is ignored while snoozed. |
 
 `ESCALATED` and `SNOOZED` are the **persisted transients** — a dead device gets no free
-retry on reboot (`ESCALATED` self-clears via `ESCALATED → OK` when health comes back),
+retry on reboot (`ESCALATED` self-clears via `ESCALATED → OK` when health comes back, and
+keeps its start `escalated_at` across the restart),
 and a deliberate snooze survives a restart (re-arms the remaining time, or resumes
 immediately if it already elapsed). `BLIND` is **not** persisted — it is re-derived from
 live health on boot, and a device that reads `UNKNOWN` *mid-recovery* (e.g. rebooting)
@@ -210,7 +211,8 @@ Every distinct case the system handles. *(C = confirmed by a test/probe; L = see
 | Case | Behaviour |
 |---|---|
 | `ESCALATED` + still unhealthy | restored as `ESCALATED` (no free retry). |
-| `ESCALATED` + healthy again | auto-clears to `OK`. |
+| `ESCALATED` + healthy again | auto-clears to `OK`; `problem_cleared` if `notify_cleared` is on, the duration counted from the stored `escalated_at`. |
+| `escalated_at` (start of the current alarm) | restored with `ESCALATED`. A stored `ESCALATED` from an older version has none: restored with `escalated_at` `None`, so a later `problem_cleared` has no duration ("Back to normal."). Dropped together with the verdict (`reset_engine_verdict`, new heartbeat token). C |
 | `recover_count`, `last_recover`, `last_seen`, `auto` | restored from the Store. |
 | `fail_count`, `last_fail`, `last_recover_driver_result`, `last_recover_driver_time` | restored from the Store. |
 | `last_cycle_start` (start of the latest own recovery cycle) | restored from the Store; a source with `fault_since()` counts its debounce from no earlier than this, so a reload or a restart in the middle of a cycle (also one the recovery action caused itself) does not start the next cycle at once. C |
@@ -234,6 +236,22 @@ Every distinct case the system handles. *(C = confirmed by a test/probe; L = see
 | `snooze_all` with some guards recovering | snoozes the rest; busy guards skipped (WARNING), no error raised. |
 | snooze persisted across restart | restored as `SNOOZED`; remaining time re-armed (or resumes if elapsed). |
 
+### Back to normal (`problem_cleared`, checkbox `notify_cleared`)
+
+| Case | Behaviour |
+|---|---|
+| `ESCALATED`, health reads `OK` by itself, `notify_cleared` on | `OK` + `problem_cleared`: "Back to normal after {duration}." / "Wieder in Ordnung nach {duration}." (German dative: "nach 26 Stunden", "nach 2 Tagen"; minutes under 2 h, hours under 2 days, else days), duration = now − `escalated_at`. The only path that sends it. C |
+| same, but before HA has started (restored `ESCALATED`, health already `OK` at boot) | `OK` and the duration at once; the send waits for `EVENT_HOMEASSISTANT_STARTED` (`async_at_started`), so the notify action is registered. Dropped on `async_stop`. C |
+| same, `notify_cleared` off or missing (guard stored before the option) | `OK`, no message. C |
+| same, `escalated_at` unknown (`ESCALATED` stored by an older version) | "Back to normal." / "Wieder in Ordnung."; `event` still `problem_cleared`. C |
+| `necromancer.reset` | `OK` + re-derive, no `problem_cleared` (an operator act, not a recovery by itself). C |
+| recovery succeeds (`VERIFY`/`RECOVERING` → `COOLDOWN` → `OK`) | `recovery_success` only (`COOLDOWN → OK` sends nothing). C |
+| snooze ends / `unsnooze` (also a guard snoozed while escalated) | no `problem_cleared`; the snooze left `ESCALATED` and cleared `escalated_at`. |
+| linked follower escalated (`linked_repair_failed` / `no_auto_recovery`), then healthy by itself | same branch, same rule as its own escalation. |
+| heartbeat guard escalated by a failure ping, then a success ping | `OK` + `problem_cleared` when on (a success ping is health returning by itself). C |
+| heartbeat token regenerated while `ESCALATED` | verdict and `escalated_at` dropped (`BLIND`), no `problem_cleared`. |
+| new guard / reconfigure | checkbox on for a new guard; reconfigure shows the stored value (off when missing). Stored as a bool in `behavior` for every guard type, notify-only and heartbeat included. C |
+
 ### Heartbeat (`heartbeat` source + `/api/necromancer/heartbeat/<name>_<token>`)
 
 Evaluation — first matching row wins (`deadline = basis + period`, basis = last
@@ -254,7 +272,7 @@ the engine's debounce (default 1 h for heartbeat guards).
 | still overdue after a repair (an action without health check, no ping yet) | `COOLDOWN` ends → `SUSPECT` for a **full** debounce counted from the cooldown end, then the next cycle — not at once. C |
 | entry reload while `COOLDOWN` or `RECOVERING`, still overdue | comes back `OK` → `SUSPECT`; the debounce counts from the cycle start / cooldown end (a future cooldown end = a full debounce from the reload), never a cycle in the same tick. C |
 | the recovery restarts HA (or the host) while still overdue | after the boot the debounce counts from the stored cycle start (the bootstrap time counts), so restarts come at most once per debounce, not once per boot. C |
-| success after a failure | `OK` at once. C |
+| success after a failure | `OK` at once; from `ESCALATED` with `problem_cleared` if `notify_cleared` is on (also a late success after an overdue alarm). C |
 | `period` or debounce changed | only the deadline / the wait moves; nothing resets. C |
 | HA restart | same arithmetic, no startup grace: overdue stays overdue and re-enters `SUSPECT` for the **rest** of the grace (from HA started; the bootstrap time counts); a sender retry within it makes it `OK` silently. Down past `deadline + debounce`: the reaction comes right after HA started, and a retry a moment later turns it `OK` but the alarm is out. A stored `ESCALATED` stays. C |
 | snooze ends after `deadline + debounce` (deadline passed during the snooze) | the grace is used up: the reaction comes right after the snooze. Deliberate (KISS): still broken after maintenance is broken. |
@@ -289,7 +307,7 @@ above applies with "now" as the ping time:
 
 | Case | Behaviour |
 |---|---|
-| overdue, `ESCALATED` (a lost ping, the job ran) | `OK`; `last_ok` = now, so `next_due` = now + `period`; saved like an endpoint ping. `reset` would not do: the deadline would stay passed and the guard turn red again. C |
+| overdue, `ESCALATED` (a lost ping, the job ran) | `OK` (with `problem_cleared` if `notify_cleared` is on, like a real ping); `last_ok` = now, so `next_due` = now + `period`; saved like an endpoint ping. `reset` would not do: the deadline would stay passed and the guard turn red again. C |
 | overdue, `SUSPECT` (in the grace) | `OK`, debounce cancelled, **no notification** — like a late ping. C |
 | snoozed | stays `SNOOZED`; the ping is stored (`last_ok`, Store) and judged when the snooze ends. C |
 | any ping | one INFO line `<guard>: manual heartbeat ping by user <user_id>` (`-` without a user); the token is never logged. C |

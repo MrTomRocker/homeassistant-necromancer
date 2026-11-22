@@ -184,6 +184,10 @@ CONF_RELOAD_DELAY = "reload_delay"
 # default (one root-cause repair -> one notification, the leader's). Opt in per
 # guard to also notify the follower's success. Failures always notify.
 CONF_NOTIFY_FOLLOWER_SUCCESS = "notify_follower_success"
+# Report when an escalated guard turns healthy again by itself (`problem_cleared`).
+# On for new guards; a guard stored without the key (older versions) stays silent,
+# so an update does not start announcing anything the user never asked for.
+CONF_NOTIFY_CLEARED = "notify_cleared"
 
 # defaults (seconds, except counts/bools)
 DEFAULT_DEBOUNCE = 120
@@ -205,7 +209,9 @@ DEFAULT_RELOAD_DELAY = 10
 # prepends "<name>: " to build `message`). Phrased for TTS: numbers as words
 # ("1 von 2", not "1/2"), no slashes/parentheses, plural-correct via `{attempts}`
 # (computed in core/notify.py). str.format vars: {attempt}, {max}, {attempts},
-# {attempts_dative} (German "nach 2 Versuchen"; template-only, not an action variable).
+# {attempts_dative} (German "nach 2 Versuchen"; template-only, not an action variable),
+# {duration} (spoken, dative in German: "nach 26 Stunden"; rendered from raw seconds,
+# template-only as well).
 # Kept in code rather than the translation files because Home Assistant's translation
 # schema has no "notify" category; core/notify.py picks the language with an English fallback.
 NOTIFY_MESSAGES: dict[str, dict[str, str]] = {
@@ -217,6 +223,8 @@ NOTIFY_MESSAGES: dict[str, dict[str, str]] = {
         "no_auto_recovery": "Problem detected, auto-recovery is disabled.",
         "problem_detected": "Problem detected.",
         "linked_repair_failed": "Linked repair failed, still faulty.",
+        # problem_cleared: an escalated guard turned healthy again by itself.
+        "problem_cleared": "Back to normal after {duration}.",
     },
     "de": {
         "recovery_attempt": "Reparaturversuch {attempt} von {max}.",
@@ -227,7 +235,16 @@ NOTIFY_MESSAGES: dict[str, dict[str, str]] = {
         "problem_detected": "Problem erkannt.",
         # linked_repair_failed: a follower escalates when the group repair failed.
         "linked_repair_failed": "Gruppen-Reparatur fehlgeschlagen, weiterhin gestört.",
+        "problem_cleared": "Wieder in Ordnung nach {duration}.",
     },
+}
+
+# Texts for an event whose `{duration}` is unknown — e.g. an ESCALATED stored by an
+# older version, without the time it began. Picked by core/notify.py when no
+# duration is passed; the `event` key stays the same, so automations see no difference.
+NOTIFY_MESSAGES_NO_DURATION: dict[str, dict[str, str]] = {
+    "en": {"problem_cleared": "Back to normal."},
+    "de": {"problem_cleared": "Wieder in Ordnung."},
 }
 
 # Detail texts: the *reason* behind a finding, appended as a second sentence to an
