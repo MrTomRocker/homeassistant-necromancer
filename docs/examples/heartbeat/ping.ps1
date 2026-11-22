@@ -9,7 +9,8 @@
 #
 # In Windows Task Scheduler: program `powershell.exe` (or `pwsh.exe`), arguments
 #   -NoProfile -ExecutionPolicy Bypass -File C:\scripts\backup-and-ping.ps1
-# and set HEARTBEAT_URL as a user or system environment variable, not in the arguments.
+# and set HEARTBEAT_URL as a user environment variable of the task's account (not a system
+# variable: every local user can read those), not in the arguments.
 # A task starts in C:\Windows\System32, so the wrapper needs full paths:
 #   & 'C:\Program Files\Backup\backup.exe'
 #   & "$PSScriptRoot\ping.ps1" $LASTEXITCODE

@@ -125,7 +125,8 @@ escalated guard whose health returns **by itself** then sends `event: problem_cl
 that is unknown). On for new guards, off for existing guards until ticked. No such message after
 `necromancer.reset`, after a successful repair (that sends `recovery_success`) or when a snooze
 ends. For anything else (a light, another channel) use a state trigger `from: escalated`
-`to: ok`. There is no recovery event for it.
+`to: ok`. Unlike `problem_cleared`, it also fires on `necromancer.reset`, even while the device
+is still faulty (`ok` for a moment, then `suspect`). There is no recovery event for it.
 
 **Outcome of a recovery cycle:** `event.received` on the recovery event entity (read it from
 `recovery_event_entity`) with `options: {event_type: [...]}`. Types: `recovered`, `escalated`

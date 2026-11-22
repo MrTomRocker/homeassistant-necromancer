@@ -39,8 +39,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ping.ps1 0
 ```
 
 In Task Scheduler, put the same arguments in *Add arguments* (`-NoProfile -ExecutionPolicy Bypass
--File C:\scripts\backup-and-ping.ps1`) and set `HEARTBEAT_URL` as a user or system environment
-variable. `pwsh.exe` (PowerShell 7) works the same way. A task starts in `C:\Windows\System32`,
+-File C:\scripts\backup-and-ping.ps1`) and set `HEARTBEAT_URL` as a **user** environment variable of
+the task's account (System Properties → Environment Variables; not a system variable, which every
+local user can read, and not with `setx`, which puts the token on a command line). `pwsh.exe` (PowerShell 7) works the same way. A task starts in `C:\Windows\System32`,
 so the wrapper uses full paths, and passes the exit code on to the task's *Last Run Result*:
 
 ```powershell

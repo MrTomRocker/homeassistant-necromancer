@@ -491,7 +491,8 @@ Or tell yourself when an escalated guard is **back to normal** — e.g. the back
 again, or you fixed the device by hand. For a message on the guard's own notify channel, the
 simplest way is the checkbox *Also notify when it's back to normal* (see
 [Notifications](#notifications)). For anything else — a light, a different channel — trigger on
-the status sensor:
+the status sensor (unlike the message, this also fires on `necromancer.reset`, even while the device
+is still faulty: the sensor shows `ok` for a moment, then `suspect`):
 
 ```yaml
 - triggers:
@@ -951,7 +952,10 @@ known, e.g. an alarm raised by an older version).
 - No such message after `necromancer.reset`, after a successful repair (that's
   `recovery_success`) or when a snooze ends — only when health returns while the guard is
   `escalated`.
-- A linked follower that escalated and later recovers by itself follows the same rule.
+- A linked follower that escalated and later recovers by itself follows the same rule. An escalated
+  guard that is pulled into a linked partner's repair instead ends like a follower: the leader's
+  *Recovery succeeded* closes the group's alarm, and the follower itself reports only with
+  *notify on follower success*.
 
 ## Services
 

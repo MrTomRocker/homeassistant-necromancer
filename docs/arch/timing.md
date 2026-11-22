@@ -248,6 +248,7 @@ Every distinct case the system handles. *(C = confirmed by a test/probe; L = see
 | recovery succeeds (`VERIFY`/`RECOVERING` → `COOLDOWN` → `OK`) | `recovery_success` only (`COOLDOWN → OK` sends nothing). C |
 | snooze ends / `unsnooze` (also a guard snoozed while escalated) | no `problem_cleared`; the snooze left `ESCALATED` and cleared `escalated_at`. |
 | linked follower escalated (`linked_repair_failed` / `no_auto_recovery`), then healthy by itself | same branch, same rule as its own escalation. |
+| escalated guard (auto-recovery on) pulled into a linked partner's later repair, healthy afterwards | leaves `ESCALATED` via `RECOVERING` (follower; `escalated_at` cleared) → `COOLDOWN` → `OK`: no `problem_cleared`; its own `recovery_success` only with `notify_follower_success`. The group's closing message is the leader's `recovery_success`. |
 | heartbeat guard escalated by a failure ping, then a success ping | `OK` + `problem_cleared` when on (a success ping is health returning by itself). C |
 | heartbeat token regenerated while `ESCALATED` | verdict and `escalated_at` dropped (`BLIND`), no `problem_cleared`. |
 | new guard / reconfigure | checkbox on for a new guard; reconfigure shows the stored value (off when missing). Stored as a bool in `behavior` for every guard type, notify-only and heartbeat included. C |
