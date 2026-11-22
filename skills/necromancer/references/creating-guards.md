@@ -130,7 +130,7 @@ The health picker hides only this guard's own entities, so a supervisor can pick
 |---|---|---|
 | `behavior` | `debounce` 120 s (3600 s heartbeat, max 86400), `cooldown` 600 s (max 86400), `health_check` `true`, `boot_window` 180 s (max 3600), `max_attempts` 2 (1-10) | always (recovery steps) |
 | `reload` | `reload_entry` `false`: reload the assigned device's integration after the repair; `reload_delay` 10 s (max 600): wait before the reload | `device_id` is set |
-| `notification` | `notify_action`: optional action sequence; variables in SKILL.md | always |
+| `notification` | `notify_action`: optional action sequence; variables in SKILL.md. `notify_cleared`: also notify (`problem_cleared`) when an escalated guard turns healthy by itself; `true` on create, the stored value on reconfigure (`false` for a guard stored without it) | always |
 | `linked_guards` | `linked_guards`: list of partner **subentry IDs** (options come from the form); `notify_follower_success` `false` | other recovery guards exist and this is not a heartbeat guard |
 
 All times are seconds. Notify-only and heartbeat guards are never offered as link partners.

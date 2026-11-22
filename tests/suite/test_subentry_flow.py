@@ -630,3 +630,123 @@ async def test_heartbeat_guards_stay_out_of_links(
     ).schema.schema
     options = next(v for k, v in link.items() if str(k) == "linked_guards")
     assert [o["value"] for o in options.config["options"]] == ["guard0"]
+
+
+# ---------------- "back to normal" toggle (notification section) ----------------
+
+
+async def _to_strategy_step(
+    hass: HomeAssistant,
+    result: dict,
+    strategy: str,
+    source: str = "state_based",
+    name: str = "Job",
+) -> dict:
+    """From the source step to the strategy's form."""
+    result = await _cfg(hass, result["flow_id"], {"source_type": source})
+    device = HB_DEVICE if source == "heartbeat_based" else STATE_HEALTH
+    result = await _cfg(hass, result["flow_id"], {"name": name, **device})
+    result = await _cfg(hass, result["flow_id"], {"strategy": strategy})
+    assert result["step_id"] == strategy
+    return result
+
+
+async def test_notify_cleared_on_for_a_new_guard(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """Create: the toggle shows on and an untouched section stores True."""
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    entry = await setup_guards()
+    result = await _to_strategy_step(hass, await _init(hass, entry.entry_id), "switch")
+    assert _default(result, "notify_cleared", "notification") is True
+    result = await _cfg(
+        hass,
+        result["flow_id"],
+        {
+            "switch_entity": "switch.guard_target",
+            "off_on_delay": 2,
+            "behavior": {"debounce": 5, "cooldown": 10},
+            "notification": {},
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"]["behavior"]["notify_cleared"] is True
+
+
+async def test_notify_cleared_off_for_a_legacy_guard(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """Reconfigure of a guard stored without the key: shown and stored as off."""
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    entry = await setup_guards(make_guard("Job", notify_cleared=None))
+    assert "notify_cleared" not in entry.subentries["guard0"].data["behavior"]
+    result = await _to_strategy_step(
+        hass, await _reconfigure(hass, entry.entry_id), "switch"
+    )
+    assert _default(result, "notify_cleared", "notification") is False
+    result = await _cfg(
+        hass,
+        result["flow_id"],
+        {
+            "switch_entity": "switch.guard_target",
+            "off_on_delay": 2,
+            "behavior": {"debounce": 5, "cooldown": 10},
+            "notification": {},
+        },
+    )
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.subentries["guard0"].data["behavior"]["notify_cleared"] is False
+
+
+async def test_notify_cleared_round_trips(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """A stored value is shown on reconfigure and a change is stored."""
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    entry = await setup_guards(
+        make_guard("Job", strategy="notify", notify_cleared=True)
+    )
+    for shown, chosen in ((True, False), (False, True)):
+        result = await _to_strategy_step(
+            hass, await _reconfigure(hass, entry.entry_id), "notify"
+        )
+        assert _default(result, "notify_cleared", "notification") is shown
+        result = await _cfg(
+            hass, result["flow_id"], {"notification": {"notify_cleared": chosen}}
+        )
+        assert result["reason"] == "reconfigure_successful"
+        assert entry.subentries["guard0"].data["behavior"]["notify_cleared"] is chosen
+
+
+@pytest.mark.parametrize("chosen", [None, False])
+async def test_notify_cleared_stored_for_notify_and_heartbeat_guards(
+    hass: HomeAssistant, setup_guards: SetupGuards, chosen: bool | None
+) -> None:
+    """Notify-only and heartbeat guards store the toggle too (None = untouched)."""
+    await _set_internal_url(hass)
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    entry = await setup_guards()
+    section = {} if chosen is None else {"notify_cleared": chosen}
+    expected = chosen is None  # untouched -> the default for a new guard: on
+
+    result = await _to_strategy_step(hass, await _init(hass, entry.entry_id), "notify")
+    assert _default(result, "notify_cleared", "notification") is True
+    result = await _cfg(hass, result["flow_id"], {"notification": section})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"]["behavior"]["notify_cleared"] is expected
+
+    result = await _to_strategy_step(
+        hass,
+        await _init(hass, entry.entry_id),
+        "notify",
+        source="heartbeat_based",
+        name="Backup",
+    )
+    assert _default(result, "notify_cleared", "notification") is True
+    result = await _cfg(hass, result["flow_id"], {"notification": section})
+    assert result["step_id"] == "heartbeat_url"
+    result = await _cfg(hass, result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"]["behavior"]["notify_cleared"] is expected

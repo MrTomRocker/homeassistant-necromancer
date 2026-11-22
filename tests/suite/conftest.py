@@ -57,6 +57,7 @@ def make_guard(
     notify_action: list | None = None,
     linked_guards: Sequence[str] | None = None,
     notify_follower_success: bool = False,
+    notify_cleared: bool | None = False,
     on_value: Sequence[str] = ("on",),
     off_value: Sequence[str] = ("off",),
     attribute: str | None = None,
@@ -64,7 +65,11 @@ def make_guard(
     token: str = HEARTBEAT_TOKEN,
     local_only: bool = True,
 ) -> dict[str, Any]:
-    """Build one guard subentry `data` dict matching `_build_data`'s output."""
+    """Build one guard subentry `data` dict matching `_build_data`'s output.
+
+    `notify_cleared=None` leaves the key out, like a guard stored by a version
+    before the "back to normal" toggle.
+    """
     notify_only = strategy == "notify"
     check = strategy in _CHECK_STRATEGIES
 
@@ -88,6 +93,8 @@ def make_guard(
         }
 
     behavior: dict[str, Any] = {"debounce": debounce, "notify_action": notify_action}
+    if notify_cleared is not None:
+        behavior["notify_cleared"] = notify_cleared
     data: dict[str, Any] = {
         "name": name,
         "health": health,

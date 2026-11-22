@@ -38,7 +38,7 @@ shared script. The guard stays "dumb"; it knows nothing about phones or rooms.
 `message` is the full `"Name: text"` line, `name`/`event_text` are its parts (handy when a channel
 takes a separate title), `event` is the key you can branch on (`problem_detected`, `recovery_attempt`,
 `recovery_success`, `recovery_failed`, `recovery_blocked`, `no_auto_recovery`,
-`linked_repair_failed`), and `attempt`/`max`/`attempts`/`reason` fill in where applicable.
+`linked_repair_failed`, `problem_cleared`), and `attempt`/`max`/`attempts`/`reason` fill in where applicable.
 `health_detail` is the Health Source's reason as a sentence (e.g. *"No heartbeat for 25 hours,
 expected every 24 hours."*) — it is **already appended** to `message` and `event_text`, so forward it
 only if a channel wants the reason on its own. The `default('')` keeps the script's fields tidy when
@@ -112,7 +112,8 @@ naturally on Alexa and the tablet with no extra formatting.
   forgot the TTS call or used last year's entity id.
 - **Branch centrally on `event`.** Because the script gets the `event` key, you can route by
   severity in one place: send only `recovery_failed` / `no_auto_recovery` / `linked_repair_failed`
-  to voice, and let routine `recovery_success` events just write the persistent card or the log.
+  to voice, and let routine `recovery_success` and `problem_cleared` events just write the
+  persistent card or the log.
 - **The guards stay trivial.** The forwarding block is copy-paste identical, so adding a new guard
   is mechanical and there's nothing per-guard to get wrong.
 
@@ -120,7 +121,13 @@ naturally on Alexa and the tablet with no extra formatting.
 
 - **Route by `event`.** Wrap the loud channels in `{{ event in ['problem_detected',
   'recovery_failed', 'no_auto_recovery', 'linked_repair_failed'] }}` and leave
-  `recovery_success` to the persistent card only — so good news doesn't announce itself in every room.
+  `recovery_success` and `problem_cleared` to the persistent card only — so good news doesn't
+  announce itself in every room.
+- **Back to normal is opt-in per guard.** `problem_cleared` (*"Back to normal after 26 hours."*)
+  comes only from guards with *Also notify when it's back to normal* ticked in their
+  *Notification* section — on for new guards, off for existing ones until ticked — and only when
+  an escalated guard turns healthy by itself (not after a reset, a successful repair or a snooze).
+  It needs no extra forwarding: the block above already passes it on.
 - **Add a quiet-hours / do-not-disturb switch.** Create an `input_boolean.necromancer_quiet` and add
   `condition: state` (`input_boolean.necromancer_quiet` is `off`) alongside the `condition: time`, so
   you can mute voice with one tap regardless of the clock.

@@ -80,7 +80,8 @@ action reacts but sends no message: check it in **Reconfigure**.
 **After N tries.** `attempt` equals *max attempts* (default 2). Each attempt ran and health did
 not read OK within the boot window, or the action raised an error (the log has a warning per
 retry and a traceback on the last). Fix the device. The guard goes back to `ok` by itself when
-health returns. To try again: `necromancer.reset` re-checks and, if still unhealthy, waits out
+health returns; with the *Notification* checkbox `notify_cleared` on it then sends
+`problem_cleared` ("Back to normal after …"). To try again: `necromancer.reset` re-checks and, if still unhealthy, waits out
 the debounce and repairs again. For an immediate try, press the Revive button. If the device is
 only slow, raise the boot window; more attempts rarely help.
 
@@ -94,6 +95,22 @@ back on does not start a repair. Call `necromancer.reset` afterwards.
 |---|---|---|
 | `escalated` | attempts ran, the device did not come back | device problem; see above |
 | `blocked` | the repair could not even start | `switch entity … not found`, `no recovery action configured`, `invalid recovery action: …`, `no port matches '…'`, `'…' matches 2 ports`; fix the guard's recovery in **Reconfigure** or the PoE ports, check Repairs |
+
+## No "back to normal" message
+
+`problem_cleared` comes only when an `escalated` guard turns healthy **by itself** and the
+guard's *Notification* checkbox *Also notify when it's back to normal* (`notify_cleared`) is on.
+Check, in this order:
+
+- **The checkbox.** Guards created before the option have it off until someone ticks it in
+  **Reconfigure**. New guards have it on.
+- **The path.** No message after `necromancer.reset`, a successful repair (that sends
+  `recovery_success`) or the end of a snooze. It counts only when health comes back while the
+  guard is `escalated`.
+- **The notify action.** Without one, nothing is sent. A notify action that branches on `event`
+  needs a branch for `problem_cleared` (or a default branch).
+- **No duration in the text** ("Back to normal." only): the alarm was raised by an older version,
+  which stored no start time.
 
 ## Both linked guards show `recovering`
 
@@ -188,8 +205,8 @@ entity and on timeout.
 
 The running cycle is dropped. On start the guard re-reads health: healthy → `ok`; unhealthy →
 `suspect` and the debounce runs again (a heartbeat guard waits only the rest, counted from its
-deadline or its last repair). `attempt` starts over. Only `escalated`, `snoozed` (with its
-remaining time), the counters, the auto-recovery switch and a heartbeat guard's pings survive. So a recovery that restarts
+deadline or its last repair). `attempt` starts over. Only `escalated` (with its start time),
+`snoozed` (with its remaining time), the counters, the auto-recovery switch and a heartbeat guard's pings survive. So a recovery that restarts
 Home Assistant itself never reaches *max attempts*: every restart starts a new round. Give such a
 guard a long debounce.
 

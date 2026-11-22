@@ -318,20 +318,22 @@ scripting a `homeassistant.reload_config_entry` action.
 (`.storage/necromancer.<entry_id>`), independent of the display entities. Per
 guard the engine stores `{state, attempt, recover_count, fail_count, last_recover,
 last_seen, last_fail, last_recover_driver_result, last_recover_driver_time,
-last_cycle_start, auto, snooze_until, source}`, where `source` is the health source's own `snapshot()`
-(`{}` for sources without state; a heartbeat's pings — additive, `STORAGE_VERSION`
+last_cycle_start, auto, snooze_until, escalated_at, source}`, where `source` is
+the health source's own `snapshot()` (`{}` for sources without state; a heartbeat's pings — additive, `STORAGE_VERSION`
 unchanged). Alongside those per-guard snapshots the same Store file holds the PoE
 fabric's `id → port` cache under a separate `_poe_cache` key (written by
 `__init__`'s `_serialize`). On restart `source` goes to `health.restore()` first,
-then the stats and `auto` flag are restored, `ESCALATED` is restored (then
-re-derived from live health), `SNOOZED` is restored (re-arming the *remaining*
-snooze, or resuming if it elapsed), and transient states
+then the stats and `auto` flag are restored, `ESCALATED` is restored with its
+`escalated_at` (then re-derived from live health; a stored `ESCALATED` from an
+older version has none and restores with `escalated_at` `None`), `SNOOZED` is
+restored (re-arming the *remaining* snooze, or resuming if it elapsed), and
+transient states
 (RECOVERING/COOLDOWN/VERIFY) are *not* restored — they come back as
 OK/live-health. If `restore()` reports a new source identity (a regenerated
 heartbeat token, a type switch to heartbeat), the stored `ESCALATED` judged
-something that no longer exists and is dropped (`state` ok, `attempt` 0, via
-`reset_engine_verdict`); a `SNOOZED` stays. The engine also hands its save callback
-to the source (`bind_persist`), since a source can change state the engine never
+something that no longer exists and is dropped (`state` ok, `attempt` 0,
+`escalated_at` cleared, via `reset_engine_verdict`); a `SNOOZED` stays. The engine
+also hands its save callback to the source (`bind_persist`), since a source can change state the engine never
 sees as a transition (an OK→OK ping). The fabric's `_poe_cache` is restored too, so a `poe_port` guard
 keeps its last-known fallback port across a reboot. The display entities
 (`sensor.*_status`, `binary_sensor.*_health`, `switch.*_auto_recovery`,
@@ -348,6 +350,21 @@ would only repeat it), `recovery_failed` (`_escalate`) and, generically,
 `linked_repair_failed` and the auto-off `no_auto_recovery` of a follower
 (`core/links.py`). Not on `recovery_success`, nor on `recovery_blocked`, which has
 its own reason. Sources without `detail()` send `""`, so their texts are unchanged.
+
+**Back to normal (`problem_cleared`).** The engine keeps `escalated_at`, the UTC time
+the guard entered `ESCALATED`: set on every transition *into* it, cleared on every
+transition *out of* it, whatever the path (health, `reset`, revive, snooze, a dropped
+verdict). It is persisted with the rest of the state, so an alarm that spans a restart
+keeps its start. The notification has exactly one call site: the branch of `_evaluate`
+where `state == ESCALATED` and health reads `OK` — health came back **by itself**.
+There, and only when `behavior.notify_cleared` is truthy, the guard sends
+`problem_cleared` through its normal notify path (detached, like every alert) with the
+seconds since `escalated_at`. No other path notifies: not `reset()`, not a recovery
+success (that is `recovery_success`), not the end of a snooze, not `COOLDOWN → OK`. A
+linked follower that escalated (`linked_repair_failed`, `no_auto_recovery`) and later
+recovers on its own passes through the same branch and follows the same rule. The
+recovery event entity does not fire, and there is no extra entity. A guard stored
+without the key (created before the option) reads it as off.
 
 ---
 
@@ -615,7 +632,8 @@ follow — e.g. a *ping* guard and a *lamps-unavailable* guard on the same Hue b
 
 There are no fixed notify targets. Each guard optionally defines a **notify
 action** (an `ActionSelector` sequence) that runs on events
-(problem / recovery / escalation). Necromancer resolves a localized message and
+(problem / recovery / escalation, and back to normal when `notify_cleared` is on).
+Necromancer resolves a localized message and
 exposes it to the action as Jinja variables:
 
 | Variable | Value |
@@ -623,7 +641,7 @@ exposes it to the action as Jinja variables:
 | `message` | The full ready-made line, `"<name>: <event_text>"`. |
 | `name` | The guard name. |
 | `event_text` | The localized event text **without** the name (so the user can compose their own line / avoid duplicating the name in a title). |
-| `event` | The notify key (`recovery_success`, …). |
+| `event` | The notify key (`problem_detected`, `recovery_attempt`, `recovery_success`, `recovery_failed`, `recovery_blocked`, `no_auto_recovery`, `linked_repair_failed`, `problem_cleared`). |
 | `attempt` / `max` / `attempts` / `reason` | Event params, where applicable. `attempts` is the plural-correct phrase ("1 Versuch" / "3 Versuche"). |
 | `health_detail` | Why the source judged as it did, as plain text (e.g. "Kein Lebenszeichen seit 26 Stunden, erwartet alle 24 Stunden."), `""` when the source gives no detail or the event carries none (see §3, *The reason behind an alarm*). |
 
@@ -648,6 +666,18 @@ of the preposition (`{since}` after "seit"/"vor" takes the dative, "seit 3 Tagen
 `{period}` after "alle" the accusative, "alle 7 Tage"); `{code}` becomes a clause
 from `DETAIL_CODE_PHRASES` (", Exit-Code 3" for digits, ", Code TERM" for a word,
 nothing without a code).
+
+**Duration of an alarm.** The engine hands `problem_cleared` the seconds since
+`escalated_at`; `core/notify.py` renders them as `{duration}` with the same
+`_format_duration`, German with `dative=True` after "nach" ("Wieder in Ordnung nach
+26 Stunden.", "nach 2 Tagen"); English "Back to normal after 26 hours.". Like
+`attempts_dative`, the duration is for the text only and is **not** an action
+variable, so the variable set stays the one in the table above. Without a start (an `ESCALATED` restored from an older
+version) `_resolve` picks the text from `NOTIFY_MESSAGES_NO_DURATION` ("Back to
+normal." / "Wieder in Ordnung."); `event` is `problem_cleared` in both cases.
+A clear found before HA has started (a restored `ESCALATED` whose health is
+already back) fixes the duration at once but sends only at
+`EVENT_HOMEASSISTANT_STARTED`, like the deferred debounce of `_enter_suspect`.
 
 ---
 
@@ -714,6 +744,13 @@ is no separate "mode" field — the notify-vs-recover choice *is* the strategy c
   (called by every strategy’s `*_defaults`), which replaces it when the edit
   crosses the heartbeat boundary — 3600 towards heartbeat, `DEFAULT_DEBOUNCE` away
   from it; the schemas’ own `source_type` default only matters on create.
+- **Back-to-normal checkbox.** `_notification_section` (every strategy step) adds
+  `notify_cleared` (`CONF_NOTIFY_CLEARED`, a `BooleanSelector`) next to
+  `notify_action`. Default **on** when a guard is created; on reconfigure the stored
+  value, and a guard stored without the key (every guard from before the option)
+  shows and behaves as **off**, so an update sends no all-clear nobody asked for.
+  `_build_data` always stores `behavior["notify_cleared"]` as a bool, also for
+  notify-only and heartbeat guards.
 
 - **Flat device step.** The device & health step is **section-less**: its fields
   (`name`, `entity_id`, `attribute`, `on_value`, `off_value` for state-based — or

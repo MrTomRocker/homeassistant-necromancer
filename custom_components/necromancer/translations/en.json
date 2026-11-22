@@ -230,9 +230,13 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation, or is back to normal. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
               "data": {
-                "notify_action": "Action"
+                "notify_action": "Action",
+                "notify_cleared": "Also notify when it's back to normal"
+              },
+              "data_description": {
+                "notify_cleared": "On: when an escalated guard turns healthy again by itself, it reports that, with how long the alarm lasted (event `problem_cleared`). Off: only problems, repairs and escalations."
               }
             },
             "linked_guards": {
@@ -292,9 +296,13 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation, or is back to normal. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
               "data": {
-                "notify_action": "Action"
+                "notify_action": "Action",
+                "notify_cleared": "Also notify when it's back to normal"
+              },
+              "data_description": {
+                "notify_cleared": "On: when an escalated guard turns healthy again by itself, it reports that, with how long the alarm lasted (event `problem_cleared`). Off: only problems, repairs and escalations."
               }
             },
             "linked_guards": {
@@ -359,9 +367,13 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation, or is back to normal. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
               "data": {
-                "notify_action": "Action"
+                "notify_action": "Action",
+                "notify_cleared": "Also notify when it's back to normal"
+              },
+              "data_description": {
+                "notify_cleared": "On: when an escalated guard turns healthy again by itself, it reports that, with how long the alarm lasted (event `problem_cleared`). Off: only problems, repairs and escalations."
               }
             },
             "linked_guards": {
@@ -420,9 +432,13 @@
             },
             "notification": {
               "name": "Notification",
-              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation, or is back to normal. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
               "data": {
-                "notify_action": "Action"
+                "notify_action": "Action",
+                "notify_cleared": "Also notify when it's back to normal"
+              },
+              "data_description": {
+                "notify_cleared": "On: when an escalated guard turns healthy again by itself, it reports that, with how long the alarm lasted (event `problem_cleared`). Off: only problems, repairs and escalations."
               }
             },
             "linked_guards": {
@@ -463,9 +479,13 @@
           "sections": {
             "notification": {
               "name": "Notification",
-              "description": "Optional — run an action when this guard hits a problem, recovery or escalation. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
+              "description": "Optional — run an action when this guard hits a problem, recovery or escalation, or is back to normal. You provide the action (a phone push, a TTS announcement, a light, a script — anything); Necromancer passes the alert text and context as variables, so you decide whether and how to be told. Take the ready-made message, or build your own. Variables: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Reference a variable with double curly braces in your action.",
               "data": {
-                "notify_action": "Action"
+                "notify_action": "Action",
+                "notify_cleared": "Also notify when it's back to normal"
+              },
+              "data_description": {
+                "notify_cleared": "On: when an escalated guard turns healthy again by itself, it reports that, with how long the alarm lasted (event `problem_cleared`). Off: only problems, repairs and escalations."
               }
             }
           }

@@ -230,9 +230,13 @@
             },
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur, Eskalation oder Entwarnung. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
-                "notify_action": "Aktion"
+                "notify_action": "Aktion",
+                "notify_cleared": "Auch melden, wenn es wieder in Ordnung ist"
+              },
+              "data_description": {
+                "notify_cleared": "Ein: Wird ein eskalierter Guard von selbst wieder gesund, meldet er das mit der Dauer seit dem Alarm (Event `problem_cleared`). Aus: nur Problem, Reparatur und Eskalation."
               }
             },
             "linked_guards": {
@@ -292,9 +296,13 @@
             },
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur, Eskalation oder Entwarnung. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
-                "notify_action": "Aktion"
+                "notify_action": "Aktion",
+                "notify_cleared": "Auch melden, wenn es wieder in Ordnung ist"
+              },
+              "data_description": {
+                "notify_cleared": "Ein: Wird ein eskalierter Guard von selbst wieder gesund, meldet er das mit der Dauer seit dem Alarm (Event `problem_cleared`). Aus: nur Problem, Reparatur und Eskalation."
               }
             },
             "linked_guards": {
@@ -359,9 +367,13 @@
             },
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur, Eskalation oder Entwarnung. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
-                "notify_action": "Aktion"
+                "notify_action": "Aktion",
+                "notify_cleared": "Auch melden, wenn es wieder in Ordnung ist"
+              },
+              "data_description": {
+                "notify_cleared": "Ein: Wird ein eskalierter Guard von selbst wieder gesund, meldet er das mit der Dauer seit dem Alarm (Event `problem_cleared`). Aus: nur Problem, Reparatur und Eskalation."
               }
             },
             "linked_guards": {
@@ -420,9 +432,13 @@
             },
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur, Eskalation oder Entwarnung. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
-                "notify_action": "Aktion"
+                "notify_action": "Aktion",
+                "notify_cleared": "Auch melden, wenn es wieder in Ordnung ist"
+              },
+              "data_description": {
+                "notify_cleared": "Ein: Wird ein eskalierter Guard von selbst wieder gesund, meldet er das mit der Dauer seit dem Alarm (Event `problem_cleared`). Aus: nur Problem, Reparatur und Eskalation."
               }
             },
             "linked_guards": {
@@ -463,9 +479,13 @@
           "sections": {
             "notification": {
               "name": "Benachrichtigung",
-              "description": "Optional — eine Aktion bei Problem, Reparatur oder Eskalation. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
+              "description": "Optional — eine Aktion bei Problem, Reparatur, Eskalation oder Entwarnung. Du gibst die Aktion vor (Handy-Push, TTS-Durchsage, Lampe, Skript — beliebig); Necromancer übergibt Meldetext und Kontext als Variablen, du entscheidest ob und wie benachrichtigt wird. Nimm die fertige message oder bau dir deine eigene. Variablen: message, name, event_text, event, attempt, max, attempts, reason, health_detail. Variablen referenzierst du in der Aktion mit doppelten geschweiften Klammern.",
               "data": {
-                "notify_action": "Aktion"
+                "notify_action": "Aktion",
+                "notify_cleared": "Auch melden, wenn es wieder in Ordnung ist"
+              },
+              "data_description": {
+                "notify_cleared": "Ein: Wird ein eskalierter Guard von selbst wieder gesund, meldet er das mit der Dauer seit dem Alarm (Event `problem_cleared`). Aus: nur Problem, Reparatur und Eskalation."
               }
             }
           }

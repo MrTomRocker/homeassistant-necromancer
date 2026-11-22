@@ -2012,6 +2012,328 @@ async def test_snapshot_has_source_key(hass, _):
     await eng.async_stop()
 
 
+# ---------------- problem_cleared (escalated guard healthy again by itself) ----------------
+
+
+def _record_notify(eng) -> list[tuple[str, dict]]:
+    """Replace the engine's notify with a recorder of (key, params)."""
+    notified: list[tuple[str, dict]] = []
+
+    async def _rec(key, **kw):
+        notified.append((key, kw))
+
+    eng._notify = _rec
+    return notified
+
+
+async def _escalate(hass, eng, health):
+    """Drive a recover guard into ESCALATED (debounce -> 1 failed attempt)."""
+    health.verdict = Health.UNHEALTHY
+    await eng.async_start()
+    await _advance(hass, 30)
+    assert eng.state is GState.ESCALATED, eng.state
+
+
+async def test_escalated_at_follows_every_transition(hass, _):
+    """Set on entering ESCALATED, cleared on leaving it (here: reset)."""
+    health = FakeHealth(hass)
+    eng = make(hass, health, StubDriver(hass), boot_window=0, max_attempts=1)
+    assert eng.escalated_at is None
+    before = dt_util.utcnow()
+    await _escalate(hass, eng, health)
+    assert eng.escalated_at is not None and eng.escalated_at >= before
+    assert eng.snapshot()["escalated_at"] == eng.escalated_at.isoformat()
+    eng.reset()  # still unhealthy -> OK -> SUSPECT (a fresh cycle)
+    assert eng.state is GState.SUSPECT and eng.escalated_at is None
+    assert eng.snapshot()["escalated_at"] is None
+    await eng.async_stop()
+
+
+async def test_problem_cleared_with_duration_when_on(hass, _):
+    """ESCALATED -> OK by health + flag on -> problem_cleared with the duration."""
+    health = FakeHealth(hass)
+    eng = make(
+        hass,
+        health,
+        StubDriver(hass),
+        boot_window=0,
+        max_attempts=1,
+        notify_cleared=True,
+    )
+    notified = _record_notify(eng)
+    events: list[str] = []
+    eng.add_event_listener(lambda kind, _data: events.append(kind))
+    await _escalate(hass, eng, health)
+    eng.escalated_at = dt_util.utcnow() - timedelta(hours=26)  # alarm began 26 h ago
+    notified.clear()
+    events.clear()
+    health.verdict = Health.OK
+    eng._evaluate()
+    await hass.async_block_till_done()
+    assert eng.state is GState.OK and eng.escalated_at is None and eng.attempt == 0
+    assert [k for k, _ in notified] == ["problem_cleared"], notified
+    duration = notified[0][1]["duration"]
+    assert abs(duration - 26 * 3600) < 60, duration
+    assert events == []  # not a recovery: the event entity stays quiet
+    await eng.async_stop()
+
+
+async def test_problem_cleared_silent_when_off(hass, _):
+    """Flag off, and a guard stored without the key: nothing on the way back."""
+    for extra in ({"notify_cleared": False}, {}):
+        health = FakeHealth(hass)
+        eng = make(
+            hass, health, StubDriver(hass), boot_window=0, max_attempts=1, **extra
+        )
+        notified = _record_notify(eng)
+        await _escalate(hass, eng, health)
+        notified.clear()
+        health.verdict = Health.OK
+        eng._evaluate()
+        await hass.async_block_till_done()
+        assert eng.state is GState.OK and eng.escalated_at is None
+        assert notified == [], (extra, notified)
+        await eng.async_stop()
+
+
+async def test_problem_cleared_not_on_reset(hass, _):
+    """An operator reset of a recovered guard is no "back to normal" message."""
+    health = FakeHealth(hass)
+    eng = make(
+        hass,
+        health,
+        StubDriver(hass),
+        boot_window=0,
+        max_attempts=1,
+        notify_cleared=True,
+    )
+    notified = _record_notify(eng)
+    await _escalate(hass, eng, health)
+    notified.clear()
+    health.verdict = Health.OK  # healthy, but no evaluation yet
+    eng.reset()
+    await hass.async_block_till_done()
+    assert eng.state is GState.OK and eng.escalated_at is None
+    assert notified == [], notified
+    await eng.async_stop()
+
+
+async def test_problem_cleared_not_on_recovery_or_snooze(hass, _):
+    """A successful manual recovery or a snooze out of ESCALATED stays silent."""
+    health = FakeHealth(hass)
+    driver = StubDriver(hass)
+    eng = make(hass, health, driver, boot_window=0, max_attempts=1, notify_cleared=True)
+    notified = _record_notify(eng)
+    await _escalate(hass, eng, health)
+    # manual recover from ESCALATED, this time the driver heals the device
+    driver.on_recover = lambda: setattr(health, "verdict", Health.OK)
+    notified.clear()
+    await eng.async_manual_recover()
+    await hass.async_block_till_done()
+    assert eng.state is GState.COOLDOWN and eng.escalated_at is None, eng.state
+    await _advance(hass, 30)  # cooldown -> ok
+    assert eng.state is GState.OK
+    keys = [k for k, _ in notified]
+    assert "recovery_success" in keys and "problem_cleared" not in keys, notified
+    await eng.async_stop()
+    # snooze an escalated guard, it heals meanwhile, unsnooze -> OK silently
+    health2 = FakeHealth(hass)
+    eng2 = make(
+        hass,
+        health2,
+        StubDriver(hass),
+        boot_window=0,
+        max_attempts=1,
+        notify_cleared=True,
+    )
+    notified2 = _record_notify(eng2)
+    await _escalate(hass, eng2, health2)
+    notified2.clear()
+    eng2.snooze(timedelta(hours=1))
+    assert eng2.escalated_at is None
+    health2.verdict = Health.OK
+    eng2.unsnooze()
+    await hass.async_block_till_done()
+    assert eng2.state is GState.OK and notified2 == [], notified2
+    await eng2.async_stop()
+
+
+async def test_problem_cleared_linked_follower(hass, _):
+    """A follower escalated by a failed group repair reports its own way back."""
+    h1 = FakeHealth(hass, Health.UNHEALTHY)
+    h2 = FakeHealth(hass, Health.UNHEALTHY)
+    e1, e2 = make_pair(
+        hass,
+        h1,
+        StubDriver(hass),
+        h2,
+        StubDriver(hass),
+        boot_window=0,
+        max_attempts=1,
+        notify_cleared=True,
+    )
+    n2 = _record_notify(e2)
+    await e1.async_start()
+    await e2.async_start()
+    await e1.async_manual_recover()
+    await hass.async_block_till_done()
+    assert e2.state is GState.ESCALATED and e2.escalated_at is not None
+    n2.clear()
+    h2.verdict = Health.OK
+    e2._evaluate()
+    await hass.async_block_till_done()
+    assert e2.state is GState.OK and [k for k, _ in n2] == ["problem_cleared"], n2
+    await e1.async_stop()
+    await e2.async_stop()
+
+
+async def test_problem_cleared_persisted_escalated_at(hass, _):
+    """A restored ESCALATED keeps its start; the clear after restart has the duration."""
+    began = dt_util.utcnow() - timedelta(hours=3)
+    snap = {"state": "escalated", "attempt": 1, "escalated_at": began.isoformat()}
+    with _NotifySink() as sent:
+        eng = DeviceEngine(
+            hass,
+            "G",
+            FakeHealth(hass, Health.UNHEALTHY),
+            StubDriver(hass),
+            StandardPolicy({}),
+            {
+                "debounce": 30,
+                "notify_cleared": True,
+                "notify_action": [{"action": "test.sink"}],
+            },
+            subentry_id="g",
+            engines={},
+            persisted=snap,
+        )
+        assert eng.state is GState.ESCALATED and eng.escalated_at == began
+        assert eng.snapshot()["escalated_at"] == began.isoformat()
+        await eng.async_start()
+        await hass.async_block_till_done()
+        assert eng.state is GState.ESCALATED and sent == []
+        eng.health.verdict = Health.OK
+        eng._evaluate()
+        await hass.async_block_till_done()
+        assert eng.state is GState.OK
+        assert [v["event"] for v in sent] == ["problem_cleared"], sent
+        assert sent[0]["message"] == "G: Back to normal after 3 hours.", sent[0]
+        assert "duration" not in sent[0], sent[0]  # template-only, no new variable
+        await eng.async_stop()
+
+
+async def test_problem_cleared_legacy_escalated_without_start(hass, _):
+    """ESCALATED stored by an older version (no escalated_at) -> no-duration text."""
+    snap = {"state": "escalated", "attempt": 2}
+    with _NotifySink() as sent:
+        eng = DeviceEngine(
+            hass,
+            "G",
+            FakeHealth(hass, Health.OK),
+            StubDriver(hass),
+            StandardPolicy({}),
+            {
+                "debounce": 30,
+                "notify_cleared": True,
+                "notify_action": [{"action": "test.sink"}],
+            },
+            subentry_id="g",
+            engines={},
+            persisted=snap,
+        )
+        assert eng.state is GState.ESCALATED and eng.escalated_at is None
+        await eng.async_start()  # healthy at restart -> clears by itself
+        await hass.async_block_till_done()
+        assert eng.state is GState.OK
+        assert [v["event"] for v in sent] == ["problem_cleared"], sent
+        assert sent[0]["message"] == "G: Back to normal.", sent[0]
+        assert sent[0]["event_text"] == "Back to normal.", sent[0]
+        await eng.async_stop()
+
+
+async def test_problem_cleared_during_bootstrap_waits_for_started(hass, _):
+    """Healthy at a restart before HA has started: OK now, the message once started.
+
+    The notify action may not be registered during bootstrap and a failed send is
+    never retried, so only the send waits; a stop before the start drops it.
+    """
+    began = dt_util.utcnow() - timedelta(hours=3)
+    behavior = {
+        "debounce": 30,
+        "notify_cleared": True,
+        "notify_action": [{"action": "test.sink"}],
+    }
+    with _NotifySink() as sent:
+        hass.set_state(CoreState.starting)
+        try:
+            eng = DeviceEngine(
+                hass,
+                "G",
+                FakeHealth(hass, Health.OK),
+                StubDriver(hass),
+                StandardPolicy({}),
+                behavior,
+                subentry_id="g",
+                engines={},
+                persisted={
+                    "state": "escalated",
+                    "attempt": 1,
+                    "escalated_at": began.isoformat(),
+                },
+            )
+            await eng.async_start()
+            await hass.async_block_till_done()
+            assert eng.state is GState.OK and eng.escalated_at is None
+            assert sent == [], sent
+            # a guard stopped (unloaded) before the start sends nothing later
+            eng2 = DeviceEngine(
+                hass,
+                "H",
+                FakeHealth(hass, Health.OK),
+                StubDriver(hass),
+                StandardPolicy({}),
+                behavior,
+                subentry_id="h",
+                engines={},
+                persisted={"state": "escalated", "attempt": 1},
+            )
+            await eng2.async_start()
+            await eng2.async_stop()
+        finally:
+            hass.set_state(CoreState.running)
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        await hass.async_block_till_done()
+        assert [v["event"] for v in sent] == ["problem_cleared"], sent
+        assert sent[0]["message"] == "G: Back to normal after 3 hours.", sent[0]
+        await eng.async_stop()
+
+
+async def test_hb_success_ping_after_failure_reports_cleared(hass, _):
+    """Failure ping -> ESCALATED; a success ping 26 h later -> problem_cleared."""
+    with _HbClock() as clock, _NotifySink() as sent:
+        src = _hb_source(hass, "e1")
+        eng = _hb_engine(hass, src, notify_cleared=True)
+        await eng.async_start()
+        await src.async_handle_ping(True, None)
+        await src.async_handle_ping(False, "3")
+        assert eng.state is GState.ESCALATED
+        await clock.advance(hass, 26 * 3600 - 1)  # still escalated (overdue too)
+        await src.async_handle_ping(True, None)
+        assert eng.state is GState.OK
+        await hass.async_block_till_done()
+        assert [v["event"] for v in sent] == ["problem_detected", "problem_cleared"]
+        assert sent[1]["event_text"] == "Back to normal after 26 hours.", sent[1]
+        assert sent[1]["health_detail"] == "", sent[1]
+        await eng.async_stop()
+
+
+async def test_reset_engine_verdict_drops_escalated_at(hass, _):
+    """A dropped verdict (new heartbeat identity) takes its start time with it."""
+    stored = {"state": "escalated", "attempt": 1, "escalated_at": "2026-01-01T00:00"}
+    assert "escalated_at" not in reset_engine_verdict(stored)
+    assert stored["escalated_at"]  # input left alone
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 

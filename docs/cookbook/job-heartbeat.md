@@ -237,8 +237,12 @@ tap_action:
   [`ping.ps1`](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/examples/heartbeat/ping.ps1)
   (Task Scheduler: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File …`, `HEARTBEAT_URL` as
   an environment variable).
-- **Back to normal.** Want a message when an escalated backup finally pings again? Trigger on the
-  status sensor `from: escalated` `to: ok` — see
+- **Back to normal.** Want a message when an escalated backup finally pings again? Tick *Also
+  notify when it's back to normal* in the guard's *Notification* section (on for new guards, off
+  for existing ones until ticked). The next success ping then sends *"Nightly Backup: Back to
+  normal after 26 hours."* (`event: problem_cleared`; the time counts from the alarm) through the
+  same notify action. Not after a `necromancer.reset` or a snooze. For other reactions, trigger on
+  the status sensor `from: escalated` `to: ok` — see
   [On your dashboard & in automations](https://github.com/MrTomRocker/homeassistant-necromancer#on-your-dashboard--in-automations).
 
 ## Gotchas & variations
