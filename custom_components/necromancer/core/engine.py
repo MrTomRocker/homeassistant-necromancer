@@ -62,6 +62,11 @@ from .state import GState
 
 LOGGER = logging.getLogger(__name__)
 
+# How long a start restored after a restart stays on hold across a BLIND
+# entered during bootstrap (the source not loaded yet): a return to the stored
+# state within it keeps the stored start; a longer BLIND is a real one.
+RESTORED_SINCE_HOLD = timedelta(minutes=15)
+
 
 def _noop() -> None:
     """Default save callback when none is provided (e.g. in tests)."""
@@ -83,6 +88,7 @@ def reset_engine_verdict(stored: dict) -> dict:
         new["state"] = GState.OK.value
         new["attempt"] = 0
         new.pop("escalated_at", None)
+        new.pop("state_since", None)
     return new
 
 
@@ -140,6 +146,25 @@ class DeviceEngine:
         # after ..." duration. Persisted with the restored ESCALATED; set and
         # cleared in _set_state, so every path in or out keeps it right.
         self.escalated_at: datetime | None = None
+        # When the guard entered its current state, whatever it is: the cards'
+        # "for 2 h" / "problem since 11:19". HA's last_changed starts again at
+        # every restart, this one is persisted with the state and restored (see
+        # _apply_persisted / _set_state). Seeded with "now" for a fresh guard.
+        self.state_since: datetime = dt_util.utcnow()
+        # (state, since) as stored before a restart: when the first evaluation
+        # re-derives that state (a SUSPECT from still-bad health), its old start
+        # is kept. One-shot, and dropped after that first evaluation, so a later
+        # transition never inherits it — except across a BLIND entered during
+        # bootstrap (the source is not loaded yet), see _set_state.
+        self._restored_since: tuple[str, datetime] | None = None
+        # Until when a restored start held across a bootstrap BLIND may still
+        # be taken (None: no such hold).
+        self._restored_until: datetime | None = None
+        # (state, state_since) as read from the Store: when the live pair
+        # differs after the first evaluation (no stored start yet, a stored
+        # transient state that is gone, an elapsed snooze), it is saved once,
+        # so the start survives the next restart even without a transition.
+        self._stored_pair: tuple[str | None, datetime | None] = (None, None)
         self.auto = bool(behavior.get(CONF_AUTO_RESTART, DEFAULT_AUTO_RESTART))
         # Operator snooze (necromancer.snooze): health ignored until `snooze_until`
         # (re-armed on restart) or unsnooze. Reuses `_unsub_timer` (states are
@@ -204,6 +229,8 @@ class DeviceEngine:
         )
         if "auto" in data:
             self.auto = bool(data["auto"])
+        stored_since = dt_util.parse_datetime(data.get("state_since") or "")
+        self._stored_pair = (data.get("state"), stored_since)
         if data.get("state") == GState.ESCALATED.value:
             self.state = GState.ESCALATED
             self.attempt = int(data.get("attempt", 0) or 0)
@@ -215,6 +242,17 @@ class DeviceEngine:
             self.state = GState.SNOOZED
             self._snoozed = True
             self._snooze_until = dt_util.parse_datetime(data.get("snooze_until") or "")
+        # The stored start of the stored state (older versions: none; an
+        # ESCALATED falls back to its escalated_at).
+        if stored_since is None and self.state is GState.ESCALATED:
+            stored_since = self.escalated_at
+        stored_state = data.get("state")
+        if stored_since is not None and stored_state:
+            if stored_state == self.state.value:
+                self.state_since = stored_since
+            # Also for a state restored right here (OK): a BLIND at boot and
+            # back to it keeps the stored start.
+            self._restored_since = (stored_state, stored_since)
 
     def snapshot(self) -> dict:
         """Serialise persistent runtime state for the Store."""
@@ -238,6 +276,7 @@ class DeviceEngine:
             "escalated_at": self.escalated_at.isoformat()
             if self.escalated_at
             else None,
+            "state_since": self.state_since.isoformat(),
             "auto": self.auto,
             "snooze_until": self._snooze_until.isoformat()
             if self._snooze_until
@@ -281,13 +320,34 @@ class DeviceEngine:
             # not the old finding.
             self._read_detail()
             self._evaluate()
+            self._settle_restored_since()
         except Exception:
+            self._restored_since = None
+            self._restored_until = None
             # __init__ drops an engine whose start raised, without async_stop. Tear
             # down what we subscribed here ourselves: otherwise a heartbeat token
             # stays `active` on a dead source and its pings get 200 into the void
             # (unsub sets it back to `waiting` -> 503, the sender retries).
             await self.async_stop()
             raise
+
+    def _settle_restored_since(self) -> None:
+        """End the restart hand-over of `state_since` after the first evaluation.
+
+        The stored start is offered to that evaluation only: left pending, a
+        transition hours later into the same state would take the start from
+        before the restart. The one exception is a BLIND entered during
+        bootstrap (the source is not loaded yet): the hold set in _set_state
+        stays until the guard leaves it. And when the live (state, since)
+        differs from the stored one, it is saved now: otherwise a quiet guard
+        writes nothing and the next restart starts the clock again.
+        """
+        if self._restored_until is None or self.state is not GState.BLIND:
+            self._restored_since = None
+            self._restored_until = None
+        if (self.state.value, self.state_since) != self._stored_pair:
+            self._stored_pair = (self.state.value, self.state_since)
+            self._save()
 
     @callback
     def _check_config(self, _hass: HomeAssistant) -> None:
@@ -523,10 +583,37 @@ class DeviceEngine:
         updates).
         """
         if state != self.state:
+            now = dt_util.utcnow()
             if state == GState.ESCALATED:
-                self.escalated_at = dt_util.utcnow()
+                self.escalated_at = now
             elif self.state == GState.ESCALATED:
                 self.escalated_at = None
+            # The first transition after a restart back into the state stored
+            # before it (a SUSPECT re-derived from still-bad health) keeps that
+            # state's old start; any other transition starts the clock now.
+            restored = self._restored_since
+            if (
+                restored is not None
+                and state is GState.BLIND
+                and restored[0] != state.value
+                and self.hass.state is not CoreState.running
+            ):
+                # BLIND during bootstrap: the source is not loaded yet (no
+                # state, or HA's restored `unavailable`). Not a finding about
+                # the device, so the stored start stays on hold for a while and
+                # a return to the stored state keeps it.
+                self._restored_until = now + RESTORED_SINCE_HOLD
+                self.state_since = now
+            else:
+                until = self._restored_until
+                self._restored_since = None
+                self._restored_until = None
+                keep = (
+                    restored is not None
+                    and restored[0] == state.value
+                    and (until is None or now <= until)
+                )
+                self.state_since = restored[1] if keep else now
             self.state = state
             LOGGER.debug("%s entered state %s", self.name, state)
             # Read the reason synchronously at the transition, so an alarm sent
@@ -637,9 +724,14 @@ class DeviceEngine:
             else 0.0
         )
         if remaining <= 0:
+            now = dt_util.utcnow()
+            until = self._snooze_until
             self._snoozed = False
             self._snooze_until = None
             self.state = GState.OK  # the following _evaluate re-derives from health
+            # OK since the snooze ran out (while HA was down), not since this
+            # start; async_start saves the new pair (_settle_restored_since).
+            self.state_since = until if until is not None and until <= now else now
             return
         self._cancel_timer()
         self._unsub_timer = async_call_later(self.hass, remaining, self._snooze_done)

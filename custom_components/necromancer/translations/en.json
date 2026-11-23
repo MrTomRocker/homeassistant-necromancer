@@ -20,6 +20,7 @@
           "delete_port": "Delete port",
           "import_ports": "Import ports",
           "export_ports": "Export ports",
+          "sidebar": "Sidebar",
           "save": "Save"
         }
       },
@@ -121,6 +122,16 @@
       "export_result": {
         "title": "Exported ports",
         "description": "Copy the YAML below — edit it and paste it back via “Import ports”.\n\n```\n{yaml}\n```"
+      },
+      "sidebar": {
+        "title": "Sidebar",
+        "description": "Show the Necromancer page in the sidebar: every guard at a glance, with its actions. It is visible to all users; each user can still hide it in their profile. Takes effect when you save.",
+        "data": {
+          "show_panel": "Show in the sidebar"
+        },
+        "data_description": {
+          "show_panel": "Turn off to remove the page from the sidebar for everyone."
+        }
       }
     },
     "error": {

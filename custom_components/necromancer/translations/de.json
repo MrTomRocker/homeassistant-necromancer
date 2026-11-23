@@ -20,6 +20,7 @@
           "delete_port": "Port entfernen",
           "import_ports": "Ports importieren",
           "export_ports": "Ports exportieren",
+          "sidebar": "Seitenleiste",
           "save": "Speichern"
         }
       },
@@ -121,6 +122,16 @@
       "export_result": {
         "title": "Exportierte Ports",
         "description": "Kopiere das YAML unten – bearbeiten und über „Ports importieren“ wieder einspielen.\n\n```\n{yaml}\n```"
+      },
+      "sidebar": {
+        "title": "Seitenleiste",
+        "description": "Die Necromancer-Seite in der Seitenleiste zeigen: alle Guards auf einen Blick, mit ihren Aktionen. Sie ist für alle Nutzer sichtbar; jeder kann sie zusätzlich in seinem Profil ausblenden. Wirkt beim Speichern.",
+        "data": {
+          "show_panel": "In der Seitenleiste zeigen"
+        },
+        "data_description": {
+          "show_panel": "Ausschalten entfernt die Seite für alle aus der Seitenleiste."
+        }
       }
     },
     "error": {
