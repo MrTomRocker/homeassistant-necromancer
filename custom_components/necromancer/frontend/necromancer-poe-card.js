@@ -325,8 +325,11 @@ export function idOriginHtml(r, i, lang) {
   const o = originOf(r);
   const link = () => {
     const source = `${o.entity}${o.attribute ? `.${o.attribute}` : ""}`;
+    // The entity's name reads better than its long id ("Port 18 Nachbarn ·
+    // mac"); the id stays in the tooltip.
+    const shown = o.entityName ? `${o.entityName}${o.attribute ? ` · ${o.attribute}` : ""}` : source;
     const title = o.entityName ? `${o.entityName} (${source})` : source;
-    return `<button data-action="more-info" data-entity="${esc(o.entity)}" data-key="src${i}" title="${esc(title)}">${esc(source).replace(/([._])/g, "$1<wbr>")}</button>`;
+    return `<button data-action="more-info" data-entity="${esc(o.entity)}" data-key="src${i}" title="${esc(title)}">${esc(shown).replace(/([._])/g, "$1<wbr>")}</button>`;
   };
   if (o.kind === "conflict") {
     const fixed = o.staticId || r.idStatic;
@@ -394,7 +397,10 @@ export function portRowHtml(r, i, lang, { armed = false, running: own = false, n
     const on = r.power === "on";
     const tone = r.power == null ? "idle" : on ? "good" : "bad";
     const power = r.power == null ? core.t(lang, "state.unavailable") : core.t(lang, on ? "poe.power_on" : "poe.power_off");
-    const dev = r.switchDevice && r.switchDevice !== r.switch ? `<span class="muted" title="${esc(r.switchDevice)}">· ${esc(r.switchDevice)}</span>` : "";
+    // The device only when the switch's name does not already say it
+    // ("PoE-Switch-Serverschrank Port 18" needs no "· PoE-Switch-Serverschrank").
+    const said = r.switchDevice && String(r.switch || "").toLowerCase().startsWith(String(r.switchDevice).toLowerCase());
+    const dev = r.switchDevice && r.switchDevice !== r.switch && !said ? `<span class="muted" title="${esc(r.switchDevice)}">· ${esc(r.switchDevice)}</span>` : "";
     sw = `<button class="v" data-action="more-info" data-entity="${esc(r.actuator)}" data-key="act${i}" title="${esc(`${r.switch} (${r.actuator})`)}">${esc(r.switch)}</button>${dev}`;
     swTag = `<button class="tag" style="--t:${TONE_COLORS[tone]}" data-action="more-info" data-entity="${esc(r.actuator)}" data-key="pw${i}"><ha-icon icon="${on ? "mdi:flash" : "mdi:flash-off"}"></ha-icon>${esc(power)}</button>`;
   } else sw = `<span class="muted">–</span>`;

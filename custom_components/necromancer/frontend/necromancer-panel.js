@@ -36,7 +36,7 @@ const HERO_STATES = [...core.GUARD_STATES, "unavailable"];
  * draws its own header and bulk actions, the card only the list (or the
  * masonry), the timeline option passes straight through.
  */
-export function panelCardConfig(s, tab) {
+export function panelCardConfig(s, tab, opts = {}) {
   const conf = {
     display: s.display === "cards" ? "cards" : "list",
     show_header: false,
@@ -50,7 +50,10 @@ export function panelCardConfig(s, tab) {
   };
   // The full cards' 24 h section: only the "Cards" display has full cards.
   if (conf.display === "cards" && s.timeline === true) conf.timeline = true;
+  // With a Heartbeat tab, every guard is in exactly one tab: jobs there, the
+  // rest here (`split`: the panel has heartbeat guards).
   if (tab === "heartbeat") conf.filter = { types: ["heartbeat"] };
+  else if (tab === "guards" && opts.split) conf.filter = { types: ["recovery", "notify"] };
   return conf;
 }
 
@@ -174,7 +177,10 @@ const STYLE = `
   }
   .tab:active { transform: scale(0.94); }
   .tab[aria-selected="true"] { background: var(--ui-surface); color: var(--ui-text); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12); }
-  .tab[hidden] { display: none; }
+  .tab[hidden], .tabs[hidden] { display: none; }
+  /* Attention count of a tab (also of the one not shown). */
+  .tbadge { min-width: 20px; height: 20px; padding: 0 6px; box-sizing: border-box; border-radius: 10px; display: inline-grid; place-items: center;
+    font-size: 12px; font-weight: 800; line-height: 1; color: #fff; background: var(--c); }
   .search {
     flex: 1 1 220px; max-width: 360px; margin-left: auto; display: flex; align-items: center; gap: 8px; height: 44px;
     padding: 0 5px 0 14px; border-radius: 22px; background: var(--ui-surface); box-sizing: border-box; color: var(--ui-text2);
@@ -233,8 +239,11 @@ const STYLE = `
     .bulk { margin-left: 0; }
     .bar { gap: 8px; margin: 12px 0 10px; }
     .tabs { width: 100%; box-sizing: border-box; }
-    .tab { flex: 1; justify-content: center; padding: 0 8px; min-width: 0; }
+    /* Each tab as wide as its content (a short "PoE" leaves room for a long
+       "Heartbeat" with its badge), the rest shared out. */
+    .tab { flex: 1 1 auto; justify-content: center; padding: 0 8px; gap: 5px; min-width: 0; }
     .tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tbadge { min-width: 18px; height: 18px; padding: 0 5px; font-size: 11px; }
     .search { max-width: none; margin-left: 0; }
   }
   @media (max-width: 600px) {
@@ -416,20 +425,49 @@ export class NecromancerPanel extends HTMLElement {
     const hass = this._hass;
     if (!hass || !hass.states) return;
     const lang = this._lang();
-    const ids = this._discover(hass);
-    const sig = [lang, this._view.state, ...ids.map((id) => hass.states[id])];
+    const all = this._discover(hass);
+    const hb = all.filter((id) => core.guardInfo(hass.states[id]).type === "heartbeat");
+    const split = hb.length > 0;
+    if (split !== this._split) {
+      // Heartbeat guards appeared or went: the tabs and the guards tab's filter change.
+      this._split = split;
+      this._applySettings();
+      if (!split && this._tab === "heartbeat") this._selectTab("guards");
+    }
+    const user = hass.user;
+    const admin = !(user && user.is_admin === false);
+    // The ids per tab: with a Heartbeat tab each guard is in one of them.
+    const hbSet = new Set(hb);
+    const tabIds = { guards: split ? all.filter((id) => !hbSet.has(id)) : all, heartbeat: hb };
+    const ids = tabIds[this._tab] || all;
+    const sig = [lang, this._view.state, this._tab, admin, ...all.map((id) => hass.states[id])];
     if (!force && sameSig(sig, this._sig)) return;
     this._sig = sig;
+    // Per-tab attention counts for the tab badges (a problem in the other tab
+    // stays visible).
+    this._tabCounts = {
+      guards: core.countByState(tabIds.guards, hass),
+      heartbeat: core.countByState(tabIds.heartbeat, hass),
+    };
+    this._renderTabs();
+    // Nothing in the start tab but jobs in the other one (a heartbeat-only
+    // install): open the tab that has guards, unless the user chose a tab.
+    if (!this._userPicked && this._tab === "guards" && split && !tabIds.guards.length) {
+      this._selectTab("heartbeat");
+      return;
+    }
     const counts = core.countByState(ids, hass);
+    const allCounts = core.countByState(all, hass);
     const worst = core.ATTENTION_STATES.find((s) => counts[s] > 0);
     this._el.hero.style.setProperty("--hc", core.stateColor(worst || "ok"));
     this._el.hero.classList.toggle("alert", counts.escalated > 0);
-    const headline = counts.attention ? core.t(lang, "count.problems", { n: counts.attention }) : t(lang, "ui.all_quiet");
+    const headline = counts.attention ? core.t(lang, counts.attention === 1 ? "count.problems_one" : "count.problems", { n: counts.attention }) : t(lang, "ui.all_quiet");
     if (this._el.headline.textContent !== headline) this._el.headline.textContent = headline;
     const sub = core.t(lang, counts.total === 1 ? "count.total_one" : "count.total", { n: counts.total });
     if (this._el.hsub.textContent !== sub) this._el.hsub.textContent = sub;
 
-    const bubbles = HERO_STATES.filter((s) => counts[s] > 0 || s === "ok")
+    // An active filter keeps its bubble (also with 0 in this tab), so it can be undone.
+    const bubbles = HERO_STATES.filter((s) => counts[s] > 0 || s === "ok" || this._view.state === s)
       .map((s) => {
         const c = core.stateColor(s);
         const hot = counts[s] > 0 && core.needsAttention(s) && !core.isMutedState(s);
@@ -439,10 +477,13 @@ export class NecromancerPanel extends HTMLElement {
       .join("");
     this._set("bubbles", this._el.bubbles, bubbles);
 
+    // Maintenance mode acts on every guard (so it follows all guards, not the
+    // tab): admins only (others just watch), and not with "Show actions" off.
     let bulk = "";
-    if (counts.total) {
+    const showActs = !this._settings || this._settings.show_actions !== false;
+    if (allCounts.total && admin && showActs) {
       bulk += `<button class="pill snz strong" data-action="snooze-all" data-anchor="bulk-snooze" aria-haspopup="menu"><ha-icon icon="mdi:sleep"></ha-icon><span>${esc(core.t(lang, "action.snooze_all"))}</span><ha-icon icon="mdi:chevron-down"></ha-icon></button>`;
-      if (counts.snoozed > 0) {
+      if (allCounts.snoozed > 0) {
         const armed = this._confirm.is("unsnooze_all");
         bulk += `<button class="pill snz ${armed ? "confirm" : ""}" data-action="unsnooze-all"><ha-icon icon="mdi:alarm"></ha-icon><span>${esc(armed ? t(lang, "ui.wake_confirm") : core.t(lang, "action.unsnooze_all"))}</span></button>`;
       }
@@ -458,17 +499,23 @@ export class NecromancerPanel extends HTMLElement {
   }
 
   _tabs() {
-    return PANEL_TABS.filter((tab) => tab !== "poe" || this._poeCount > 0);
+    return PANEL_TABS.filter((tab) => (tab !== "poe" || this._poeCount > 0) && (tab !== "heartbeat" || this._split));
   }
 
   _renderTabs() {
     const lang = this._lang();
     const icons = { guards: "mdi:shield-check", heartbeat: "mdi:heart-pulse", poe: "mdi:ethernet" };
-    const html = this._tabs()
-      .map(
-        (tab) =>
-          `<button class="tab" role="tab" data-action="tab" data-tab="${tab}" aria-selected="${this._tab === tab}" tabindex="${this._tab === tab ? 0 : -1}"><ha-icon icon="${icons[tab]}"></ha-icon><span>${esc(core.t(lang, `tab.${tab}`))}</span></button>`,
-      )
+    const tabs = this._tabs();
+    // A single tab needs no tab bar.
+    this._el.tabs.hidden = tabs.length < 2;
+    const html = tabs
+      .map((tab) => {
+        // Badge: how many guards of that tab need attention, in the worst state's colour.
+        const c = (this._tabCounts || {})[tab];
+        const worst = c && core.ATTENTION_STATES.find((st) => c[st] > 0);
+        const badge = c && c.attention ? `<b class="tbadge" style="--c:${core.stateColor(worst)}" aria-label="${esc(core.t(lang, c.attention === 1 ? "count.problems_one" : "count.problems", { n: c.attention }))}">${esc(c.attention)}</b>` : "";
+        return `<button class="tab" role="tab" data-action="tab" data-tab="${tab}" aria-selected="${this._tab === tab}" tabindex="${this._tab === tab ? 0 : -1}"><ha-icon icon="${icons[tab]}"></ha-icon><span>${esc(core.t(lang, `tab.${tab}`))}</span>${badge}</button>`;
+      })
       .join("");
     this._set("tabs", this._el.tabs, html);
     if (this._tab === "poe" && this._poeCount === 0 && this._poeChecked) this._selectTab("guards");
@@ -477,7 +524,7 @@ export class NecromancerPanel extends HTMLElement {
   // ------------------------------------------------------------ tabs and cards
 
   _cardConfig(tab) {
-    return panelCardConfig(this._settings, tab);
+    return panelCardConfig(this._settings, tab, { split: Boolean(this._split) });
   }
 
   _makeCard(tab) {
@@ -505,6 +552,8 @@ export class NecromancerPanel extends HTMLElement {
     if (this._hass) card.hass = this._hass;
     if (next !== "poe") card.setView(this._view);
     this._renderTabs();
+    // The hero counts the open tab's guards.
+    this._renderHero(true);
   }
 
   _applySettings() {
@@ -574,7 +623,7 @@ export class NecromancerPanel extends HTMLElement {
         <div class="sgroup">${esc(core.t(lang, "settings.sort"))}</div>
         <div class="seg" role="group">${seg("sort", core.SORT_MODES, (v) => core.t(lang, `sort.${v}`))}</div>
         <div class="sgroup">${esc(core.t(lang, "settings.start_tab"))}</div>
-        <div class="seg" role="group">${seg("start_tab", PANEL_TABS.filter((x) => x !== "poe" || this._poeCount > 0), (v) => core.t(lang, `tab.${v}`))}</div>
+        <div class="seg" role="group">${seg("start_tab", this._tabs(), (v) => core.t(lang, `tab.${v}`))}</div>
         <div class="dfoot"><button class="pill strong" data-action="close-sheet"><ha-icon icon="mdi:check"></ha-icon><span>${esc(t(lang, "ui.done"))}</span></button></div>
       </div>`;
     const active = this.shadowRoot.activeElement;
@@ -591,6 +640,8 @@ export class NecromancerPanel extends HTMLElement {
   async _changeSetting(key, value) {
     this._settings = actions.normalizePanelSettings({ ...this._settings, [key]: value });
     this._applySettings();
+    // "Show actions" also decides the hero's maintenance mode.
+    this._renderHero(true);
     try {
       this._settings = await savePanelSettings(this._hass, this._settings);
     } catch (_err) {

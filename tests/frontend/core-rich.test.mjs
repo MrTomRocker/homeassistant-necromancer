@@ -123,14 +123,14 @@ describe("mainValue rich", () => {
     assert.equal(mv.age, 19 * 60);
     assert.ok(mv.title.startsWith("Pool power"));
     const de = mainValue(info, hassWith(stateGuard, { "sensor.pool_power": POWER }), {}, NOW, "de", rich);
-    assert.equal(de.caption, "Gesund seit 19 min");
+    assert.equal(de.caption, "Gesund seit 19 Min.");
   });
 
   test("the state word follows the guard state", () => {
     const esc = { ...stateGuard, state: "escalated" };
     const mv = mainValue(info, hassWith(esc, { "sensor.pool_power": POWER }), {}, NOW, "de", rich);
     assert.equal(mv.value, "200 W");
-    assert.equal(mv.caption, "Eskaliert seit 19 min");
+    assert.equal(mv.caption, "Eskaliert seit 19 Min.");
   });
 
   test("opts.since: the real start of the state beats last_changed (restart)", () => {
@@ -169,7 +169,7 @@ describe("mainValue rich", () => {
       assert.equal(mv.stateWord, null, st);
     }
     const missing = mainValue(info, hassWith(stateGuard), {}, NOW, "de", rich);
-    assert.equal(missing.value, "seit 19 min");
+    assert.equal(missing.value, "seit 19 Min.");
   });
 
   test("template guard (no source_entity): 'for 19 min'", () => {
@@ -295,11 +295,11 @@ describe("poePortRows mapping", () => {
     assert.equal(p4.idOrigin.label, "live · from sensor.sw.port_4_mac");
     assert.equal(p4.idOrigin.attribute, "port_4_mac");
     assert.equal(p23.idOrigin.kind, "fixed");
-    assert.equal(p23.idOrigin.label, "Fixed id");
+    assert.equal(p23.idOrigin.label, "Static label");
     assert.equal(p7.idOrigin.kind, "conflict");
     assert.equal(p8.idOrigin.kind, "none");
-    assert.equal(rows(hass, "de")[0].idOrigin.label, "live · aus input_text.switch_port_3_mac");
-    assert.equal(rows(hass, "de")[3].idOrigin.label, "Feste Kennung");
+    assert.equal(rows(hass, "de")[0].idOrigin.label, "live über input_text.switch_port_3_mac");
+    assert.equal(rows(hass, "de")[3].idOrigin.label, "Statisches Label");
   });
 
   test("id origin: an empty live entity says so, a conflict names both sources", () => {
@@ -308,12 +308,12 @@ describe("poePortRows mapping", () => {
     assert.equal(p4.idOrigin.empty, true);
     // Empty: the same words (the "Nothing connected" line says the rest).
     assert.equal(p4.idOrigin.label, "live · from sensor.sw.port_4_mac");
-    assert.equal(rows(hass, "de")[1].idOrigin.label, "live · aus sensor.sw.port_4_mac");
+    assert.equal(rows(hass, "de")[1].idOrigin.label, "live über sensor.sw.port_4_mac");
     assert.equal(p7.idStatic, "x");
     assert.equal(p7.idOrigin.staticId, "x");
     assert.equal(p7.idOrigin.entity, "sensor.y");
-    assert.equal(p7.idOrigin.label, "conflict · fixed x and sensor.y");
-    assert.equal(rows(hass, "de")[5].idOrigin.label, "Konflikt · fest x und sensor.y");
+    assert.equal(p7.idOrigin.label, "conflict · label x and sensor.y");
+    assert.equal(rows(hass, "de")[5].idOrigin.label, "Konflikt · Label x und sensor.y");
     assert.equal(p7.idDisplay, null, "a conflict shows no id");
   });
 

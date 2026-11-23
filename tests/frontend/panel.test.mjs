@@ -1044,6 +1044,106 @@ describe("guards card: empty states", () => {
   });
 });
 
+describe("observe only for non-admins; calm healthy rows", () => {
+  const tap = (el, action, data = {}) =>
+    el._click({ target: { closest: () => ({ dataset: { action, ...data }, getAttribute: () => null }) }, stopPropagation() {} });
+
+  test("a non-admin gets no buttons, no menu, chips and popup only inform; no bulk actions", async () => {
+    const hass = cardHass();
+    hass.user = { is_admin: false };
+    hass.states["switch.alpha_auto_recovery"] = { entity_id: "switch.alpha_auto_recovery", state: "off", attributes: {} };
+    const el = await mount("necromancer-guard-card", { entity: "sensor.alpha_status" }, hass);
+    assert.deepEqual(el._ctx.acts.actions, []);
+    const out = dump(el);
+    assert.ok(!out.includes('data-action="reset"') && !out.includes('data-action="menu"') && !out.includes('data-action="auto-chip"'));
+    tap(el, "recovery");
+    await settle();
+    const pop = el._rec.el.innerHTML;
+    assert.ok(!pop.includes('data-action="rec-auto"') && !pop.includes('data-action="rec-repair"'));
+    const list = await mount("necromancer-guards-card", {}, hass);
+    assert.ok(!dump(list).includes('data-action="snooze-all"'), "no maintenance mode");
+    hass.user = { is_admin: true };
+    const admin = await mount("necromancer-guard-card", { entity: "sensor.alpha_status" }, hass);
+    assert.equal(admin._ctx.acts.main, "reset");
+  });
+
+  test("healthy: the main pill is tinted, a problem keeps the strong fill", async () => {
+    const ok = await mount("necromancer-guard-card", { entity: "sensor.bravo_status" }, cardHass());
+    assert.match(dump(ok), /class="pill accent main "/);
+    assert.ok(!/class="pill accent strong "/.test(dump(ok)));
+    const bad = await mount("necromancer-guard-card", { entity: "sensor.alpha_status" }, cardHass());
+    assert.match(dump(bad), /class="pill accent strong "/);
+  });
+});
+
+describe("guards card in HA's card picker", () => {
+  test("the picker preview shows a short sample, the added card everything", async () => {
+    const hass = cardHass();
+    const full = await mount("necromancer-guards-card", { collapse_ok: false }, hass);
+    const all = full._cards.size;
+    assert.ok(all > 4, `fixture has ${all} guards`);
+    const el = document.createElement("necromancer-guards-card");
+    el.setConfig({ collapse_ok: false });
+    el.hass = hass;
+    // As inside hui-card-picker's shadow root.
+    el.getRootNode = () => ({ host: { tagName: "HUI-CARD-PICKER" } });
+    el.connectedCallback();
+    await settle();
+    assert.equal(el._cards.size, 4);
+  });
+});
+
+describe("panel: tabs without overlap", () => {
+  const panelExtra = { narrow: false, panel: { url_path: "necromancer", config: {} }, route: { prefix: "/necromancer", path: "" } };
+
+  test("with heartbeat guards: Guards shows the others, Heartbeat the jobs, badges count each tab", async () => {
+    const hass = cardHass();
+    const el = await mount("necromancer-panel", undefined, hass, panelExtra);
+    await settle();
+    assert.deepEqual(el._cards.guards._config.filter, { types: ["recovery", "notify"] });
+    const tabs = el._el.tabs.innerHTML;
+    assert.ok(tabs.includes('data-tab="heartbeat"'));
+    // alpha escalated + delta recovering in Guards; the blind backup in Heartbeat.
+    assert.match(tabs, /data-tab="guards".*?class="tbadge"[^>]*>2</s);
+    assert.match(tabs, /data-tab="heartbeat".*?class="tbadge"[^>]*>1</s);
+    // The hero counts the open tab only.
+    assert.ok(!el._el.bubbles.innerHTML.includes("Blind"));
+    el._selectTab("heartbeat");
+    await settle();
+    assert.deepEqual(el._cards.heartbeat._config.filter, { types: ["heartbeat"] });
+    assert.ok(el._el.bubbles.innerHTML.includes("Blind"));
+  });
+
+  test("without heartbeat guards: no Heartbeat tab, Guards shows everything, one tab = no tab bar", async () => {
+    const hass = cardHass();
+    for (const id of Object.keys(hass.states)) {
+      const so = hass.states[id];
+      if (so.attributes && so.attributes.health_type === "heartbeat") delete hass.states[id];
+    }
+    const ws = hass.callWS;
+    hass.callWS = async function callWS(msg) {
+      if (msg.type === "necromancer/poe/ports") {
+        this.ws.push(msg);
+        return { entry_id: "e1", ports: [] };
+      }
+      return ws.call(this, msg);
+    };
+    const el = await mount("necromancer-panel", undefined, hass, panelExtra);
+    await settle();
+    assert.ok(!el._el.tabs.innerHTML.includes('data-tab="heartbeat"'));
+    assert.equal(el._cards.guards._config.filter, undefined);
+    assert.equal(el._el.tabs.hidden, true, "Guards alone (no PoE ports): no tab bar");
+  });
+
+  test("a non-admin sees no maintenance mode in the panel", async () => {
+    const hass = cardHass();
+    hass.user = { is_admin: false };
+    const el = await mount("necromancer-panel", undefined, hass, panelExtra);
+    await settle();
+    assert.ok(!el._el.bulk.innerHTML.includes("snooze-all"));
+  });
+});
+
 describe("buttons: main pill and snooze pill (design §16)", () => {
   const pills = (el) => [el._ctx.acts.main, el._ctx.acts.second];
   const tap = (el, action, data = {}) =>
@@ -1144,7 +1244,7 @@ describe("main value of a numeric state guard", () => {
     assert.ok(out.includes("Healthy for 19 min"));
     assert.ok(out.includes('data-action="more-info"') && out.includes('data-entity="sensor.bravo_power"'));
     const de = await mount("necromancer-guard-card", { entity: "sensor.bravo_status" }, numericHass("de"));
-    assert.ok(dump(de).includes("Gesund seit 19 min"));
+    assert.ok(dump(de).includes("Gesund seit 19 Min."));
     // The collapsed row shows the value in its pill.
     const row = await mount("necromancer-guard-card", { entity: "sensor.bravo_status", layout: "compact" }, numericHass());
     assert.ok(dump(row).includes("200 W"));
@@ -1528,7 +1628,7 @@ describe("full card timeline option (G1) and the tray wording", () => {
   test("helpers: one period format, numbers stay with their nouns, old failures go quiet", async () => {
     const base = await import("../../custom_components/necromancer/frontend/necromancer-base.js?v=test");
     assert.equal(base.withPeriodFormatted("No heartbeat for 5 hours, expected every 60 minutes.", 3600), "No heartbeat for 5 hours, expected every 1 h.");
-    assert.equal(base.withPeriodFormatted("Kein Lebenszeichen seit 5 Stunden, erwartet alle 90 Minuten.", 5400), "Kein Lebenszeichen seit 5 Stunden, erwartet alle 1 h 30 min.");
+    assert.equal(base.withPeriodFormatted("Kein Lebenszeichen seit 5 Stunden, erwartet alle 90 Minuten.", 5400), "Kein Lebenszeichen seit 5 Stunden, erwartet alle 1 Std. 30 Min.");
     assert.equal(base.withPeriodFormatted("Failure reported, exit code 3.", 3600), "Failure reported, exit code 3.");
     assert.equal(base.withPeriodFormatted("No heartbeat, expected every 60 minutes.", null), "No heartbeat, expected every 60 minutes.", "no period: as is");
     assert.equal(base.glueEventText("Escalated · 2 attempts · 4 h ago"), "Escalated\u00a0· 2\u00a0attempts\u00a0· 4\u00a0h\u00a0ago");
@@ -1708,7 +1808,7 @@ describe("recovery popup and chips", () => {
     assert.equal(panelCardConfig({ ...s, display: "cards", timeline: true }, "guards").timeline, true);
     assert.ok(!("timeline" in panelCardConfig({ ...s, display: "list", timeline: true }, "guards")), "a list has no full cards");
     // "Row shows" names the cards' folded quiet group in its helper.
-    assert.match(gc.configForm("de").computeHelper({ name: "row_detail" }), /Karten: nur die Zeilen der zugeklappten ruhigen Gruppe/);
+    assert.match(gc.configForm("de").computeHelper({ name: "row_detail" }), /Karten: nur die Zeilen der eingeklappten ruhigen Gruppe/);
   });
 
 });

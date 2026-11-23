@@ -336,10 +336,10 @@ describe("statusLine", () => {
     const got = STATES.map((s) => statusLine(rec, s, snooze, "de-DE", opts));
     assert.deepEqual(got, [
       "Gesund",
-      "Problem, warte …",
+      "Problem, wird bestätigt …",
       "Zustand unbekannt",
-      "Repariere …",
-      "Prüfe …",
+      "Reparatur läuft …",
+      "Prüfung läuft …",
       "Repariert",
       "Eskaliert",
       "Schlummert bis 14:30",
@@ -351,9 +351,9 @@ describe("statusLine", () => {
     assert.deepEqual(got, [
       "Gesund",
       "Lebenszeichen überfällig",
-      "Warte auf erstes Lebenszeichen",
-      "Repariere …",
-      "Warte auf Lebenszeichen …",
+      "Wartet auf das erste Lebenszeichen",
+      "Reparatur läuft …",
+      "Wartet auf Lebenszeichen …",
       "Repariert",
       "Eskaliert",
       "Schlummert bis 14:30",
@@ -422,7 +422,7 @@ describe("formatRelative / formatDuration", () => {
     assert.equal(formatRelative(ago(60), NOW, "en"), "1 min ago");
     assert.equal(formatRelative(ago(3599), NOW, "en"), "59 min ago");
     assert.equal(formatRelative(ago(6 * 3600), NOW, "en"), "6 h ago");
-    assert.equal(formatRelative(ago(6 * 3600), NOW, "de"), "vor 6 h");
+    assert.equal(formatRelative(ago(6 * 3600), NOW, "de"), "vor 6 Std.");
     assert.equal(formatRelative(ago(86399), NOW, "en"), "23 h ago");
     assert.equal(formatRelative(ago(3 * 86400), NOW, "en"), "3 d ago");
     assert.equal(formatRelative(ago(3 * 86400), NOW, "de"), "vor 3 Tg.");
@@ -436,7 +436,7 @@ describe("formatRelative / formatDuration", () => {
 
   test("future", () => {
     assert.equal(formatRelative(NOW + 5 * 60000, NOW, "en"), "in 5 min");
-    assert.equal(formatRelative(NOW + 2 * 3600000, NOW, "de"), "in 2 h");
+    assert.equal(formatRelative(NOW + 2 * 3600000, NOW, "de"), "in 2 Std.");
   });
 
   test("accepts Date, epoch ms and ISO; invalid gives a dash", () => {
@@ -456,7 +456,7 @@ describe("formatRelative / formatDuration", () => {
     assert.equal(formatDuration(5400), "1 h 30 min");
     assert.equal(formatDuration(7200), "2 h");
     assert.equal(formatDuration(86400 + 300), "1 d");
-    assert.equal(formatDuration(3 * 86400 + 4 * 3600, "de"), "3 Tg. 4 h");
+    assert.equal(formatDuration(3 * 86400 + 4 * 3600, "de"), "3 Tg. 4 Std.");
     assert.equal(formatDuration(-5), "0 s");
     assert.equal(formatDuration(null), "–");
     assert.equal(formatDuration("abc"), "–");
@@ -496,7 +496,7 @@ describe("mainValue", () => {
 
   test("heartbeat: de wording", () => {
     const mv = mainValue(hb, hbStates(ago(6 * 3600), { period: 86400, next_due: ago(-18 * 3600) }), {}, NOW, "de");
-    assert.equal(mv.value, "vor 6 h");
+    assert.equal(mv.value, "vor 6 Std.");
     assert.equal(mv.caption, "Letztes Lebenszeichen · erwartet alle 1 Tg.");
     assert.equal(mv.late, false);
   });
@@ -579,7 +579,7 @@ describe("mainValue", () => {
     assert.match(mv.title, /restart/);
     assert.equal(mv.age, 3 * 86400);
     const de = mainValue(info, { states: { "sensor.pool_status": { ...SWITCH, last_changed: ago(5400) } } }, {}, NOW, "de");
-    assert.equal(de.value, "seit 1 h 30 min");
+    assert.equal(de.value, "seit 1 Std. 30 Min.");
     // It ticks once a minute, so it shows no seconds from a minute on.
     const m = mainValue(info, { states: { "sensor.pool_status": { ...SWITCH, last_changed: ago(65) } } }, {}, NOW, "en");
     assert.equal(m.value, "for 1 min");
@@ -605,12 +605,12 @@ describe("footerEvent", () => {
       text: "Recovery succeeded · 2 h ago",
       age: 7200,
     });
-    assert.equal(footerEvent(info, ev("recovered", ago(7200)), {}, NOW, "de").text, "Reparatur erfolgreich · vor 2 h");
+    assert.equal(footerEvent(info, ev("recovered", ago(7200)), {}, NOW, "de").text, "Reparatur erfolgreich · vor 2 Std.");
   });
 
   test("escalated with attempts (singular / plural)", () => {
     assert.equal(footerEvent(info, ev("escalated", ago(600), { attempt: 2 }), {}, NOW, "en").text, "Escalated · 2 attempts · 10 min ago");
-    assert.equal(footerEvent(info, ev("escalated", ago(600), { attempt: 1 }), {}, NOW, "de").text, "Eskaliert · 1 Versuch · vor 10 min");
+    assert.equal(footerEvent(info, ev("escalated", ago(600), { attempt: 1 }), {}, NOW, "de").text, "Eskaliert · 1 Versuch · vor 10 Min.");
     const r = footerEvent(info, ev("escalated", ago(600), { attempt: 0 }), {}, NOW, "en");
     assert.equal(r.text, "Escalated · 10 min ago");
     assert.equal(r.tone, "bad");
@@ -621,7 +621,7 @@ describe("footerEvent", () => {
     const r = footerEvent(info, ev("blocked", ago(60), { reason: "switch not found" }), {}, NOW, "en");
     assert.equal(r.text, "Recovery blocked: switch not found · 1 min ago");
     assert.equal(r.icon, "mdi:cancel");
-    assert.equal(footerEvent(info, ev("blocked", ago(60)), {}, NOW, "de").text, "Reparatur blockiert · vor 1 min");
+    assert.equal(footerEvent(info, ev("blocked", ago(60)), {}, NOW, "de").text, "Reparatur blockiert · vor 1 Min.");
   });
 
   test("escalated without an event: health_detail", () => {

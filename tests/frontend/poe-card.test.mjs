@@ -70,7 +70,7 @@ describe("PoE card: names and headings", () => {
 
   test("column headings in en and de, empty over the bubble and the pill", () => {
     assert.deepEqual(mod.columnHeads("en"), ["", "Port", "Switch", "Connected", "Used by", "Last restart", ""]);
-    assert.deepEqual(mod.columnHeads("de"), ["", "Port", "Switch", "Angeschlossen", "Genutzt von", "Letzter Neustart", ""]);
+    assert.deepEqual(mod.columnHeads("de"), ["", "Port", "Schalter", "Angeschlossen", "Genutzt von", "Letzter Neustart", ""]);
     const html = mod.colsHtml("de");
     assert.match(html, /aria-hidden="true"/);
     assert.ok(html.includes("Letzter Neustart"));
@@ -128,10 +128,10 @@ describe("PoE card: port row markup", () => {
     assert.ok(!html.includes("null"));
   });
 
-  test("fixed id: the online tag next to the id, 'Fixed id' on the line below", () => {
+  test("fixed id: the online tag next to the id, 'Static label' on the line below", () => {
     const p = payload({ id_source: "static", id_static: "demo-camera", id_entity: null });
     const html = mod.portRowHtml(rowOf(p), 1, "de", { now: NOW });
-    assert.match(html, /demo-camera<\/span><button class="tag"[^>]*><ha-icon icon="mdi:lan-connect"><\/ha-icon>Online<\/button><\/span><span class="cx"><span class="src"><span>Feste Kennung<\/span><\/span><\/span>/);
+    assert.match(html, /demo-camera<\/span><button class="tag"[^>]*><ha-icon icon="mdi:lan-connect"><\/ha-icon>Online<\/button><\/span><span class="cx"><span class="src"><span>Statisches Label<\/span><\/span><\/span>/);
     assert.ok(html.includes("Angeschlossen"));
   });
 
@@ -207,10 +207,10 @@ const mapRows = (lang = "en", p = mapPayload(), h = mapHass()) => core.poePortRo
 const rowHtml = (lang = "en", i = 0, p, h) => mod.portRowHtml(mapRows(lang, p, h)[i], i, lang, { now: NOW });
 
 describe("PoE card: id mapping", () => {
-  test("fixed id: the id in mono and 'Fixed id' as its origin, no source link", () => {
+  test("fixed id: the id in mono and 'Static label' as its origin, no source link", () => {
     const html = rowHtml("en", 0);
     assert.ok(html.includes('<span class="v mono" title="123412">123412</span>'));
-    assert.ok(html.includes('<span class="src"><span>Fixed id</span></span>'));
+    assert.ok(html.includes('<span class="src"><span>Static label</span></span>'));
     assert.ok(!html.includes('data-key="src0"'));
   });
 
@@ -220,9 +220,10 @@ describe("PoE card: id mapping", () => {
     assert.ok(html.includes('title="3C:22:FB:12:34:56 (3c22.fb12.3456)"'), "raw spelling in the tooltip");
     assert.match(html, /<span class="src live"><span>live · from <button data-action="more-info" data-entity="input_text.switch_port_3_mac" data-key="src1"/);
     assert.ok(html.includes('title="Switch port 3 MAC (input_text.switch_port_3_mac)"'));
-    assert.ok(html.includes("input_<wbr>text.<wbr>switch_<wbr>port_<wbr>3_<wbr>mac"), "the entity id may wrap at . and _");
+    // The entity's name, not its long id (the id stays in the tooltip).
+    assert.match(html, /data-key="src1" title="Switch port 3 MAC \(input_text.switch_port_3_mac\)">Switch port 3 MAC<\/button>/);
     const de = rowHtml("de", 1);
-    assert.ok(de.includes("live · aus <button"));
+    assert.ok(de.includes("live über <button"));
   });
 
   test("live id and its guard: 'matches', without repeating the id", () => {
@@ -258,7 +259,7 @@ describe("PoE card: id mapping", () => {
     assert.ok(html.includes("Nothing connected · expected:"));
     const de = mod.portRowHtml(mapRows("de", p, h)[2], 2, "de", { now: NOW });
     assert.ok(!de.includes("gerade leer"));
-    assert.ok(de.includes('<span class="src live empty"><span>live · aus <button'));
+    assert.ok(de.includes('<span class="src live empty"><span>live über <button'));
     // A port that reports an id keeps its green dot and its Online/Offline tag.
     const live = mod.portRowHtml(rows[1], 1, "en", { now: NOW });
     assert.ok(live.includes('<span class="src live"><span>'));
@@ -312,9 +313,9 @@ describe("PoE card: id mapping", () => {
     const p = { ports: [{ label: "9", id_source: "conflict", id_static: "aa-bb-cc-00-11-22", id_entity: "input_text.x", guards: [] }] };
     const html = mod.portRowHtml(core.poePortRows(p, { states: {} }, "en", { mapping: true })[0], 0, "en", { now: NOW });
     assert.ok(html.includes("Misconfigured"));
-    assert.match(html, /<span class="src conflict"><span>conflict · fixed <span class="mono">AA:BB:CC:00:11:22<\/span> and <button data-action="more-info" data-entity="input_text.x"/);
+    assert.match(html, /<span class="src conflict"><span>conflict · label <span class="mono">AA:BB:CC:00:11:22<\/span> and <button data-action="more-info" data-entity="input_text.x"/);
     const de = mod.portRowHtml(core.poePortRows(p, { states: {} }, "de", { mapping: true })[0], 0, "de", { now: NOW });
-    assert.ok(de.includes('Konflikt · fest <span class="mono">AA:BB:CC:00:11:22</span> und <button'));
+    assert.ok(de.includes('Konflikt · Label <span class="mono">AA:BB:CC:00:11:22</span> und <button'));
   });
 
   test("no id source: 'No id source' under 'Nothing connected'", () => {
@@ -351,6 +352,16 @@ describe("PoE card: ports filter", () => {
     assert.ok(mod.portMatches("5", "5"));
     assert.ok(!mod.portMatches("25", "Port 2"));
     assert.ok(!mod.portMatches("Port 5", ""));
+  });
+});
+
+describe("PoE card: switch column", () => {
+  test("the device is not repeated when the switch's name already says it", () => {
+    const base = rowOf();
+    const same = mod.portRowHtml({ ...base, switch: "PoE-Switch-Serverschrank Port 18", switchDevice: "PoE-Switch-Serverschrank" }, 0, "en", { now: NOW });
+    assert.ok(!same.includes("· PoE-Switch-Serverschrank"));
+    const other = mod.portRowHtml({ ...base, switch: "Port 18 PoE", switchDevice: "Core switch" }, 0, "en", { now: NOW });
+    assert.ok(other.includes("· Core switch"));
   });
 });
 

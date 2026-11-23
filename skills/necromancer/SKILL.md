@@ -197,7 +197,8 @@ Heartbeat or Check now; snoozed: Wake up; healthy: Heartbeat or Check now) and S
 the ⋮ menu; there are no per-button options. The cards read everything else from the status
 sensor, so they need no entity names. *Copy heartbeat URL* copies the secret URL to the clipboard
 without showing it. The recovery chip opens a popup with the repair target, the auto-recovery
-switch and *Repair now*; it never switches power directly.
+switch and *Repair now*; it never switches power directly. Only admins get buttons; other users
+only watch (the services themselves stay callable for them, e.g. in automations).
 
 ## Heartbeat guards
 

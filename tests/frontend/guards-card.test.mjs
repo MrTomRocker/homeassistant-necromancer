@@ -196,7 +196,7 @@ describe("row context line (fills the wide row's free column)", () => {
     const s = so("suspect", { driver_type: "notify" });
     const info = base.core.guardInfo(s);
     assert.equal(base.contextLine(info, s, "en", opts()), "Problem since 10:22 · Notify only");
-    assert.equal(base.contextLine(info, s, "de", opts()), "Problem seit 10:22 · Nur Benachrichtigung");
+    assert.equal(base.contextLine(info, s, "de", opts()), "Problem seit 10:22 · Nur benachrichtigen");
   });
 
   test("healthy guard: repair counts, or none so far", () => {
@@ -217,7 +217,7 @@ describe("row context line (fills the wide row's free column)", () => {
     );
     assert.equal(
       base.contextLine(info, s, "de", opts({ lastHeartbeat: last, period: 3600 })),
-      "Letzter Heartbeat um 11:02 · erwartet alle 1 h",
+      "Letztes Lebenszeichen um 11:02 · erwartet alle 1 Std.",
     );
     assert.equal(base.contextLine(info, s, "en", opts({ lastHeartbeat: "unknown", period: 60 })), "Expected every 1 min");
   });
