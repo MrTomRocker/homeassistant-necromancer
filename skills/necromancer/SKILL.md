@@ -36,13 +36,30 @@ to do in the UI. Read the matching reference before you act:
   German install has `switch.<guard>_auto_reparatur`, `button.<guard>_reparieren`,
   `event.<guard>_wiederbelebung` and `sensor.<guard>_letztes_lebenszeichen` instead of
   `_auto_recovery`, `_revive`, `_recovery` and `_last_heartbeat`. Read them from the status
-  sensor's attributes `health_entity` (always set), `auto_recovery_entity`, `revive_entity` and
-  `recovery_event_entity`. The last three are `null` for a notify-only guard, which has no
-  switch, button or event entity. The *Last heartbeat* sensor has no such attribute: find it on
-  the guard's device.
+  sensor's attributes `health_entity` (always set), `auto_recovery_entity`, `revive_entity`,
+  `recovery_event_entity` and, on heartbeat guards only, `last_heartbeat_entity` (the *Last
+  heartbeat* sensor). `auto_recovery_entity`, `revive_entity` and `recovery_event_entity` are
+  `null` for a notify-only guard, which has no switch, button or event entity.
+- **How does it repair?** The status sensor's `driver_type` is the strategy: `switch`, `action`,
+  `actions`, `poe_port`, or `notify` for a notify-only guard. `driver_entity` is the switch it
+  power-cycles (`switch`) or the one script an `action` guard runs (only when the action is
+  exactly one script), else `null`; `driver_steps` counts the action steps (`action` /
+  `actions`); `driver_port_expected_id` is a PoE guard's device id. `recover_driver` names the
+  resolved target. Where a PoE id sits *right now* (port, switch, `match`, port status, last
+  restart) comes from the read-only WebSocket command `necromancer/guard/recovery` with the
+  status sensor's `entity_id` — readable by any user who may read the guard (for non-admins,
+  entities they may not read and another device's id on the port come back `null`; `hidden`
+  lists the blanked entity fields, e.g. `port.status_entity`); its
+  `dormant` means the guard's device is disabled, `running: false` that it has no engine
+  (dormant or failed setup). The full port list `necromancer/poe/ports` is admin-only.
+- **What does it watch?** For a state-based guard (`health_type: entity_state`) the status
+  sensor's `source_entity` is the watched entity and `source_attribute` the attribute it
+  judges (`null` = the state). Both are `null` for template and heartbeat guards.
 - **Why is it in this state?** Read the status sensor's `health_type` (`entity_state`,
   `template` or `heartbeat`), `health_detail` (the reason in words), `attempt`,
-  `last_recover_driver_result` (`good` / `failed`), `snooze_until`, and for heartbeat guards
+  `last_recover_driver_result` (`good` / `failed`), `snooze_until`, `escalated_at` (when it
+  escalated; survives an HA restart, unlike `last_changed`), `state_since` (when it entered its
+  current state, any state; restart-proof too), and for heartbeat guards
   `last_status`, `last_code` and `awaiting_first_success`. Check **Settings → Repairs** for
   config problems.
 
@@ -149,6 +166,38 @@ needs a default branch.
 `recover_failed: true` reports a failed repair; it decides the outcome only when the guard's
 Health Check is off. With the Health Check on (default), health within the boot window decides.
 Variables set in the off action are readable in the on action.
+
+## Dashboards
+
+The integration ships its own cards and a sidebar page ("Necromancer") and loads them by itself:
+no dashboard resource, no HACS frontend repository, no other custom cards. For guards on a
+dashboard, suggest these instead of building templates or `auto-entities` setups:
+
+```yaml
+type: custom:necromancer-guard-card    # one guard
+entity: sensor.office_ap_status        # required: the guard's status sensor
+value_entity: sensor.office_ap_latency # optional main value; default by guard type
+chips: [switch.port_5_poe]             # optional extra chips (or {entity, name, icon, color})
+```
+
+```yaml
+type: custom:necromancer-guards-card   # all or filtered guards, problems first
+filter: {states: [escalated, suspect], types: [heartbeat], area: office, label: network}
+```
+
+`custom:necromancer-poe-card` lists the PoE ports (admin users only; `ports: [Port 5]` narrows
+it). Further guard card options: `name`, `icon`, `value_name`, `layout` (`full` or `compact`),
+`timeline` (24 h section on the full card, default off), `row_detail` (`text` or `timeline` in a
+compact row), `show_counters`, `show_footer` and `show_actions` (`true`/`false`; false = nothing
+on the card can be triggered). The guards card also takes `title`, `entities`, `sort`
+(`problems`, `name`, `state`, `last_activity`), `display` (`list` or `cards`), `collapse_ok`
+(default false), `row_detail` (default `timeline`), `value_entities` and `bulk`. The buttons
+follow one fixed rule: the state's main button (escalated: Heartbeat or Reset; problem: Revive,
+Heartbeat or Check now; snoozed: Wake up; healthy: Heartbeat or Check now) and Snooze, the rest in
+the ⋮ menu; there are no per-button options. The cards read everything else from the status
+sensor, so they need no entity names. *Copy heartbeat URL* copies the secret URL to the clipboard
+without showing it. The recovery chip opens a popup with the repair target, the auto-recovery
+switch and *Repair now*; it never switches power directly.
 
 ## Heartbeat guards
 
