@@ -39,7 +39,12 @@ from custom_components.necromancer.config_flow import (
     NecromancerOptionsFlow,
 )
 from custom_components.necromancer.config_flow_helpers import schemas as cf
-from custom_components.necromancer.core.actions import async_run, async_validate
+from custom_components.necromancer.core.actions import (
+    action_steps,
+    async_run,
+    async_validate,
+    single_script,
+)
 from custom_components.necromancer.core.drivers import create_driver
 from custom_components.necromancer.core.health import create_health, heartbeat as hb
 from custom_components.necromancer.core.health.base import Health
@@ -1546,6 +1551,101 @@ async def test_translations_notify_cleared(hass, _):
             assert "problem_cleared" in help_text, (lang, step)
             for text in (desc, help_text):
                 assert "{" not in text and "}" not in text, (lang, step)
+
+
+# ---------------- sensor: card attributes ----------------
+
+
+async def test_source_attributes(hass, _):
+    """source_entity only for state guards; source_attribute only off the state."""
+    from custom_components.necromancer.sensor import _source_attributes
+
+    state = {"type": "entity_state", "entity_id": "sensor.pump_power"}
+    assert _source_attributes(state) == {
+        "source_entity": "sensor.pump_power",
+        "source_attribute": None,
+    }
+    assert _source_attributes({**state, "source": "state"})["source_attribute"] is None
+    assert _source_attributes({**state, "source": "rssi"}) == {
+        "source_entity": "sensor.pump_power",
+        "source_attribute": "rssi",
+    }
+    none = {"source_entity": None, "source_attribute": None}
+    assert _source_attributes({"type": "template", "template": "{{ 1 }}"}) == none
+    assert _source_attributes({"type": "heartbeat", "period": 60}) == none
+
+
+async def test_status_escalated_at(hass, _):
+    """escalated_at and state_since on the status sensor mirror the engine."""
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from custom_components.necromancer.sensor import StatusSensor
+
+    at = datetime(2026, 11, 22, 11, 11, tzinfo=UTC)
+    driver = SimpleNamespace(config={"type": "noop"}, target_info=lambda: None)
+    health = SimpleNamespace(config={"type": "template", "template": "{{ 1 }}"})
+    engine = SimpleNamespace(
+        name="Unit",
+        hass=hass,
+        link_device_id=None,
+        state=SimpleNamespace(value="escalated"),
+        attempt=2,
+        recover_count=0,
+        fail_count=1,
+        last_recover=None,
+        last_fail=None,
+        last_recover_driver_result=None,
+        last_recover_driver_time=None,
+        _snooze_until=None,
+        escalated_at=at,
+        state_since=at,
+        health=health,
+        health_detail=None,
+        driver=driver,
+    )
+    sensor = StatusSensor(engine, "unit_sub", "Unit")
+    sensor.hass = hass
+    assert sensor.extra_state_attributes["escalated_at"] == at
+    assert sensor.extra_state_attributes["state_since"] == at
+    engine.escalated_at = None
+    assert sensor.extra_state_attributes["escalated_at"] is None
+
+
+async def test_single_script_and_action_steps(hass, _):
+    """The script a one-script recovery action runs; anything else is None."""
+    one = {"action": "script.turn_on", "target": {"entity_id": "script.reboot_nas"}}
+    cases = [
+        ([{"action": "script.reboot_nas"}], "script.reboot_nas"),
+        ({"service": "script.reboot_nas", "data": {"x": 1}}, "script.reboot_nas"),
+        ([one], "script.reboot_nas"),
+        (
+            [{**one, "target": {"entity_id": ["script.reboot_nas"]}}],
+            "script.reboot_nas",
+        ),
+        ([{"action": "script.turn_on", "entity_id": "script.a"}], "script.a"),
+        ([{"action": "script.turn_on", "data": {"entity_id": "script.a"}}], "script.a"),
+        # Two scripts, a templated target, a device target, no target at all:
+        ([{**one, "target": {"entity_id": "script.a, script.b"}}], None),
+        ([{**one, "target": {"entity_id": "{{ 'script.a' }}"}}], None),
+        ([{**one, "target": {"entity_id": "script.a", "area_id": "x"}}], None),
+        ([{"action": "script.turn_on"}], None),
+        ([{**one, "target": {"entity_id": "switch.plug"}}], None),
+        # Other script services, other domains, several or disabled steps:
+        ([{"action": "script.turn_off", "target": {"entity_id": "script.a"}}], None),
+        ([{"action": "script.reload"}], None),
+        ([{"action": "shell_command.reboot"}], None),
+        ([{"action": "script.a"}, {"delay": 5}], None),
+        ([{"action": "script.a", "enabled": False}], None),
+        ([], None),
+        (None, None),
+    ]
+    for action, expected in cases:
+        assert single_script(action) == expected, (action, single_script(action))
+    assert action_steps(None) == 0
+    assert action_steps([]) == 0
+    assert action_steps({"action": "script.a"}) == 1
+    assert action_steps([{"action": "script.a"}, {"delay": 5}]) == 2
 
 
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

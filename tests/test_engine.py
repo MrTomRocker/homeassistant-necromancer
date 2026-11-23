@@ -2334,6 +2334,271 @@ async def test_reset_engine_verdict_drops_escalated_at(hass, _):
     assert stored["escalated_at"]  # input left alone
 
 
+async def test_state_since_follows_every_transition(hass, _):
+    """state_since: when the guard entered its current state, persisted with it."""
+    health = FakeHealth(hass)
+    eng = make(hass, health, StubDriver(hass), boot_window=0, max_attempts=1)
+    assert eng.state_since is not None
+    assert eng.snapshot()["state_since"] == eng.state_since.isoformat()
+    await _escalate(hass, eng, health)
+    assert eng.state_since == eng.escalated_at
+    escalated = eng.state_since
+    eng.reset()  # still unhealthy -> OK -> SUSPECT: a fresh start
+    assert eng.state is GState.SUSPECT and eng.state_since >= escalated
+    assert eng.snapshot()["state_since"] == eng.state_since.isoformat()
+    before = eng.state_since
+    eng._set_state(GState.SUSPECT)  # no change: the clock keeps running
+    assert eng.state_since == before
+    await eng.async_stop()
+
+
+async def test_state_since_survives_a_restart(hass, _):
+    """A stored start of the state survives a restart.
+
+    Kept for the restored state, for a state the first evaluation re-derives
+    (SUSPECT), and taken from escalated_at for an older blob.
+    """
+    began = dt_util.utcnow() - timedelta(hours=3)
+
+    def engine(snap, verdict):
+        return DeviceEngine(
+            hass,
+            "G",
+            FakeHealth(hass, verdict),
+            StubDriver(hass),
+            StandardPolicy({}),
+            {"debounce": 3600, "boot_window": 0, "max_attempts": 1},
+            subentry_id="g",
+            engines={},
+            persisted=snap,
+        )
+
+    ok = engine({"state": "ok", "state_since": began.isoformat()}, Health.OK)
+    assert ok.state_since == began
+    await ok.async_start()
+    assert ok.state is GState.OK and ok.state_since == began
+    await ok.async_stop()
+
+    sus = engine(
+        {"state": "suspect", "state_since": began.isoformat()}, Health.UNHEALTHY
+    )
+    await sus.async_start()
+    await hass.async_block_till_done()
+    assert sus.state is GState.SUSPECT and sus.state_since == began, sus.state_since
+    await sus.async_stop()
+
+    gone = engine({"state": "suspect", "state_since": began.isoformat()}, Health.OK)
+    await gone.async_start()
+    assert gone.state is GState.OK and gone.state_since > began
+    assert gone._restored_since is None  # spent by the first evaluation
+    await gone.async_stop()
+
+    old = engine(
+        {"state": "escalated", "attempt": 1, "escalated_at": began.isoformat()},
+        Health.UNHEALTHY,
+    )
+    assert old.state is GState.ESCALATED and old.state_since == began
+    await old.async_stop()
+
+    assert "state_since" not in reset_engine_verdict(
+        {"state": "escalated", "state_since": began.isoformat()}
+    )
+
+    # A blob without state_since is saved once after the start (no transition
+    # needed), so the start survives the next restart; one with it is not.
+    for snap, want in (
+        ({"state": "ok"}, 1),
+        ({"state": "ok", "state_since": began.isoformat()}, 0),
+    ):
+        saves = []
+        eng = DeviceEngine(
+            hass,
+            "G",
+            FakeHealth(hass, Health.OK),
+            StubDriver(hass),
+            StandardPolicy({}),
+            {"debounce": 30, "boot_window": 0},
+            subentry_id="g",
+            engines={},
+            persisted=snap,
+            save=lambda saves=saves: saves.append(1),
+        )
+        await eng.async_start()
+        assert len(saves) == want, (snap, saves)
+        await eng.async_stop()
+
+
+def _since_engine(hass, snap, health, saves=None, store=None):
+    """A guard restored from `snap`; each save writes its snapshot to `store`."""
+    eng = None
+
+    def _save():
+        if saves is not None:
+            saves.append(1)
+        if store is not None:
+            store.clear()
+            store.update(eng.snapshot())
+
+    eng = DeviceEngine(
+        hass,
+        "G",
+        health,
+        StubDriver(hass),
+        StandardPolicy({}),
+        {"debounce": 3600, "boot_window": 0, "max_attempts": 1},
+        subentry_id="g",
+        engines={},
+        persisted=snap,
+        save=_save,
+    )
+    return eng
+
+
+async def test_restored_since_is_dropped_after_the_first_evaluation(hass, _):
+    """A stored start is offered to the first evaluation only.
+
+    Regression: a stored SUSPECT (or BLIND) whose health was fine again at the
+    start left the one-shot pending, so a fault days later took the start from
+    before the restart ("suspect for 3 days" for a fault that just began).
+    """
+    began = dt_util.utcnow() - timedelta(days=3)
+    for stored, later, want in (
+        ("suspect", Health.UNHEALTHY, GState.SUSPECT),
+        ("blind", Health.UNKNOWN, GState.BLIND),
+        ("recovering", None, GState.RECOVERING),
+    ):
+        health = FakeHealth(hass, Health.OK)
+        eng = _since_engine(
+            hass, {"state": stored, "state_since": began.isoformat()}, health
+        )
+        await eng.async_start()
+        assert eng.state is GState.OK and eng._restored_since is None, stored
+        start = dt_util.utcnow()
+        if want is GState.RECOVERING:
+            eng._set_state(GState.RECOVERING)  # as when following a linked partner
+        else:
+            health.verdict = later
+            eng._evaluate()
+        assert eng.state is want, (stored, eng.state)
+        assert eng.state_since >= start, (stored, eng.state_since)
+        assert eng.snapshot()["state_since"] == eng.state_since.isoformat()
+        await eng.async_stop()
+
+
+async def test_state_since_survives_a_boot_blind(hass, _):
+    """A BLIND during bootstrap (source not loaded yet) keeps the stored start.
+
+    Regression: the boot-time OK->BLIND spent the restored start, so every
+    state-based guard loading before its source read "ok for 1 min" after each
+    restart, and a stored SUSPECT lost its start the same way.
+    """
+    began = dt_util.utcnow() - timedelta(days=5)
+    hass.set_state(CoreState.starting)
+    try:
+        for stored, later, want in (
+            ("ok", Health.OK, GState.OK),
+            ("suspect", Health.UNHEALTHY, GState.SUSPECT),
+        ):
+            store: dict = {}
+            health = FakeHealth(hass, Health.UNKNOWN)
+            eng = _since_engine(
+                hass,
+                {"state": stored, "state_since": began.isoformat()},
+                health,
+                store=store,
+            )
+            await eng.async_start()
+            assert eng.state is GState.BLIND, stored
+            health.verdict = later
+            eng._evaluate()
+            assert eng.state is want and eng.state_since == began, (
+                stored,
+                eng.state,
+                eng.state_since,
+            )
+            assert eng._restored_since is None
+            assert store["state_since"] == began.isoformat(), store
+            await eng.async_stop()
+
+        # Back to another state than the stored one: a fresh start.
+        health = FakeHealth(hass, Health.UNKNOWN)
+        eng = _since_engine(
+            hass, {"state": "ok", "state_since": began.isoformat()}, health
+        )
+        await eng.async_start()
+        health.verdict = Health.UNHEALTHY
+        eng._evaluate()
+        assert eng.state is GState.SUSPECT and eng.state_since > began
+        await eng.async_stop()
+
+        # A BLIND that outlasts the hold is a real one: the start is not kept.
+        health = FakeHealth(hass, Health.UNKNOWN)
+        eng = _since_engine(
+            hass, {"state": "ok", "state_since": began.isoformat()}, health
+        )
+        await eng.async_start()
+        assert eng._restored_until is not None
+        eng._restored_until = dt_util.utcnow() - timedelta(seconds=1)
+        health.verdict = Health.OK
+        eng._evaluate()
+        assert eng.state is GState.OK and eng.state_since > began
+        await eng.async_stop()
+    finally:
+        hass.set_state(CoreState.running)
+
+    # Once HA runs, an unknown source is a finding: no hold.
+    health = FakeHealth(hass, Health.UNKNOWN)
+    eng = _since_engine(hass, {"state": "ok", "state_since": began.isoformat()}, health)
+    await eng.async_start()
+    assert eng.state is GState.BLIND and eng._restored_since is None
+    health.verdict = Health.OK
+    eng._evaluate()
+    assert eng.state is GState.OK and eng.state_since > began
+    await eng.async_stop()
+
+
+async def test_state_since_is_saved_when_the_start_changes_it(hass, _):
+    """A start that changes (state, since) without a transition saves it once.
+
+    Regression: a stored transient state (cooldown, suspect, …) gone at the
+    start, or a snooze that ran out while HA was down, changed nothing in the
+    Store, so each later restart started the clock again.
+    """
+    began = dt_util.utcnow() - timedelta(hours=3)
+    ended = dt_util.utcnow() - timedelta(hours=1)
+    for snap, want_since in (
+        ({"state": "cooldown", "state_since": began.isoformat()}, None),
+        (
+            {
+                "state": "snoozed",
+                "state_since": began.isoformat(),
+                "snooze_until": ended.isoformat(),
+            },
+            ended,  # ok since the snooze ran out, not since this start
+        ),
+    ):
+        store: dict = {}
+        saves: list = []
+        eng = _since_engine(hass, snap, FakeHealth(hass, Health.OK), saves, store)
+        await eng.async_start()
+        assert eng.state is GState.OK and saves, (snap, saves)
+        first = eng.state_since
+        if want_since is not None:
+            assert first == want_since, (snap, first)
+        assert store["state"] == "ok" and store["state_since"] == first.isoformat()
+        await eng.async_stop()
+
+        # The next restart reads what was saved: same start, nothing to save.
+        saves2: list = []
+        again = _since_engine(
+            hass, dict(store), FakeHealth(hass, Health.OK), saves2, store
+        )
+        await again.async_start()
+        assert again.state is GState.OK and again.state_since == first
+        assert saves2 == [], (snap, saves2)
+        await again.async_stop()
+
+
 TESTS = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
 
 

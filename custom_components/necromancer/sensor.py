@@ -26,14 +26,25 @@ from .const import (
     ATTR_EVENT_TEXT,
     ATTR_MAX,
     ATTR_MESSAGE,
+    CONF_ACTION,
+    CONF_EXPECTED_ID,
+    CONF_OFF_ACTION,
+    CONF_ON_ACTION,
+    CONF_SWITCH_ENTITY,
     CONF_TYPE,
     DOMAIN,
+    MODE_NOTIFY,
     SERVICE_HEARTBEAT_PING,
     SERVICE_NOTIFY_GUARD,
     SERVICE_RESET,
     SERVICE_SNOOZE,
     SERVICE_UNSNOOZE,
+    STRATEGY_ACTION,
+    STRATEGY_ACTIONS,
+    STRATEGY_POE,
+    STRATEGY_SWITCH,
 )
+from .core.actions import action_steps, single_script
 from .core.engine import DeviceEngine, GState
 from .core.health.heartbeat import (
     STATUS_FAIL,
@@ -44,6 +55,16 @@ from .core.health.heartbeat import (
 from .entity import NecromancerEntity
 
 LOGGER = logging.getLogger(__name__)
+
+# Engine driver type -> the strategy name the user picked in the flow. The cards
+# key their buttons on this, so they need no knowledge of the internal names.
+_DRIVER_STRATEGY = {
+    "switch_cycle": STRATEGY_SWITCH,
+    "action_call": STRATEGY_ACTION,
+    "action_cycle": STRATEGY_ACTIONS,
+    "poe_port": STRATEGY_POE,
+    "noop": MODE_NOTIFY,
+}
 
 
 async def async_setup_entry(
@@ -106,6 +127,58 @@ async def _async_heartbeat_ping(entity: StatusSensor, call: ServiceCall) -> None
     await entity.async_heartbeat_ping(call.context.user_id)
 
 
+def _driver_attributes(driver_config: dict) -> dict:
+    """Return the static `driver_*` card attributes from a guard's driver config.
+
+    All of them come from the subentry's driver block, so they only move on a
+    reconfigure (= reload) and cost no recorder rows. What changes at runtime (the
+    port a PoE id resolves to now, its status, its last cycle) stays out: the cards
+    read it on demand through `necromancer/guard/recovery`.
+    """
+    driver_type = driver_config.get(CONF_TYPE)
+    if driver_type == "switch_cycle":
+        entity = driver_config.get(CONF_SWITCH_ENTITY)
+    elif driver_type == "action_call":
+        # The script a one-script action runs (else None: "Action (n steps)").
+        entity = single_script(driver_config.get(CONF_ACTION))
+    else:
+        entity = None
+    if driver_type == "action_call":
+        steps: int | None = action_steps(driver_config.get(CONF_ACTION))
+    elif driver_type == "action_cycle":
+        steps = action_steps(driver_config.get(CONF_OFF_ACTION)) + action_steps(
+            driver_config.get(CONF_ON_ACTION)
+        )
+    else:
+        steps = None
+    return {
+        "driver_type": _DRIVER_STRATEGY.get(driver_type),
+        "driver_entity": entity,
+        "driver_steps": steps,
+        "driver_port_expected_id": driver_config.get(CONF_EXPECTED_ID)
+        if driver_type == "poe_port"
+        else None,
+    }
+
+
+def _source_attributes(health_config: dict) -> dict:
+    """Return `source_entity` + `source_attribute` from a guard's health config.
+
+    Only a state-based guard watches one entity; the cards show its value as the
+    guard's main value ("200 W"). A template guard may read many and a heartbeat
+    guard reads none, so both get None. `source_attribute` names the attribute the
+    guard reads instead of the state (None = the state itself), so a card never
+    shows the state when the guard judges an attribute.
+    """
+    if health_config.get(CONF_TYPE) != "entity_state":
+        return {"source_entity": None, "source_attribute": None}
+    attribute = health_config.get("source", "state")
+    return {
+        "source_entity": health_config.get("entity_id"),
+        "source_attribute": None if attribute == "state" else attribute,
+    }
+
+
 class StatusSensor(NecromancerEntity, SensorEntity):
     """Current lifecycle state of the guarded device."""
 
@@ -143,15 +216,35 @@ class StatusSensor(NecromancerEntity, SensorEntity):
             "last_recover_driver_result": e.last_recover_driver_result,
             "last_recover_driver_time": e.last_recover_driver_time,
             "snooze_until": e._snooze_until,
+            # When the guard entered ESCALATED (None outside it). HA's
+            # last_changed starts again at every restart; this one survives it
+            # (persisted with the restored ESCALATED), so a card can say
+            # "escalated for 2 h" instead of "for 3 min". It only moves with the
+            # state itself: no extra recorder rows.
+            "escalated_at": e.escalated_at,
+            # When the guard entered its current state, any state: the cards'
+            # "for 19 min" and "problem since 11:19". Persisted and restored by
+            # the engine, so it survives a restart like escalated_at; it moves
+            # only with the state (no extra recorder rows).
+            "state_since": e.state_since,
             # Here, not only as `health_source` on the health binary sensor: that
             # one is unavailable (no attributes) while health is unknown, so a
             # heartbeat guard waiting for its first ping could not be found by it.
             "health_type": e.health.config.get(CONF_TYPE),
+            # Static (they only move on a reconfigure, which reloads), so they cost
+            # no recorder rows: the strategy, the actor switch (`switch`) or the
+            # one script (`action`), the step count and a PoE guard's expected id.
+            # PoE ports resolve at runtime: `recover_driver` and the WS command.
+            **_driver_attributes(e.driver.config),
+            # Static too: the entity a state-based guard watches (None otherwise).
+            **_source_attributes(e.health.config),
         }
         # Captured at the state transition, so it never changes between them.
         if e.health_detail is not None:
             attrs["health_detail"] = e.health_detail
         if isinstance(e.health, HeartbeatHealth):
+            # The ping time's own sensor, resolved like the siblings above.
+            attrs["last_heartbeat_entity"] = self._sibling("sensor", "last_heartbeat")
             # Only values that move with the verdict: any attribute change turns
             # HA's state_reported into state_changed, one recorder row per ping.
             # The ping time itself lives on the LastHeartbeatSensor.

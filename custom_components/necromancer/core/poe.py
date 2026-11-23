@@ -17,6 +17,7 @@ import logging
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.util import dt as dt_util
 
 from ..const import (
     CONF_ACTUATOR,
@@ -58,6 +59,11 @@ def _norm(value: object) -> str | None:
     return None if norm in _PLACEHOLDER_IDS else norm
 
 
+def normalize_id(value: object) -> str | None:
+    """Public form of the fabric's id normalisation (the cards compare with it)."""
+    return _norm(value)
+
+
 class PoeFabric:
     """Port-level resolve + repair, shared by guards and the repair service."""
 
@@ -68,6 +74,8 @@ class PoeFabric:
         self._cache: dict[str, str] = {}  # normalized id -> port label (last-known)
         self._status: dict[str, str] = {}  # port label -> status
         self._inflight: dict[str, asyncio.Task] = {}  # port label -> running cycle
+        # port label -> {"time": ISO end of the last cycle, "ok": bool}; this HA run only
+        self._last_cycle: dict[str, dict] = {}
         self._unsub: CALLBACK_TYPE | None = None
 
     # ---------- lifecycle ----------
@@ -131,21 +139,23 @@ class PoeFabric:
                 self._learn(pid, port[CONF_LABEL])
 
     # ---------- resolution ----------
-    def _port_id(self, port: dict) -> str | None:
+    def _port_id(self, port: dict, *, warn: bool = True) -> str | None:
         """Read a port's current id (static, or from its id-entity).
 
         A port gives its id ONE way. If it has both a static value and an
         id-entity it is misconfigured — ignore it (return None, so it matches no
         guard and the guard blocks) and warn, rather than silently picking one.
+        `warn=False` reads quietly (the cards' read-only port list).
         """
         static = port.get(CONF_ID_STATIC)
         entity_id = port.get(CONF_ID_ENTITY)
         if static and entity_id:
-            LOGGER.warning(
-                "PoE port %r is misconfigured: both a fixed id and an id-entity set "
-                "— ignoring it; remove one",
-                port.get(CONF_LABEL),
-            )
+            if warn:
+                LOGGER.warning(
+                    "PoE port %r is misconfigured: both a fixed id and an id-entity "
+                    "set — ignoring it; remove one",
+                    port.get(CONF_LABEL),
+                )
             return None
         if static:
             return static
@@ -163,6 +173,44 @@ class PoeFabric:
         if not label:
             return None
         return next((p for p in self._ports if p.get(CONF_LABEL) == label), None)
+
+    @property
+    def ports(self) -> list[dict]:
+        """The configured ports (a copy, for the read-only WS port list)."""
+        return list(self._ports)
+
+    def current_id(self, port: dict) -> str | None:
+        """A port's current id, read without side effects or warnings."""
+        return self._port_id(port, warn=False)
+
+    def locate(self, identifier: str) -> tuple[list[str], str]:
+        """Where an id points, without learning or dropping anything.
+
+        Returns `(labels, kind)`: kind `live` (exactly one port reports it now),
+        `ambiguous` (several do), `last_known` (none does, the cache remembers one)
+        or `none`. Read-only twin of `resolve_with_reason` for the cards.
+        """
+        target = _norm(identifier)
+        if target is None:
+            return [], "none"
+        live = [
+            p[CONF_LABEL]
+            for p in self._ports
+            if _norm(self._port_id(p, warn=False)) == target
+        ]
+        if len(live) == 1:
+            return live, "live"
+        if live:
+            return live, "ambiguous"
+        cached = self._by_label(self._cache.get(target))
+        if cached is not None:
+            return [cached[CONF_LABEL]], "last_known"
+        return [], "none"
+
+    def last_cycle(self, label: str) -> dict | None:
+        """End time and result of the port's last cycle in this HA run, if any."""
+        last = self._last_cycle.get(label)
+        return dict(last) if last else None
 
     @property
     def port_count(self) -> int:
@@ -292,6 +340,10 @@ class PoeFabric:
         """Return a snapshot of every port's status by label."""
         return dict(self._status)
 
+    def _record_cycle(self, label: str, ok: bool) -> None:
+        """Remember the end of a cycle for the PoE card ("last restart")."""
+        self._last_cycle[label] = {"time": dt_util.utcnow().isoformat(), "ok": ok}
+
     def _set_status(self, label: str, status: str) -> None:
         """Update a port's status and fire the change event only on transitions."""
         if self._status.get(label) != status:
@@ -339,9 +391,11 @@ class PoeFabric:
         except Exception:
             # A raising service must still leave a terminal status, not strand the
             # port on "recovering". CancelledError (BaseException) passes through.
+            self._record_cycle(label, False)
             self._set_status(label, PORT_FAILED)
             LOGGER.exception("PoE port %r: repair raised", label)
             raise
+        self._record_cycle(label, ok)
         self._set_status(label, PORT_GOOD if ok else PORT_FAILED)
         if not ok:
             LOGGER.warning("PoE port %r: repair did not confirm online", label)

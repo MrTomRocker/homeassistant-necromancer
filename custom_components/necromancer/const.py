@@ -118,6 +118,10 @@ IMPORT_MODE_REPLACE = "replace"
 CONF_PORTS_YAML = "ports_yaml"
 CONF_PORT_SELECTION = "selection"
 
+# options flow: show the Necromancer page in the sidebar (design-frontend §8)
+CONF_SHOW_PANEL = "show_panel"
+DEFAULT_SHOW_PANEL = True
+
 # port-level repair service (necromancer.repair_poe_port) — the shared primitive
 # guards (and other automations) call to power-cycle a port by device id.
 SERVICE_REPAIR_POE_PORT = "repair_poe_port"

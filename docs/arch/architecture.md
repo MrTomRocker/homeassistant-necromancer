@@ -74,8 +74,8 @@ Store on every restart — never the source of truth.
 
 | HA calls (by name) | When |
 |---|---|
-| `async_setup_entry` | entry loaded: boot, first add, **after every reload** — registers the heartbeat view (once per HA run), rebuilds the entry's heartbeat token table, builds all engines, then `async_forward_entry_setups` creates the entities. |
-| `async_unload_entry` | entry torn down: shutdown, **before every reload**, removal — unloads platforms, **stops the engines, then flushes the Store**. |
+| `async_setup_entry` | entry loaded: boot, first add, **after every reload** — registers the heartbeat view and the cards' static path (each once per HA run), adds the cards' module URL, rebuilds the entry's heartbeat token table, builds all engines, then `async_forward_entry_setups` creates the entities. |
+| `async_unload_entry` | entry torn down: shutdown, **before every reload**, removal — unloads platforms, **stops the engines**, removes the cards' module URL, **then flushes the Store**. |
 | `async_remove_entry` | the integration entry is deleted — drops its Repairs issues and its heartbeat tokens (`404` from then on). |
 | `async_remove_config_entry_device` | user deletes a guarded device in the UI. |
 | `_async_reload_entry` (registered update listener) | the entry's options/subentries change — calls `async_reload`. |
@@ -850,13 +850,54 @@ no longer belongs to a live guard.
 The status sensor's attributes are intentionally lean — `guard_name` (the subentry
 title, for generic dashboards), the live-resolved sibling entity_ids `health_entity` /
 `auto_recovery_entity` / `revive_entity` / `recovery_event_entity` (`None` where a
-notify-only guard has none), `attempt`, `recover_count`,
+notify-only guard has none) and, on heartbeat guards only, `last_heartbeat_entity`
+(the `last_heartbeat` timestamp sensor), `attempt`, `recover_count`,
 `last_recover`, `fail_count`, `last_fail`, `recover_driver` (the resolved target),
 `last_recover_driver_result` (the recovery driver's own `good`/`failed` verdict for the
 last attempt, distinct from the overall guard state) and `last_recover_driver_time`,
 plus `snooze_until`; auto-recovery is the switch (not duplicated as an attribute) and
 "last seen healthy" is left to state history.
 
+- `driver_type` + `driver_entity` + `driver_steps` + `driver_port_expected_id`
+  (**every** guard) — what the cards (see *Frontend delivery* below)
+  key their buttons and the recovery popup on. `driver_type` is the flow's strategy name, mapped from the
+  driver's config type (`switch_cycle`→`switch`, `action_call`→`action`,
+  `action_cycle`→`actions`, `poe_port`→`poe_port`, `noop`→`notify`), so no consumer
+  needs the internal names; `driver_entity` is the cycled switch for `switch`, the one
+  script an `action` guard runs (`core/actions.single_script`: a one-step sequence that
+  is `script.<name>` or `script.turn_on` with exactly one script target, no templates,
+  no device/area targets), else `None`; `driver_steps` counts the top-level action
+  steps (`action`; off + on for `actions`), else `None`; `driver_port_expected_id` is a
+  `poe_port` guard's expected id, else `None`. Where that id resolves *now* moves at
+  runtime and is deliberately **not** an attribute (each change would be a recorder
+  row): `recover_driver` keeps its one-line summary and the cards ask
+  `necromancer/guard/recovery` (below). All four come from the subentry's driver block,
+  so they only move on a reconfigure (= reload) and cost no recorder rows.
+- `source_entity` + `source_attribute` (**every** guard) — the entity a state-based
+  (`entity_state`) guard watches, and the attribute it judges instead of the state
+  (`None` = the state). The cards show that entity's value as the guard's main value
+  ("200 W"). `None` for template guards (may read many entities) and heartbeat guards
+  (read none). From the health block, so static like `driver_*`: no recorder rows.
+- `escalated_at` (**every** guard; `None` outside ESCALATED) — the engine's own
+  `escalated_at` (persisted with the restored ESCALATED, set and cleared in
+  `_set_state`). HA's `last_changed` starts again at every restart, so the cards count
+  "escalated for 2 h" from this one. It only moves with the state: no extra recorder rows.
+- `state_since` (**every** guard) — when the guard entered its current state, any state:
+  the engine's `state_since`, set in `_set_state` on every change and persisted with the
+  state. On a restart a restored state (OK, ESCALATED, SNOOZED) keeps its start; a
+  transient one the first evaluation re-derives (a SUSPECT whose health is still bad)
+  keeps the start stored before the restart too (`_restored_since`, offered to that first
+  evaluation only and dropped right after it, so a fault hours later starts now). A BLIND
+  entered **before HA has started** (the source integration not loaded yet, HA's restored
+  `unavailable`) does not spend it: the stored start stays on hold for
+  `RESTORED_SINCE_HOLD` (15 min), and a return to the stored state within it keeps that
+  start; a longer BLIND, or one once HA runs, is a real one. Anything else starts now; an
+  elapsed snooze counts OK from its `snooze_until`. When the start leaves (state,
+  since) different from the stored pair (no stored start, a transient state gone, an
+  elapsed snooze), the engine saves once, so a quiet guard does not start its clock again
+  at the next restart. A blob from an older version falls back to `escalated_at`. The cards
+  count "for 19 min" / "problem since 11:19" from it in every mode, without a history
+  query. Moves only with the state: no extra recorder rows.
 - `health_type` (**every** guard: `entity_state` / `template` / `heartbeat`). It is here
   and not only as `health_source` on `binary_sensor.*_health`, because that entity is
   `unavailable` while health is unknown and HA then writes no attributes — a heartbeat
@@ -921,6 +962,104 @@ Health Check, so a recovery script can poll Health out-of-band — and `heartbea
   (`NoURLAvailableError`); the caller prefixes `path` with its HA address. For deploy
   scripts that need the URL without reading `.storage`.
 
+### Frontend: cards and sidebar (`frontend.py`, `frontend/`)
+
+The Lovelace cards ship inside the package (`frontend/`, vanilla JS, no build step) and
+are delivered by the integration itself, so no dashboard resource is added by hand and
+the cards always match the installed version. `async_register_frontend` (from
+`async_setup_entry`) registers the static path `/necromancer_frontend` → `frontend/`
+(`cache_headers=False`) **once per HA run** — aiohttp routes cannot be removed, so the
+flag lives in `hass.data[DOMAIN]` like the heartbeat view's — and adds
+`/necromancer_frontend/necromancer.js?v=<version>` via `frontend.add_extra_js_url`. The
+`?v=` (the manifest version) makes browsers fetch the new file after an update.
+`async_unregister_frontend` (from `async_unload_entry`) removes that URL again; the
+static path stays and is simply reused by the next setup. `manifest.json` therefore
+depends on `http` and `frontend`.
+
+The entry module `necromancer.js` imports the elements with its own `?v=` query, so every
+sub-module comes from the same version: `necromancer-guard-card.js`,
+`necromancer-guards-card.js`, `necromancer-poe-card.js`, `necromancer-panel.js` (the sidebar
+page), plus `necromancer-base.js` (texts, design tokens, popover and confirm helpers),
+`necromancer-recovery.js` (the recovery popup), `necromancer-core.js` (pure logic, tested with `node --test`),
+`necromancer-actions.js` (service calls, toasts, the per-user panel settings in
+`frontend/*_user_data` key `necromancer_panel`) and `necromancer-timeline.js` (the optional 24 h
+history: one batched `history/history_during_period` request for all visible guards, then
+live points; no request while the timeline is off). The card editors are HA's own form (`getConfigForm`: a schema with `visible` conditions; no
+`ha-*` element of ours). The cards read everything from the status
+sensor's attributes (above) and re-render only when one of the guard's own entities changes.
+
+**Read-only WebSocket API (`websocket.py`).** Registered once per HA run (flag in
+`hass.data[DOMAIN]`, like the static path); both commands only read.
+
+- `necromancer/poe/ports` — the whole PoE port table for the PoE card (per port: the
+  actuator and its state, where the id comes from and the current id, the status entity
+  and value, the fabric status and last cycle, the `poe_port` guards pointing there with
+  their `match`). **Admin only** (`require_admin`): it names every switch, id and status
+  entity.
+- `necromancer/guard/recovery` `{entity_id}` (any entity of the guard) or `{subentry_id}`
+  (admins only; also a dormant guard) — one guard's recovery for the cards' recovery
+  popup: `type` (strategy), `can_recover`, `dormant` (its device is disabled),
+  `running` (it has an engine: false when dormant or when its setup failed),
+  `status_entity`, `target_entity` / `target_name`
+  (the switch, the one script, or the PoE actuator), `script_entity`, `steps`, and for
+  `poe_port` `expected_id` / `expected_norm`, `match`, `port_label` / `port_labels`,
+  `actuator` / `actuator_name`, `fabric_status`, `last_cycle` and `port` (that one port's
+  row as in `poe/ports`, without `guards`). `match` comes from the fabric's read-only
+  `locate()` (nothing is learned or dropped), refined: a `last_known` port that now
+  reports another id is `mismatch` (the fabric would refuse to cycle it). **Permission:**
+  any user who may read the named entity (HA entity permission `read`) gets that guard;
+  for non-admins every entity id they may not read (`status_entity`, `target_entity`,
+  `script_entity`, `actuator`, and the port's `actuator` / `status_entity` /
+  `id_entity`) is blanked together with the values read from it (`target_name`,
+  `actuator_name`, `actuator_state`, `status_state`, an id entity's `id`), and the
+  port's `id_static` / `id` / `id_norm` are blanked whenever they are not the guard's
+  own `expected_norm` (a `mismatch`: another device's id belongs to the port table).
+  `hidden` lists the blanked entity fields (`actuator`, `port.status_entity`, …; always
+  `[]` for an admin), so the popup says "Status not visible" instead of guessing "Ready"
+  for a port whose status entity it cannot read. A non-admin never gets the port table and cannot ask by `subentry_id` (no entity to
+  check). Unknown or unloaded guard → `not_found`; neither or both ids → `invalid_format`.
+
+**Elements.** `necromancer-guard-card` (one guard, `layout: full | compact`),
+`necromancer-guards-card` (a discovered or filtered list; its rows are compact guard cards that
+open into the full card in place, `display: cards` uses full cards), `necromancer-poe-card`
+(the `poe/ports` table) and `necromancer-panel` (the sidebar page: a hero with counts and
+maintenance mode, tabs, search, and a guards card / PoE card underneath). The user
+documentation with every option is [`docs/cards.md`](../cards.md).
+
+**Discovery and data.** Guards are found through the entity registry (platform + translation key
+of the status sensor), memoised on the identity of `hass.entities`; everything a card shows
+comes from the status sensor's attributes plus the sibling entities they name, so renamed
+entities and any language work. Live data the attributes cannot carry without recorder churn
+(the PoE port a device sits on right now) comes from the read-only WS commands above, only when
+the popup or the PoE card asks.
+
+**Buttons** (`core.actionsFor`, design decision in the dev notes). `applicableActions` decides
+what a guard can do in a state (by type, auto-recovery switch, admin); `mainAction` picks one
+main pill per state (busy → none; snoozed → `unsnooze`; escalated → `ping` for a heartbeat
+guard, else `reset`; suspect/blind → `revive` when it can repair, else `ping`, else `check`;
+otherwise `ping` or `check`); `snooze` is the second pill while it applies; everything else is
+the menu with `url`/`edit`/`details` last. Auto-recovery is not an action (its chip and the
+recovery popup switch it). `show_actions: false` returns no actions, and the card then also
+makes its chips and the popup read-only. There are no per-action options.
+
+**Editors.** Every card has a static `getConfigForm()` — Home Assistant renders its own form from
+the schema (the supported way; no `ha-*` element is created by the cards). Layout-dependent
+fields use the form's `visible` conditions (`{field, value, operator}` and `{condition: "or",
+conditions}`), helper texts name each default because HA shows an unset select empty, and
+`getStubConfig` writes the select defaults into a new card.
+
+**Performance.** A card renders only when one of its own guard's entities changes (a signature
+of those state objects) and not while it is off screen (`IntersectionObserver`; a stale card
+re-renders when it comes into view); relative times tick by patching text nodes, not by
+re-rendering. The guards card creates no cards for a folded quiet group and measures its column
+widths with a canvas (no layout reads). The 24 h timeline (`necromancer-timeline.js`) is one
+page-wide store: all guards that ask within a short window share one
+`history/history_during_period` request (minimal response, no attributes), after that the
+store adds points from the state objects Home Assistant hands to the cards anyway — no
+subscription per guard. A card that does not show the timeline never touches the store. Panel
+settings live in `frontend/*_user_data` (key `necromancer_panel`), cleaned by
+`normalizePanelSettings` (old keys such as `show_timeline` and `actions` are read or dropped).
+
 ---
 
 ## 10. Module map
@@ -934,6 +1073,11 @@ __init__.py        setup: build one DeviceEngine per device subentry, inject
                    wait_for_health and the admin-only heartbeat_url
 heartbeat_view.py  HeartbeatView: /api/necromancer/heartbeat/{slug}, no auth,
                    token -> local_only -> rate limit -> query, honest status codes
+frontend.py        static path /necromancer_frontend (once per HA run) + the cards'
+                   versioned module URL (added on setup, removed on unload)
+frontend/          the Lovelace cards (vanilla JS modules, no build step)
+websocket.py       read-only WS for the cards: necromancer/poe/ports (admin) and
+                   necromancer/guard/recovery (anyone who may read the guard)
 core/engine.py          the state machine, timing, persistence, health wiring (delegates
                    linking to LinkCoordinator)
 core/state.py           the GState enum (re-exported by core/engine.py)

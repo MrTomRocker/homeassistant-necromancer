@@ -48,7 +48,7 @@ vendor-agnostic, as an orchestrator on top of the entities you already have. Job
 ---
 
 **Start here:** [Why Necromancer?](#why-necromancer) · [Features](#features) · [Installation](#installation) · [Getting started](#getting-started)
-**Understand it:** [How it works](#how-it-works) · [Health Sources](#health-sources) · [Recovery strategies](#recovery-strategies) · [Timing & behaviour](#timing--behaviour) · [What you get](#what-you-get-per-guarded-device) · [💓 Heartbeat for jobs](#heartbeat)
+**Understand it:** [How it works](#how-it-works) · [Health Sources](#health-sources) · [Recovery strategies](#recovery-strategies) · [Timing & behaviour](#timing--behaviour) · [What you get](#what-you-get-per-guarded-device) · [🖥️ Cards & sidebar](#cards-and-sidebar) · [💓 Heartbeat for jobs](#heartbeat)
 **Go deeper:** [Linked guards](#linked-guards-groups) · [Supervisor guards](#supervisor-guards-watch-other-guards) · [PoE ports](#poe-ports) · [Notifications](#notifications) · [Services](#services)
 **Use & support:** [Cookbook](#cookbook) · [FAQ](#faq) · [AI agents](#ai-agents) · [Architecture](#architecture--internals) · [Contributing](#contributing) · [License](#license)
 
@@ -135,8 +135,8 @@ smart plug, a PoE camera, a cloud bridge or a nightly backup — all guarded wit
 
 ⚙️ **Operate & integrate**
 
+- 🖥️ **Built-in cards & sidebar** — a sidebar page with every guard and its 24 h timeline, plus a guard card, a guards list and a PoE card for your dashboards; recovery popup, one-tap repair and snooze, visual editor. Part of the integration — nothing else to install. See **[Dashboard cards & sidebar](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cards.md)**.
 - 🎛️ **Full operator surface** — per-guard status & health entities (with recover & fail counts and the recovery driver's own last result), a revive button, an arm/disarm switch, recovery `event`s for dashboards and automations, and a *Last heartbeat* sensor for heartbeat guards.
-- 🖥️ **Ready-made dashboard** — a generic, copy-paste fleet overview (status banner, live-incident list, and a per-guard pop-up with one-tap revive/snooze) that auto-discovers every guard via `guard_name` and is fully responsive — see **[docs/dashboard](https://github.com/MrTomRocker/homeassistant-necromancer/tree/main/docs/dashboard)**.
 - 🩹 **Self-diagnosing config** — a guard pointed at a missing or disabled health entity, a health template that reads only missing entities (or silently defaults one), a broken recovery action, an assigned device that no longer exists, or a PoE port with no id or a missing actuator surfaces in **Settings → Repairs** — event-driven and self-clearing.
 - 🤖 **Actions for your automations** — `necromancer.snooze` / `unsnooze` / `snooze_all` / `unsnooze_all` / `reset` / `repair_poe_port` / `notify_guard` / `check_health` / `wait_for_health` / `heartbeat_ping` / `heartbeat_url`, callable from any automation or script (snooze everything before a mass reboot, cycle a PoE port on demand, let a recovery script re-use a guard's Health Check, mark a heartbeat as received when a ping got lost, or fetch a guard's URL for a deploy script).
 - 😴 **Maintenance mode** — `snooze` one guard or `snooze_all` before planned work; they go quiet and auto-resume.
@@ -366,7 +366,7 @@ integration. Recover guards get the full set below, notify-only guards just the 
 
 | Entity | Purpose |
 |---|---|
-| `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `blind` / `recovering` / `verify` / `cooldown` / `escalated` / `snoozed`. Attributes include `guard_name` (the guard's name), `health_type`, `recover_count` / `fail_count`, `last_recover` / `last_fail`, the `recover_driver` and its last verdict, `snooze_until`, plus the guard's resolved sibling entity_ids (`health_entity`, `auto_recovery_entity`, …). |
+| `sensor.<guard>_status` | The lifecycle state: `ok` / `suspect` / `blind` / `recovering` / `verify` / `cooldown` / `escalated` / `snoozed`. Attributes include `guard_name` (the guard's name), `health_type`, `recover_count` / `fail_count`, `last_recover` / `last_fail`, the `recover_driver` and its last verdict, `snooze_until`, the strategy `driver_type` (and `driver_entity`, `driver_steps`, `driver_port_expected_id`), plus the guard's resolved sibling entity_ids (`health_entity`, `auto_recovery_entity`, …). |
 | `binary_sensor.<guard>_health` | The raw health verdict from the HealthSource. Its `health_source` attribute names what's watched — the partner `entity_id`, `template`, or `heartbeat`. |
 | `switch.<guard>_auto_recovery` | Arm/disarm automatic recovery for this guard (a configuration entity). |
 | `button.<guard>_revive` | Trigger a recovery cycle manually. |
@@ -407,10 +407,22 @@ labeling guards generically on a dashboard), `attempt` (retries in the current c
 `recover_count` / `fail_count` (lifetime successes / failures),
 `last_recover` / `last_fail` (timestamps),
 `recover_driver` (what gets cycled — the switch / port / actions),
+`driver_type` (the recovery strategy picked in the flow — `switch` / `action` / `actions` /
+`poe_port`, or `notify` for a notify-only guard), `driver_entity` (the switch it cycles for
+`switch`, the script an `action` guard runs when its action is exactly one script — `script.xyz`
+or `script.turn_on` with one script target —, else `None`), `driver_steps` (the number of action
+steps for `action` / `actions`, else `None`) and `driver_port_expected_id` (a PoE guard's expected
+id, else `None`) — all only change when the guard is reconfigured (where a PoE id sits *right now*
+is not an attribute: the cards ask for it on demand, see below),
 `last_recover_driver_result` / `last_recover_driver_time` (the recovery driver's own
 last verdict — `good` / `failed` — and when, distinct from the overall state above),
 `snooze_until` (when a snooze auto-resumes),
+`escalated_at` (when the guard entered *Escalated*, else `None` — unlike the state's
+`last_changed` it survives a Home Assistant restart), `state_since` (when the guard entered its
+current state, any state — also restart-proof),
 `health_type` (which source the guard uses — `entity_state` / `template` / `heartbeat`),
+`source_entity` (the entity a state-based guard watches, else `None`) and `source_attribute`
+(the attribute it judges instead of the state, else `None`) — both only change on a reconfigure,
 `health_detail` (why the source judged as it did, in words — e.g. *"No heartbeat for 25 hours,
 expected every 24 hours."*; set while there is something to say).
 
@@ -421,10 +433,21 @@ status or code, or the first success — not on every ping, so a regular job add
 here; the time of each ping is on the *Last heartbeat* sensor.
 
 Plus the guard's **sibling entity_ids** — `health_entity`, `auto_recovery_entity`,
-`revive_entity`, `recovery_event_entity` — each resolved live from its `unique_id`, so they
-survive renames. A dashboard can reference a guard's other entities straight from its status
-sensor instead of guessing names. (`auto_recovery_entity` / `revive_entity` /
-`recovery_event_entity` are `None` for a notify-only guard, which has none.)
+`revive_entity`, `recovery_event_entity` and, on heartbeat guards only,
+`last_heartbeat_entity` (the *Last heartbeat* sensor) — each resolved live from its
+`unique_id`, so they survive renames. A dashboard can reference a guard's other entities
+straight from its status sensor instead of guessing names. (`auto_recovery_entity` /
+`revive_entity` / `recovery_event_entity` are `None` for a notify-only guard, which has none.)
+
+**Where a guard's recovery points right now** (for custom cards): the read-only WebSocket command
+`necromancer/guard/recovery` with `entity_id` (any entity of the guard) answers with the strategy,
+the target entity and its name and, for a PoE guard, the port its id resolves to *now* (`match`:
+`live` / `last_known` / `ambiguous` / `mismatch` / `none`), the port's switch, status and last
+restart. `dormant` is true when the guard's device is disabled, `running` false when the guard has
+no engine (dormant, or its setup failed). Any user who may read the guard's entity may ask; entities
+they may not read come back as `null` and are listed in `hidden` (e.g. `port.status_entity`), and so
+does another device's id on the guard's port (only an admin sees which id a re-cabled port reports now). The full PoE port table
+(`necromancer/poe/ports`) stays admin-only.
 
 ### Recovery events — `event.<guard>_recovery`
 
@@ -460,11 +483,13 @@ vs "the device is dead").
 
 ### On your dashboard & in automations
 
-A guard's entities are plain Home Assistant entities — no custom card needed:
+Necromancer brings its own dashboard cards and a sidebar page — see [Cards and sidebar](#cards-and-sidebar) below. The guard's
+entities are plain Home Assistant entities too, so the built-in cards work as well:
 
-- **Overview:** an `entities` (or `auto-entities`) card over every `sensor.*_status`. It's a proper
-  enum sensor, so each state shows its localized label.
-- **Per guard:** a tile with the status sensor plus the `revive` button and `auto_recovery` switch.
+- **Overview:** an `entities` card over every `sensor.*_status`. It's a proper enum sensor, so each
+  state shows its localized label.
+- **Per guard:** the [guard card](#cards-and-sidebar), or a tile with the status sensor plus the `revive`
+  button and `auto_recovery` switch.
 - **History:** drop `event.<guard>_recovery` into a logbook card to see `recovered` / `escalated` /
   `blocked` over time.
 
@@ -505,6 +530,46 @@ is still faulty: the sensor shows `ok` for a moment, then `suspect`):
       data:
         message: "{{ state_attr(trigger.entity_id, 'guard_name') }} is back to normal."
 ```
+
+### Cards and sidebar
+
+Necromancer brings its own **sidebar page and three dashboard cards** — nothing else to install,
+no HACS frontend repository, no other custom cards. Light and dark themes, English and German.
+
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/MrTomRocker/homeassistant-necromancer/main/img/cards/panel-dark.png">
+    <img width="100%" alt="The Necromancer sidebar page: every guard, problems first, with its 24 h timeline" src="https://raw.githubusercontent.com/MrTomRocker/homeassistant-necromancer/main/img/cards/panel-light.png">
+  </picture>
+</div>
+
+- **See everything** — open **Necromancer** in the sidebar: every guard, problems first, each
+  with its last 24 hours. No setup.
+- **One guard on your dashboard** — state, main value, the last event and the button that fits
+  the state (*Reset*, *Revive*, *Heartbeat*, *Wake up* …) plus *Snooze*:
+
+  ```yaml
+  type: custom:necromancer-guard-card
+  entity: sensor.office_ap_status
+  value_entity: sensor.office_ap_latency   # optional main value
+  ```
+
+- **Only the problems** — for the home dashboard or a wall tablet:
+
+  ```yaml
+  type: custom:necromancer-guards-card
+  title: Needs a look
+  filter:
+    states: [escalated, suspect, blind]
+  show_actions: false                      # optional: nothing can be triggered
+  ```
+
+- **PoE ports** — `type: custom:necromancer-poe-card`: what is connected where, which guard uses
+  the port, the last restart.
+
+A tap on a guard's recovery chip shows what Necromancer repairs and when it last did, with the
+auto-recovery switch and *Repair now*. All options, the YAML reference and more examples:
+**[Dashboard cards & sidebar](https://github.com/MrTomRocker/homeassistant-necromancer/blob/main/docs/cards.md)**.
 
 ## Heartbeat
 
@@ -684,8 +749,9 @@ Heartbeat guards don't take part in [linked guards](#linked-guards-groups).
   deadline then, the guard stays red until the next success), `period` and `grace` (seconds). One
   recorder row per ping; exclude it from the recorder if a job pings very often.
 - `sensor.<guard>_status` — the usual lifecycle state, plus `health_type: heartbeat`,
-  `last_status`, `last_code`, `awaiting_first_success` and `health_detail` (e.g. *"No heartbeat
-  for 25 hours, expected every 24 hours."*).
+  `last_status`, `last_code`, `awaiting_first_success`, `health_detail` (e.g. *"No heartbeat
+  for 25 hours, expected every 24 hours."*) and `last_heartbeat_entity` (the entity_id of the
+  *Last heartbeat* sensor).
 - Alerts carry the reason as a second sentence (*"Nightly Backup: Problem detected. Failure
   reported, exit code 3."*) and as the [notify variable](#notifications) `{{ health_detail }}`.
 

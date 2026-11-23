@@ -95,10 +95,12 @@ from .const import (
     CONF_PORTS,
     CONF_PORTS_YAML,
     CONF_REGENERATE_TOKEN,
+    CONF_SHOW_PANEL,
     CONF_SOURCE_TYPE,
     CONF_STRATEGY,
     CONF_TOKEN,
     CONF_TYPE,
+    DEFAULT_SHOW_PANEL,
     DOMAIN,
     HEALTH_TYPE_HEARTBEAT,
     IMPORT_MODE_MERGE,
@@ -615,12 +617,14 @@ class NecromancerOptionsFlow(OptionsFlow):
     delete; edit & delete first pick a port (radio) then return to the menu.
     "Save" writes the list to `entry.options` (closing the dialog discards). The
     edit form reuses the `add_port` step_id so the frontend routes its submit
-    there; `_editing` decides replace vs append.
+    there; `_editing` decides replace vs append. "Sidebar" toggles the
+    Necromancer page in the sidebar; it is saved together with the ports.
     """
 
     def __init__(self) -> None:
         """Init the options flow (ports loaded lazily on first step)."""
         self._ports: list[dict] = []
+        self._show_panel = DEFAULT_SHOW_PANEL
         self._loaded = False
         self._edit_index = 0
         self._editing = False
@@ -633,13 +637,16 @@ class NecromancerOptionsFlow(OptionsFlow):
         if not self._loaded:
             self._loaded = True
             self._ports = list(self.config_entry.options.get(CONF_PORTS, []))
+            self._show_panel = bool(
+                self.config_entry.options.get(CONF_SHOW_PANEL, DEFAULT_SHOW_PANEL)
+            )
         options = ["add_port"]
         if self._ports:
             options += ["edit_port", "delete_port"]
         options.append("import_ports")
         if self._ports:
             options.append("export_ports")
-        options.append("save")
+        options += ["sidebar", "save"]
         port_list = (
             "\n".join(
                 f"{i + 1}. {p.get(CONF_LABEL) or '?'}"
@@ -775,9 +782,29 @@ class NecromancerOptionsFlow(OptionsFlow):
             description_placeholders={"yaml": self._export_text},
         )
 
+    async def async_step_sidebar(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show or hide the Necromancer sidebar page (applied on Save)."""
+        if user_input is not None:
+            self._show_panel = bool(user_input[CONF_SHOW_PANEL])
+            return await self.async_step_init()
+        return self.async_show_form(
+            step_id="sidebar",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_SHOW_PANEL, default=self._show_panel): bool}
+            ),
+        )
+
     async def async_step_save(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Write the working port list to the entry options."""
-        LOGGER.debug("Saving %s PoE port(s)", len(self._ports))
-        return self.async_create_entry(data={CONF_PORTS: self._ports})
+        """Write the working port list and the sidebar switch to the options."""
+        LOGGER.debug(
+            "Saving %s PoE port(s), sidebar %s",
+            len(self._ports),
+            "on" if self._show_panel else "off",
+        )
+        return self.async_create_entry(
+            data={CONF_PORTS: self._ports, CONF_SHOW_PANEL: self._show_panel}
+        )

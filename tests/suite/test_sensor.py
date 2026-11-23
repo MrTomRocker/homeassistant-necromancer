@@ -8,12 +8,13 @@ from typing import Any
 from freezegun.api import FrozenDateTimeFactory
 import pytest
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_component import async_update_entity
 from homeassistant.util import dt as dt_util
 
 from ._compat import MockConfigEntry, async_fire_time_changed
-from .conftest import SetupGuards, entity_id_for, make_guard
+from .conftest import DOMAIN, SetupGuards, entity_id_for, make_guard
 
 
 async def test_status_sensor_reflects_engine_state(
@@ -190,6 +191,110 @@ async def test_heartbeat_attributes_follow_the_verdict_not_each_ping(
     assert failed.attributes["health_detail"] == "Failure reported, exit code 3."
 
 
+async def test_escalated_at_survives_writes_and_clears_with_the_state(
+    hass: HomeAssistant, setup_guards: SetupGuards, freezer: FrozenDateTimeFactory
+) -> None:
+    """`escalated_at` is when the guard entered ESCALATED, None outside it.
+
+    The cards count "for 2 h" from it: HA's last_changed restarts with every
+    HA restart, the engine's escalated_at is persisted with the restored state.
+    A later write of the sensor (time passing) does not move it.
+    """
+    entry = await setup_guards(_hb())
+    eid = entity_id_for(hass, "guard0", "sensor", "status")
+    await _ping(hass, entry)
+    assert hass.states.get(eid).attributes["escalated_at"] is None
+
+    await _ping(hass, entry, ok=False)  # confirmed failure: escalated now
+    escalated = hass.states.get(eid)
+    assert escalated.state == "escalated"
+    at = escalated.attributes["escalated_at"]
+    assert at == entry.runtime_data.engines["guard0"].escalated_at
+    assert at is not None
+    assert abs((dt_util.utcnow() - at).total_seconds()) < 5
+
+    await _tick(hass, freezer, 600)
+    await async_update_entity(hass, eid)
+    await hass.async_block_till_done()
+    assert hass.states.get(eid).attributes["escalated_at"] == at
+
+    await _ping(hass, entry)  # back to OK
+    back = hass.states.get(eid)
+    assert back.state == "ok"
+    assert back.attributes["escalated_at"] is None
+
+
+async def test_state_since_moves_only_with_the_state(
+    hass: HomeAssistant, setup_guards: SetupGuards, freezer: FrozenDateTimeFactory
+) -> None:
+    """`state_since` is when the guard entered its current state, any state.
+
+    The cards count "for 19 min" / "problem since 11:19" from it; the engine
+    persists it with the state, so unlike last_changed it survives a restart.
+    A later write of the sensor (time passing) does not move it.
+    """
+    entry = await setup_guards(_hb())
+    eid = entity_id_for(hass, "guard0", "sensor", "status")
+    await _ping(hass, entry)
+    first = hass.states.get(eid).attributes["state_since"]
+    engine = entry.runtime_data.engines["guard0"]
+    assert first == engine.state_since
+    assert engine.snapshot()["state_since"] == first.isoformat()
+
+    await _tick(hass, freezer, 20)  # within the 60 s period: still ok
+    await async_update_entity(hass, eid)
+    await hass.async_block_till_done()
+    assert hass.states.get(eid).state == "ok"
+    assert hass.states.get(eid).attributes["state_since"] == first
+
+    await _ping(hass, entry, ok=False)  # confirmed failure: escalated now
+    escalated = hass.states.get(eid)
+    assert escalated.state == "escalated"
+    assert escalated.attributes["state_since"] == escalated.attributes["escalated_at"]
+    assert escalated.attributes["state_since"] > first
+
+
+async def test_state_since_survives_a_restart_with_the_source_not_loaded(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    freezer: FrozenDateTimeFactory,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A restart keeps `state_since`, also while the watched entity loads late.
+
+    At boot the source integration may not be set up yet (no state, or HA's
+    restored `unavailable`): the guard reads BLIND for a moment. That must not
+    restart the clock of the OK it returns to.
+    """
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    entry = await setup_guards(make_guard("Since Guard"))
+    eid = entity_id_for(hass, "guard0", "sensor", "status")
+    began = hass.states.get(eid).attributes["state_since"]
+
+    await _tick(hass, freezer, 3600)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    stored = hass_storage[f"{DOMAIN}.{entry.entry_id}"]["data"]["guard0"]
+    assert stored["state"] == "ok"
+    assert dt_util.parse_datetime(stored["state_since"]) == began
+
+    # "Restart": the health entity is not there yet while HA starts.
+    hass.states.async_remove("binary_sensor.guard_health")
+    hass.set_state(CoreState.starting)
+    try:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert hass.states.get(eid).state == "blind"
+        hass.states.async_set("binary_sensor.guard_health", "on")
+        await hass.async_block_till_done()
+    finally:
+        hass.set_state(CoreState.running)
+    state = hass.states.get(eid)
+    assert state.state == "ok"
+    assert state.attributes["state_since"] == began
+
+
 async def test_health_detail_attribute_stays_as_time_passes(
     hass: HomeAssistant, setup_guards: SetupGuards, freezer: FrozenDateTimeFactory
 ) -> None:
@@ -287,3 +392,193 @@ async def test_last_heartbeat_sensor_removed_after_type_change(
         entity_id_for(hass, "guard0", "sensor", "status")
     ).attributes
     assert attrs["health_type"] == "entity_state"
+
+
+# ---------------- card attributes (driver_type / driver_entity / last_heartbeat) ----
+
+
+SCRIPT_ACTION = [
+    {"action": "script.turn_on", "target": {"entity_id": "script.reboot_nas"}}
+]
+TWO_STEPS = [{"action": "script.reboot_nas"}, {"delay": {"seconds": 5}}]
+
+
+@pytest.mark.parametrize(
+    ("strategy", "kwargs", "expected"),
+    [
+        ("switch", {}, ("switch", "switch.guard_target", None, None)),
+        ("switch_check", {}, ("switch", "switch.guard_target", None, None)),
+        (
+            "action",
+            {"action": SCRIPT_ACTION},
+            ("action", "script.reboot_nas", 1, None),
+        ),
+        (
+            "action",
+            {"action": [{"action": "script.nas_cycle"}]},
+            ("action", "script.nas_cycle", 1, None),
+        ),
+        ("action", {"action": TWO_STEPS}, ("action", None, 2, None)),
+        (
+            "actions_check",
+            {"off_action": SCRIPT_ACTION, "on_action": TWO_STEPS},
+            ("actions", None, 3, None),
+        ),
+        (
+            "poe_port",
+            {"expected_id": "AA:BB:CC:00:11:22"},
+            ("poe_port", None, None, "AA:BB:CC:00:11:22"),
+        ),
+        ("notify", {}, ("notify", None, None, None)),
+    ],
+)
+async def test_driver_attributes_per_strategy(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    strategy: str,
+    kwargs: dict[str, Any],
+    expected: tuple,
+) -> None:
+    """The status sensor names the strategy and its static target.
+
+    The cards pick their buttons from `driver_type`, so they never see the
+    internal driver names (switch_cycle, action_call, action_cycle, noop).
+    `driver_entity` is the switch for `switch` and the one script an `action`
+    runs (None for anything else: the cards say "Action (n steps)");
+    `driver_steps` counts the action steps (off + on for `actions`) and
+    `driver_port_expected_id` is a PoE guard's id. Where that id is on the
+    fabric right now is not an attribute (it moves): see the WS command.
+    """
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    await setup_guards(make_guard("Driven", strategy=strategy, **kwargs))
+
+    attrs = hass.states.get(
+        entity_id_for(hass, "guard0", "sensor", "status")
+    ).attributes
+    assert (
+        attrs["driver_type"],
+        attrs["driver_entity"],
+        attrs["driver_steps"],
+        attrs["driver_port_expected_id"],
+    ) == expected
+    # Not a heartbeat guard: no last-heartbeat sensor to point at.
+    assert "last_heartbeat_entity" not in attrs
+
+
+async def test_last_heartbeat_entity_only_on_heartbeat_guards(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """A heartbeat guard points at its timestamp sensor; a state guard has no key."""
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    await setup_guards(_hb("Job"), make_guard("Plain", strategy="notify"))
+
+    hb_attrs = hass.states.get(
+        entity_id_for(hass, "guard0", "sensor", "status")
+    ).attributes
+    assert hb_attrs["last_heartbeat_entity"] == entity_id_for(
+        hass, "guard0", "sensor", "last_heartbeat"
+    )
+    assert hb_attrs["last_heartbeat_entity"] is not None
+    assert hb_attrs["driver_type"] == "notify"
+
+    plain_attrs = hass.states.get(
+        entity_id_for(hass, "guard1", "sensor", "status")
+    ).attributes
+    assert "last_heartbeat_entity" not in plain_attrs
+
+
+async def test_last_heartbeat_entity_follows_a_rename(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """Resolved live from the unique_id: a renamed timestamp sensor is found again."""
+    await setup_guards(_hb("Job"))
+    status_eid = entity_id_for(hass, "guard0", "sensor", "status")
+    old = entity_id_for(hass, "guard0", "sensor", "last_heartbeat")
+
+    er.async_get(hass).async_update_entity(old, new_entity_id="sensor.backup_ping")
+    await hass.async_block_till_done()
+    await async_update_entity(hass, status_eid)
+    await hass.async_block_till_done()
+
+    attrs = hass.states.get(status_eid).attributes
+    assert attrs["last_heartbeat_entity"] == "sensor.backup_ping"
+
+
+@pytest.mark.parametrize(
+    ("source", "attribute", "source_entity", "source_attribute"),
+    [
+        ("state_based", None, "binary_sensor.guard_health", None),
+        ("state_based", "rssi", "binary_sensor.guard_health", "rssi"),
+        ("template_based", None, None, None),
+        ("heartbeat_based", None, None, None),
+    ],
+)
+async def test_source_entity_per_health_type(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    source: str,
+    attribute: str | None,
+    source_entity: str | None,
+    source_attribute: str | None,
+) -> None:
+    """Only a state-based guard names the entity it watches (the card's main value).
+
+    A template guard may read many entities and a heartbeat guard reads none, so
+    both say None; `source_attribute` is set only when an attribute is judged.
+    """
+    hass.states.async_set("binary_sensor.guard_health", "on", {"rssi": "-60"})
+    await setup_guards(
+        make_guard("Watched", source=source, attribute=attribute, strategy="notify")
+    )
+
+    attrs = hass.states.get(
+        entity_id_for(hass, "guard0", "sensor", "status")
+    ).attributes
+    assert attrs["source_entity"] == source_entity
+    assert attrs["source_attribute"] == source_attribute
+
+
+@pytest.mark.parametrize("source", ["state_based", "heartbeat_based"])
+async def test_card_attributes_static_across_a_transition(
+    hass: HomeAssistant,
+    setup_guards: SetupGuards,
+    source: str,
+) -> None:
+    """A state transition rewrites the status sensor but none of the card fields.
+
+    They only move on a reconfigure (reload), so they never add a recorder row
+    on their own.
+    """
+    hass.states.async_set("binary_sensor.guard_health", "on")
+    hass.states.async_set("switch.guard_target", "on")
+    if source == "heartbeat_based":
+        guard = make_guard("Static", source=source, strategy="switch", period=60)
+    else:
+        guard = make_guard("Static", strategy="switch", debounce=60)
+    entry = await setup_guards(guard)
+    eid = entity_id_for(hass, "guard0", "sensor", "status")
+    keys = (
+        "driver_type",
+        "driver_entity",
+        "driver_steps",
+        "driver_port_expected_id",
+        "last_heartbeat_entity",
+        "source_entity",
+        "source_attribute",
+    )
+
+    before = hass.states.get(eid)
+    if source == "heartbeat_based":
+        await _ping(hass, entry)  # blind (waiting) -> ok
+    else:
+        hass.states.async_set("binary_sensor.guard_health", "off")  # ok -> suspect
+        await hass.async_block_till_done()
+    after = hass.states.get(eid)
+
+    assert after.state != before.state
+    assert {k: after.attributes.get(k) for k in keys} == {
+        k: before.attributes.get(k) for k in keys
+    }
+    assert after.attributes["driver_type"] == "switch"
+    assert after.attributes["driver_entity"] == "switch.guard_target"

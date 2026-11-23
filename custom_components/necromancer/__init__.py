@@ -63,9 +63,11 @@ from .const import (
     CONF_LOCAL_ONLY,
     CONF_POLICY,
     CONF_PORTS,
+    CONF_SHOW_PANEL,
     CONF_TOKEN,
     CONF_TYPE,
     DEFAULT_LOCAL_ONLY,
+    DEFAULT_SHOW_PANEL,
     DOMAIN,
     HEALTH_TYPE_HEARTBEAT,
     MODE_NOTIFY,
@@ -94,7 +96,14 @@ from .core.heartbeat_registry import DormantApply, HeartbeatRegistry, HeartbeatS
 from .core.links import link_components
 from .core.poe import PoeFabric
 from .core.policies import create_policy
+from .frontend import (
+    async_register_frontend,
+    async_register_panel,
+    async_unregister_frontend,
+    async_unregister_panel,
+)
 from .heartbeat_view import async_register_view
+from .websocket import async_register_websocket
 
 LOGGER = logging.getLogger(__name__)
 
@@ -389,6 +398,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: NecromancerConfigEntry) 
     HeartbeatRegistry.get(hass).rebuild(
         entry.entry_id, _heartbeat_specs(entry, dormant, stored, _save)
     )
+
+    # Lovelace cards: static path once per HA run, module URL while loaded; the
+    # sidebar page while loaded and the option is on; the cards' read-only WS API.
+    await async_register_frontend(hass)
+    if entry.options.get(CONF_SHOW_PANEL, DEFAULT_SHOW_PANEL):
+        await async_register_panel(hass)
+    async_register_websocket(hass)
 
     # PoE ports are a flat list in the entry's options; every poe_port guard
     # searches the whole list, so inject it into each such driver at setup. An
@@ -742,6 +758,8 @@ async def async_unload_entry(
         HeartbeatRegistry.get(hass).set_entry_waiting(entry.entry_id)
         if (fabric := hass.data.get(DOMAIN, {}).get("fabric")) is not None:
             fabric.shutdown()
+        async_unregister_frontend(hass)
+        async_unregister_panel(hass)
     # Flush the final runtime state (stopped engines still hold it), so a reload
     # (rename/reconfigure) does not read a stale store.
     await data.store.async_save(data.serialize())

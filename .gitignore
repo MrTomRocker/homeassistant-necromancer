@@ -11,3 +11,7 @@ __pycache__/
 htmlcov/
 .coverage
 .coverage.*
+
+# registries the in-process unit scripts (tests/test_*.py, async_test_home_assistant)
+# write while they run: test output, never committed
+tests/testing_config/

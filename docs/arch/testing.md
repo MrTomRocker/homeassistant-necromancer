@@ -75,10 +75,23 @@ them with the dev venv, see §5): **`tests/test_units.py`** (57), **`tests/test_
 (22), **`tests/test_engine.py`** (91); a fourth script, **`tests/test_integration.py`**
 (12 checks), covers the health-registry robustness path (disable / rename / remove)
 and PoE pre-flight blocking against a real `hass` (§3). On top sits a **pytest suite
-on HA's native test harness** (`tests/suite/`, 188 tests) that automates Level 2
+on HA's native test harness** (`tests/suite/`, 233 tests) that automates Level 2
 in-process — see §3. In a core checkout it is linked to `tests/necromancer/` (under
 `tests/` but not `tests/components/`, so only core's `tests/conftest.py` applies) and
-run via `pytest tests/necromancer/`, as CI does. Each row maps to an invariant:
+run via `pytest tests/necromancer/`, as CI does. The cards' JavaScript has its own
+logic level, **`tests/frontend/*.test.mjs`** (`node --test tests/frontend/*.test.mjs`, node:test +
+node:assert only, no npm install; CI runs it first, together with `node --check` of the card
+module): `core.test.mjs` covers the pure functions of `frontend/necromancer-core.js` (type
+detection, the action matrix per type/state/admin, status line, main value, footer event,
+chips, time formatting and tick timing, i18n symmetry), `panel.test.mjs` loads
+`necromancer.js` against generic DOM stubs (every element renders each guard state and type,
+the panel's per-user settings, row detail and the opened guard, the main and snooze pill, the 24 h
+timeline only when switched on, the recovery popup, the heartbeat URL reaching only the
+clipboard), `guards-card.test.mjs`, `poe-card.test.mjs`,
+`timeline.test.mjs` and `pop.test.mjs` the cards' pure helpers, `recovery.test.mjs` the recovery popup's model
+(`recoveryTarget` / `actorTitle` / `recoveryModel` per strategy and PoE match, the repair
+pill's disabled reasons, `footerEvent`'s opt-in past wording, `loadGuardRecovery`'s WS call).
+Each row maps to an invariant:
 
 | Module | What to assert | Covered by |
 |---|---|---|
@@ -89,7 +102,7 @@ run via `pytest tests/necromancer/`, as CI does. Each row maps to an invariant:
 | `config_flow` helpers | `_flatten_sections` (nested→flat, duration dicts stay whole), `_as_list`, `_build_data` (health block per source type incl. heartbeat token/seconds and never `linked_guards`, behaviour per check), `_current_strategy`, `_source_type_of` (three types), `_as_duration`/`_as_seconds`, debounce default per source type (heartbeat 3600 s = the grace) and its replacement on a switch across heartbeat (`_behavior_defaults`); the debounce box goes up to 86400 s for every source type; `_health_defaults` carries no `grace`. | `test_units` |
 | `config_flow` ports YAML | `_parse_ports_yaml`/`_normalize_imported_port`: required `label`/`actuator`/`status_entity`; reject not-a-list / empty / `null` / list-of-scalar / malformed YAML / non-numeric **or negative** timing; trim, scalar→list, missing/empty status→default, int→str. `_ports_to_yaml` round-trips; import **merge** = upsert by `label`, **replace** = overwrite. `_validate_port_identity`: a port gives its id ONE way — an entity (+ optional attribute) or a static label — setting both is rejected (`id_conflict`), and an attribute with no id-entity is rejected (`attribute_needs_entity`). | `test_units` |
 | `core/notify.py` | every notify path passes the same full variable set (incl. `health_detail`, `""` when unset); `_format_duration` (de/en, singular/plural, German dative after "seit"/"vor", minute/hour/day boundaries); every `DETAIL_MESSAGES` key renders with the params `detail()` produces (code clause: digits = exit code, word = code, none = nothing); a detail is appended as a second sentence, `event` unchanged. | `test_units` |
-| `core/actions.py` | `async_validate` normalises `service`→`action`; invalid sequence raises `vol.Invalid`. | `test_units` |
+| `core/actions.py` | `async_validate` normalises `service`→`action`; invalid sequence raises `vol.Invalid`; `single_script` names the one script of a one-step `script.<name>` / `script.turn_on` (one script target in `target`, `data` or top level) and is `None` for several steps or scripts, templates, device/area targets, other services and a disabled step; `action_steps` counts top-level steps. | `test_units` |
 | `core/links.py` | `link_components` / `group_of`: undirected union → connected components (clique closure); transitive (A–B, B–C ⇒ `{A,B,C}`); a one-sided link reads symmetric; stale ids dropped. | `test_units` |
 | `core/poe.py` (fabric) + `poe_port` driver | `resolve_with_reason`: one live match wins (refreshes cache) → last-known cache → ambiguous/none with a reason; a port that sets both an id-entity and a static label is misconfigured → `_port_id` ignores it and warns (`test_port_with_both_id_sources_is_ignored`); `repair` sets status `recovering`→`good`/`failed`, with concurrent callers **coalescing** onto one in-flight cycle (`test_concurrent_callers_coalesce`); a status change fires `necromancer_poe_port`; the `poe_port` driver delegates resolve+cycle to the fabric (one cache, one cycle, **shared with the service** — `test_driver_and_service_coalesce`). | `test_poe` |
 
@@ -277,6 +290,31 @@ exploratory and true end-to-end live checks. Drive the real flows and the engine
   auto-recovery switch (`entity_category: config`, writes through to `auto`), revive
   button (manual cycle, bypasses debounce), and the recovery `event` (fires
   `recovered` / `escalated` / `blocked`; absent on notify-only guards).
+  The card attributes (same `test_sensor.py`): `driver_type` / `driver_entity` /
+  `driver_steps` / `driver_port_expected_id` per strategy (incl. an `action` guard that
+  runs one script vs. several steps; `single_script`'s edge cases are in
+  `test_units.py`), `last_heartbeat_entity` only on heartbeat guards and following a rename,
+  `source_entity` / `source_attribute` per health type (set only on state guards), and
+  all of them unchanged across a state transition (static: no extra recorder rows);
+  `escalated_at` and `state_since` move only with the state, not with a later write
+  (`test_engine.py` covers `state_since` across a restart: restored, re-derived, older blob,
+  the one-shot dropped after the first evaluation, a boot-time BLIND that keeps the stored
+  start (and one that outlasts the hold or comes once HA runs), and the save when the start
+  changes the stored pair; `test_sensor.py` restarts an entry whose health entity loads
+  only after the start and checks the OK keeps its `state_since`).
+- **Card delivery** *(`tests/suite/test_frontend.py`)*: setup adds
+  `/necromancer_frontend/necromancer.js?v=<version>` as an extra module URL, the URL serves
+  the JS module, unload removes it, and setup → unload → setup registers again (the static
+  path is registered once per HA run and reused).
+- **Cards' WebSocket API** *(`tests/suite/test_websocket.py`)*: `necromancer/poe/ports`
+  (live values, guards per port, last-known / re-cabled, admin only, empty after unload,
+  one registration across reloads) and `necromancer/guard/recovery` per strategy (switch,
+  one script vs. off/on steps, notify, PoE live / fixed / none / last known with the last
+  cycle / mismatch / ambiguous, the cache untouched by reading), `dormant` (device
+  disabled) vs. a failed setup (`running` false, not dormant), by subentry id or any
+  guard entity, the error codes, and non-admins (allowed by entity read permission,
+  unreadable entities blanked including `status_entity`, another device's fixed id on
+  a `mismatch` port blanked while the guard's own id stays, never by subentry id).
 - **Operator services** *(`tests/suite/test_services.py`)*: `reset` (clears `ESCALATED`,
   re-derives); `snooze`/`unsnooze` (→ `SNOOZED`, ignores health, auto-resumes, refused
   mid-recovery); `snooze_all`/`unsnooze_all` (bulk, no target, busy guards skipped

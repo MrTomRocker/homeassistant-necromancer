@@ -236,3 +236,43 @@ async def test_edit_and_export_appear_only_with_ports(
     result = await _menu(hass, entry_with.entry_id)
     full = set(result["menu_options"])
     assert {"edit_port", "delete_port", "export_ports"} <= full
+
+
+async def test_sidebar_switch_is_saved_with_the_ports(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """The sidebar item sits before save; its switch is stored with the ports."""
+    entry = await setup_guards(options={"ports": [dict(FLAT_PORT)]})
+
+    result = await _menu(hass, entry.entry_id)
+    assert result["menu_options"][-2:] == ["sidebar", "save"]
+    result = await _pick(hass, result["flow_id"], "sidebar")
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "sidebar"
+    # Default: on (design decision 16.2).
+    (field,) = result["data_schema"].schema
+    assert field.default() is True
+
+    result = await _submit(hass, result["flow_id"], {"show_panel": False})
+    assert result["type"] is FlowResultType.MENU
+    result = await _pick(hass, result["flow_id"], "save")
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"] == {"ports": [FLAT_PORT], "show_panel": False}
+    await hass.async_block_till_done()
+    assert entry.options["show_panel"] is False
+
+    # Reopened, the form shows the stored value.
+    result = await _menu(hass, entry.entry_id)
+    result = await _pick(hass, result["flow_id"], "sidebar")
+    (field,) = result["data_schema"].schema
+    assert field.default() is False
+
+
+async def test_save_without_sidebar_step_keeps_it_on(
+    hass: HomeAssistant, setup_guards: SetupGuards
+) -> None:
+    """Saving only port changes writes the default (on) explicitly."""
+    entry = await setup_guards()
+    result = await _menu(hass, entry.entry_id)
+    result = await _pick(hass, result["flow_id"], "save")
+    assert result["data"] == {"ports": [], "show_panel": True}

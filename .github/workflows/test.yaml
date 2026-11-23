@@ -15,6 +15,17 @@ jobs:
         with:
           path: integration
 
+      # The cards (custom_components/necromancer/frontend/*.js): a syntax check of
+      # every module, then their logic and elements against DOM stubs; node:test
+      # only, no npm install; ubuntu runners ship Node. Cheap, so it runs first
+      # and fails fast.
+      - name: Frontend tests (node --check, node --test)
+        working-directory: integration
+        run: |
+          node --version
+          for f in custom_components/necromancer/frontend/*.js; do node --check "$f"; done
+          node --test tests/frontend/*.test.mjs
+
       # Home Assistant core version the tests run against: the latest stable
       # release (what users actually run; betas are skipped), resolved at run
       # time so there is nothing to bump. core@dev is deliberately not used -- its
@@ -50,11 +61,16 @@ jobs:
           # `pythonpath` -- core's tests/__init__.py imports it, so it must be
           # installed (same as core's own script/bootstrap does). Releases from
           # before that change don't ship it (helpers still in tests/common.py).
+          # home-assistant-frontend: Necromancer depends on the `frontend`
+          # integration (the cards), whose setup imports hass_frontend; the test
+          # harness skips pip, so it must be here (version pinned by the
+          # package_constraints.txt that requirements_test.txt pulls in).
           extra=()
           for d in packages/pytest-home*assistant; do
             if [ -d "$d" ]; then extra+=(-e "$d"); fi
           done
-          pip install -e . "${extra[@]}" -r requirements_test.txt paho-mqtt
+          pip install -e . "${extra[@]}" -r requirements_test.txt paho-mqtt \
+            home-assistant-frontend -c homeassistant/package_constraints.txt
 
       - name: Link Necromancer into the core test tree
         run: |

@@ -62,6 +62,10 @@ Additional house rules:
 
 - **Logging:** lazy `%`-formatting (never f-strings in log calls), no trailing period, no component name prefix (the logger name already carries it).
 - **Translations:** custom components ship **no `strings.json`** (a Core build-time file) — `translations/en.json` is the source, edited directly, and `translations/de.json` mirrors its keys. Placeholder sets per key must stay consistent, every flow step needs a `description`, and descriptions must contain **no `{…}` braces** except real `description_placeholders` (HA renders config translations via ICU MessageFormat). Service names and descriptions also go into `services.yaml` in English, word for word as in `en.json`: the frontend shows the translations, but the services API (and every agent reading it) only sees `services.yaml`. `test_units.py` checks that both match.
+- **Cards:** vanilla JS modules in `custom_components/necromancer/frontend/` (no build step, no
+  `ha-*` elements besides `ha-card`/`ha-icon`, editors through `getConfigForm`); every import
+  carries the entry module's `?v=` query. A change to an option goes into
+  [`docs/cards.md`](docs/cards.md) and the skill.
 - **Agent skill:** a change to an action, entity, attribute, state, default or the heartbeat endpoint also goes into [`skills/necromancer/SKILL.md`](skills/necromancer/SKILL.md) — AI agents act on what it says.
 
 ## Testing
@@ -76,6 +80,8 @@ short, against a Home Assistant core checkout (CI uses the latest stable release
 - run the **in-process scripts** `tests/test_units.py`, `test_poe.py`, `test_engine.py` and
   `test_integration.py` — each is a plain `python` script with its own `main()`, run with the
   core checkout on `PYTHONPATH`;
+- run the **card tests** `node --test tests/frontend/*.test.mjs` (node:test only, no npm install) and
+  `node --check` on every module in `custom_components/necromancer/frontend/`;
 - pass the pre-commit gates (ruff check/format, `py_compile`, translation symmetry, `hassfest`).
 
 The agent-runnable live checklist is [`docs/arch/AGENT_REGRESSION.md`](./docs/arch/AGENT_REGRESSION.md).
