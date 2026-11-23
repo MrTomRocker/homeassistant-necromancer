@@ -234,7 +234,7 @@ describe("recoveryModel", () => {
   test("a newer failure wins the last-repair row; never repaired says Never", () => {
     const so = guard("pool", { ...SWITCH.attributes, last_recover: ago(5 * 86400), last_fail: ago(2 * 3600), fail_count: 2 });
     const m = recoveryModel(guardInfo(so), null, hassWith(so), "de", { now: NOW });
-    assert.deepEqual([row(m, "last_repair").value, row(m, "last_repair").tone], ["vor 2 h · fehlgeschlagen", "bad"]);
+    assert.deepEqual([row(m, "last_repair").value, row(m, "last_repair").tone], ["vor 2 Std. · fehlgeschlagen", "bad"]);
     assert.equal(row(m, "repairs").value, "0 erfolgreich · 2 fehlgeschlagen");
     const fresh = recoveryModel(guardInfo(SWITCH), null, hassWith(SWITCH), "en", { now: NOW });
     assert.deepEqual([row(fresh, "last_repair").value, row(fresh, "last_repair").tone], ["Never", "idle"]);
@@ -275,7 +275,7 @@ describe("recoveryModel", () => {
     assert.deepEqual(m.rows, []);
     assert.equal(m.auto, null);
     assert.equal(m.repair, null);
-    assert.equal(recoveryModel(guardInfo(NOTIFY), null, { states: {} }, "de").notice, "Nur melden — keine Reparatur");
+    assert.equal(recoveryModel(guardInfo(NOTIFY), null, { states: {} }, "de").notice, "Nur benachrichtigen — keine Reparatur");
   });
 
   test("script and steps", () => {
@@ -341,7 +341,7 @@ describe("recoveryModel", () => {
 
   test("PoE fixed id, last known, restarting port", () => {
     const fixed = poeWs({ port: { ...PORT5, id_source: "static", id_entity: null, id_static: "AP-1", id: "AP-1" } });
-    assert.deepEqual([row(recoveryModel(guardInfo(POE), fixed, hassWith(POE), "en"), "device").sub], ["Fixed id"]);
+    assert.deepEqual([row(recoveryModel(guardInfo(POE), fixed, hassWith(POE), "en"), "device").sub], ["Static label"]);
 
     const lk = poeWs({ match: "last_known", port: { ...PORT5, id: "-", id_norm: null } });
     const m = recoveryModel(guardInfo(POE), lk, hassWith(POE), "de");

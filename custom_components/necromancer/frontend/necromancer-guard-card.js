@@ -543,6 +543,17 @@ export class NecromancerGuardCard extends HTMLElement {
     return this._hass;
   }
 
+  /**
+   * Whether this card may trigger anything: `show_actions` on and an admin
+   * user (design §16: other users only watch — no buttons, no menu actions,
+   * chips and popup inform only). A stub without a user counts as admin.
+   */
+  _canAct() {
+    if (!this._config || !this._config.show_actions) return false;
+    const user = this._hass && this._hass.user;
+    return !(user && user.is_admin === false);
+  }
+
   get _layout() {
     return this._config && this._config.layout === "compact" && !this._expanded ? "compact" : "full";
   }
@@ -604,8 +615,8 @@ export class NecromancerGuardCard extends HTMLElement {
       icon: L("Icon", "Symbol"),
       layout: L("Layout", "Layout"),
       timeline: L("Show 24 h timeline", "Zeitverlauf anzeigen"),
-      show_counters: L("Show counters", "Zähler zeigen"),
-      show_footer: L("Show last event", "Letztes Ereignis zeigen"),
+      show_counters: L("Show counters", "Zähler anzeigen"),
+      show_footer: L("Show last event", "Letztes Ereignis anzeigen"),
       show_actions: L("Show actions", "Aktionen anzeigen"),
     };
     const helpers = {
@@ -613,12 +624,12 @@ export class NecromancerGuardCard extends HTMLElement {
       name: L("Default: the guard's name.", "Standard: der Name des Guards."),
       icon: L("Default: by guard type.", "Standard: nach Guard-Typ."),
       layout: L("Full (default): one card. Compact: one row.", "Voll (Standard): eine Karte. Kompakt: eine Zeile."),
-      timeline: L("Last 24 h: state strip, time axis and the latest changes. Default: off.", "Letzte 24 h: Zustandsstreifen, Zeitachse und die letzten Wechsel. Standard: aus."),
-      row_detail: L("Under the name: the last event (default) or a thin 24 h strip.", "Unter dem Namen: das letzte Ereignis (Standard) oder ein schmaler 24-h-Streifen."),
+      timeline: L("Last 24 h: state strip, time axis and the latest changes. Default: off.", "Letzte 24 Stunden: Zustandsstreifen, Zeitachse und die letzten Wechsel. Standard: aus."),
+      row_detail: L("Under the name: the last event (default) or a thin 24 h strip.", "Unter dem Namen: das letzte Ereignis (Standard) oder ein schmaler 24-Stunden-Streifen."),
       show_counters: L("Successful and failed repairs, under the card.", "Erfolgreiche und fehlgeschlagene Reparaturen, unten auf der Karte."),
       show_actions: L(
         "The state's main button and Snooze, the rest in the ⋮ menu. Off: nothing on the card can be triggered (e.g. a wall tablet).",
-        "Der Hauptknopf des Zustands und Snooze, der Rest im ⋮-Menü. Aus: Auf der Karte lässt sich nichts auslösen (z. B. Wandtablet).",
+        "Der Hauptknopf des Zustands und Schlummern, der Rest im ⋮-Menü. Aus: Auf der Karte lässt sich nichts auslösen (z. B. Wandtablet).",
       ),
     };
     const compact = { field: "layout", value: "compact" };
@@ -775,7 +786,7 @@ export class NecromancerGuardCard extends HTMLElement {
     // the main one and its menu takes snooze.
     const acts = core.actionsFor(info, state, attrs, {
       isAdmin: Boolean(hass.user && hass.user.is_admin),
-      show: cfg.show_actions,
+      show: this._canAct(),
     });
     let ev = cfg.show_footer ? core.footerEvent(info, hass.states, attrs, now, lang, { past: true }) : null;
     // Timeline off (a collapsed row with row_detail "text", a full card
@@ -1079,7 +1090,7 @@ export class NecromancerGuardCard extends HTMLElement {
     const armed = this._confirm.is("auto-chip");
     const word = armed ? t(lang, "action.sure") : t(lang, "chip.auto_off_short");
     // "Show actions" off: information only (the popup says the rest).
-    const live = this._config.show_actions;
+    const live = this._canAct();
     return this._chip({
       tone: "warn",
       icon: "mdi:robot-off",
@@ -1116,7 +1127,7 @@ export class NecromancerGuardCard extends HTMLElement {
         autoArmed: this._confirm.is("rec-auto"),
         repairArmed: this._confirm.is("rec-repair"),
         running: this._running.has("revive"),
-        readOnly: !this._config.show_actions,
+        readOnly: !this._canAct(),
       },
     };
   }
@@ -1192,8 +1203,11 @@ export class NecromancerGuardCard extends HTMLElement {
     const armed = this._confirm.is(id);
     const label = armed ? t(lang, "action.sure") : core.actionLabel(id, lang, autoOn);
     const tip = armed ? t(lang, "action.sure") : core.actionLabel(id, lang, autoOn);
-    // The first pill is the state's main move: a strong fill in the state colour.
-    const cls = `pill accent ${first ? "strong" : "second"} ${armed ? "confirm" : ""}`;
+    // The first pill is the state's main move: a strong fill in the state
+    // colour while something is wrong (a list of healthy guards stays calm:
+    // their main pill is tinted like snooze, so the problems stand out).
+    const quiet = this._ctx && core.isQuiet(this._ctx.state);
+    const cls = `pill accent ${first ? (quiet ? "main" : "strong") : "second"} ${armed ? "confirm" : ""}`;
     const extra = id === "snooze" ? ` data-anchor="pill-snooze" aria-haspopup="menu"` : "";
     const busy = this._running.has(id) ? ` aria-disabled="true"` : "";
     return `<button class="${cls}" data-action="${id}"${extra}${busy} title="${esc(tip)}" aria-label="${esc(tip)}"><ha-icon icon="${core.actionIcon(id, autoOn)}"></ha-icon><span class="label">${esc(label)}</span></button>`;
@@ -1257,7 +1271,7 @@ export class NecromancerGuardCard extends HTMLElement {
     const { info } = this._ctx;
     // "Show actions" off: nothing on this card changes anything (stale markup
     // or a keyboard user cannot get around it either).
-    if (!this._config.show_actions && ["rec-auto", "rec-repair", "auto-chip", "unsnooze", "snooze", "snooze-for", "menu"].includes(id)) return;
+    if (!this._canAct() && ["rec-auto", "rec-repair", "auto-chip", "unsnooze", "snooze", "snooze-for", "menu"].includes(id)) return;
     switch (id) {
       case "row":
         this._toggleExpand();

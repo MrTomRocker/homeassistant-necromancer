@@ -199,7 +199,7 @@
             "period": "Wie oft der Job Erfolg meldet, z. B. 1 Tag für eine nächtliche Sicherung. Mindestens 1 Minute.",
             "local_only": "An (Standard): Nur Absender aus privaten Netzen (LAN, VPNs mit privaten Adressen, dieser Rechner; nicht Tailscales 100.64.x) werden angenommen, andere bekommen 403. Nur ausschalten, wenn ein Absender außerhalb deines Netzes melden muss.",
             "regenerate_token": "Erzeugt eine neue geheime URL. Die alte URL wird mit dem Speichern ungültig (404) — sinnvoll, wenn die URL in falsche Hände geraten ist.",
-            "device_id": "Optional. Verknüpft das eigene Gerät dieses Guards mit dem gewählten Home-Assistant-Gerät, sodass der Guard dort als „verbunden über\" auftaucht. Schaltet außerdem frei, die Integration dieses Geräts nach einer Reparatur neu zu laden."
+            "device_id": "Optional. Verknüpft das eigene Gerät dieses Guards mit dem gewählten Home-Assistant-Gerät, sodass der Guard dort als „verbunden über“ auftaucht. Schaltet außerdem frei, die Integration dieses Geräts nach einer Reparatur neu zu laden."
           }
         },
         "strategy": {
@@ -343,7 +343,7 @@
           }
         },
         "actions": {
-          "title": "Aktionen Aus/Ein",
+          "title": "Aus-/Ein-Aktionen",
           "description": "Führt die Aus-Aktion, wartet, dann die Ein-Aktion aus, wenn das überwachte Gerät ausfällt.",
           "sections": {
             "recovery_action": {
@@ -574,7 +574,7 @@
         "notify": "Nur benachrichtigen",
         "switch": "Schalter aus- und einschalten",
         "action": "Aktion ausführen",
-        "actions": "Aktionen Aus/Ein",
+        "actions": "Aus-/Ein-Aktionen",
         "poe_port": "Auto-PoE (Port automatisch finden)"
       }
     },
@@ -714,35 +714,35 @@
   "issues": {
     "health_entity_missing": {
       "title": "{name}: Health-Entity fehlt",
-      "description": "Der Guard „{name}\" beobachtet `{entity}` — die Entity existiert nicht, der Guard ist blind und kann kein Problem erkennen. Konfiguriere den Guard auf eine existierende Entity um, oder entferne den Guard."
+      "description": "Der Guard „{name}“ beobachtet `{entity}` — die Entity existiert nicht, der Guard ist blind und kann kein Problem erkennen. Konfiguriere den Guard auf eine existierende Entity um, oder entferne den Guard."
     },
     "health_entity_disabled": {
       "title": "{name}: Health-Entity ist deaktiviert",
-      "description": "Der Guard „{name}\" beobachtet `{entity}` — die Entity ist deaktiviert, der Guard ist blind. Aktiviere `{entity}` wieder, oder konfiguriere den Guard auf eine andere Entity um."
+      "description": "Der Guard „{name}“ beobachtet `{entity}` — die Entity ist deaktiviert, der Guard ist blind. Aktiviere `{entity}` wieder, oder konfiguriere den Guard auf eine andere Entity um."
     },
     "health_template_blind": {
       "title": "{name}: Health Template liest nur fehlende Entities",
-      "description": "Alle Entities, die das Health Template von „{name}\" liest, fehlen oder sind deaktiviert — der Guard ist blind. Konfiguriere das Health Template des Guards auf existierende Entities um."
+      "description": "Alle Entities, die das Health Template von „{name}“ liest, fehlen oder sind deaktiviert — der Guard ist blind. Konfiguriere das Health Template des Guards auf existierende Entities um."
     },
     "health_template_missing_entity": {
       "title": "{name}: Health Template referenziert eine fehlende Entity",
-      "description": "Das Health Template von „{name}\" referenziert `{entity}`, die nicht existiert — das Template defaultet sie, der Guard liest also einen Wert, der das Gerät evtl. nicht widerspiegelt, und kann auf fehlenden Daten recovern/eskalieren. Lege die Entity an, oder behandle den Fehlwert im Template (z.B. mit `has_value()`)."
+      "description": "Das Health Template von „{name}“ referenziert `{entity}`, die nicht existiert — das Template defaultet sie, der Guard liest also einen Wert, der das Gerät evtl. nicht widerspiegelt, und kann auf fehlenden Daten recovern/eskalieren. Lege die Entity an, oder behandle den Fehlwert im Template (z.B. mit `has_value()`)."
     },
     "recovery_action_invalid": {
       "title": "{name}: Reparatur kann nicht laufen",
-      "description": "Die Reparatur von „{name}\" kann nicht laufen: {error}. Korrigiere die Reparatur des Guards — ein gültiger Service / eine gültige Aktion, oder (bei Auto-PoE) mindestens ein konfigurierter Port."
+      "description": "Die Reparatur von „{name}“ kann nicht laufen: {error}. Korrigiere die Reparatur des Guards — ein gültiger Service / eine gültige Aktion, oder (bei Auto-PoE) mindestens ein konfigurierter Port."
     },
     "link_device_missing": {
       "title": "{name}: zugewiesenes Gerät ist weg",
-      "description": "Das Gerät, das „{name}\" zugewiesen ist, existiert nicht mehr. Der Guard überwacht und repariert weiterhin, kann nach einer Reparatur aber die Integration des Geräts nicht neu laden. Konfiguriere den Guard neu und wähle das Gerät erneut, oder entferne die Zuweisung."
+      "description": "Das Gerät, das „{name}“ zugewiesen ist, existiert nicht mehr. Der Guard überwacht und repariert weiterhin, kann nach einer Reparatur aber die Integration des Geräts nicht neu laden. Konfiguriere den Guard neu und wähle das Gerät erneut, oder entferne die Zuweisung."
     },
     "port_no_id": {
-      "title": "PoE-Port „{label}\" hat keine Geräte-ID",
-      "description": "Der PoE-Port „{label}\" hat weder ein Statisches Label noch eine id-Entity — er kann keinem Gerät zugeordnet werden, jeder Guard, der ihn erwartet, bleibt blockiert. Öffne die Integrations-Optionen, bearbeite Port „{label}\" und setze entweder ein Statisches Label oder eine id-Entity (ein State oder ein Attribut)."
+      "title": "PoE-Port „{label}“ hat keine Geräte-ID",
+      "description": "Der PoE-Port „{label}“ hat weder ein Statisches Label noch eine id-Entity — er kann keinem Gerät zugeordnet werden, jeder Guard, der ihn erwartet, bleibt blockiert. Öffne die Integrations-Optionen, bearbeite Port „{label}“ und setze entweder ein Statisches Label oder eine id-Entity (ein State oder ein Attribut)."
     },
     "port_entity_missing": {
-      "title": "PoE-Port „{label}\": eine Entity fehlt",
-      "description": "Der PoE-Port „{label}\" referenziert `{entity}` — die Entity existiert nicht, sein Power-Cycle kann nicht laufen. Öffne die Integrations-Optionen, bearbeite Port „{label}\" und zeige mit Actuator / Status-Entity auf eine existierende Entity."
+      "title": "PoE-Port „{label}“: eine Entity fehlt",
+      "description": "Der PoE-Port „{label}“ referenziert `{entity}` — die Entity existiert nicht, sein Power-Cycle kann nicht laufen. Öffne die Integrations-Optionen, bearbeite Port „{label}“ und zeige mit Actuator / Status-Entity auf eine existierende Entity."
     }
   }
 }

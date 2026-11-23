@@ -22,7 +22,8 @@ custom cards. They follow your Home Assistant theme (light and dark), your profi
 ### Everything at a glance — the sidebar page
 
 Open **Necromancer** in the sidebar. No setup: every guard, problems first, each row with its
-last 24 hours as a coloured strip. Tap a count to see only those guards, tap a row to open the
+last 24 hours as a coloured strip. Heartbeat guards (jobs) have their own tab, so each guard is in
+exactly one place; a tab shows how many of its guards need attention. Tap a count to see only those guards, tap a row to open the
 full card in place. The gear (top right) holds your own settings — see
 [The sidebar page](#the-sidebar-page).
 
@@ -145,7 +146,8 @@ Two pills, always in the same places. On the left the state's main move:
 | snoozed | *Wake up* |
 | healthy | *Heartbeat* for a heartbeat guard, else *Check now* |
 
-On the right ***Snooze*** (30 min, 1 hour, 4 hours, 1 day) while it applies. Everything else is in
+On the right ***Snooze*** (30 min, 1 hour, 4 hours, 1 day) while it applies. On a healthy guard
+the main button is tinted instead of filled, so a calm list stays calm and problems stand out. Everything else is in
 the **⋮ menu**, in this order: *Revive* (on a snoozed guard it also ends the snooze), *Reset*,
 *Heartbeat*, *Check now*, then after a rule *Copy heartbeat URL* and *Edit* (admins only) and
 *Details*.
@@ -157,6 +159,9 @@ the **⋮ menu**, in this order: *Revive* (on a snoozed guard it also ends the s
 - A narrow row shows only the main button, as an icon; its menu then has *Snooze* too.
 - Auto-recovery is switched in the recovery popup (or with a double tap on *Auto off*), not
   from a button.
+- **Only admins act.** Other users only watch: no buttons, no menu actions, no maintenance mode;
+  the chips and the recovery popup only inform. (This is the user interface; Home Assistant itself
+  lets every user call services, e.g. in automations.)
 
 ## Recovery popup
 
@@ -179,8 +184,10 @@ phone the popup is a bottom sheet.
 
 <img width="360" alt="The sidebar page on a phone" src="../img/cards/panel-phone.png">
 
-Counts per state (tap = only those), tabs *Guards*, *Heartbeat* and *PoE* (when ports exist), a
-search field and the maintenance mode (snooze all guards for a while, wake all). The gear holds
+Counts per state for the open tab (tap = only those), tabs *Guards*, *Heartbeat* (when heartbeat
+guards exist: the jobs, while *Guards* shows the rest; both with a badge counting their guards that
+need attention) and *PoE* (admins, when ports exist), a search field and, for admins, the
+maintenance mode (snooze all guards for a while, wake all). With only one tab the tab bar is gone. The gear holds
 settings per user, stored in your profile on every device:
 
 | Setting | Default | |
@@ -335,9 +342,9 @@ app, reset the frontend cache in the app's settings.
 **"Custom element doesn't exist: necromancer-guard-card".** The Necromancer integration is not
 loaded (no entry, or the entry failed to set up) — the cards come with it.
 
-**Do non-admin users see everything?** They see the guards and can use the buttons. *Copy
-heartbeat URL*, *Edit* and the PoE card are for admins only; the recovery popup hides entities
-the user may not read.
+**What do non-admin users see?** Everything about the guards — states, values, timelines, the
+recovery popup — but no buttons: only admins act. The PoE card and tab are for admins only, and
+the recovery popup hides entities the user may not read.
 
 **I used the dashboard from `docs/dashboard` before.** It needed six other custom cards and is
 gone; replace it with a guards card (or just use the sidebar page). The entities and services

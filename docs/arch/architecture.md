@@ -1040,7 +1040,16 @@ guard, else `reset`; suspect/blind → `revive` when it can repair, else `ping`,
 otherwise `ping` or `check`); `snooze` is the second pill while it applies; everything else is
 the menu with `url`/`edit`/`details` last. Auto-recovery is not an action (its chip and the
 recovery popup switch it). `show_actions: false` returns no actions, and the card then also
-makes its chips and the popup read-only. There are no per-action options.
+makes its chips and the popup read-only; a non-admin user is treated the same way (observe only —
+an interface rule, the services stay callable). There are no per-action options. On a healthy
+guard the main pill is tinted, not filled.
+
+**Sidebar tabs.** With heartbeat guards present, *Guards* lists the others (`filter: {types:
+[recovery, notify]}`) and *Heartbeat* the jobs, so each guard is in one tab; the hero's counts
+follow the open tab, and *Guards* and *Heartbeat* carry a badge with their attention count; a
+start on an empty *Guards* tab (heartbeat-only install) opens *Heartbeat*. The maintenance mode
+acts on all guards (admins only, not with *Show actions* off). *PoE* needs a port
+(and an admin: `poe/ports` is admin-only). A single tab hides the tab bar.
 
 **Editors.** Every card has a static `getConfigForm()` — Home Assistant renders its own form from
 the schema (the supported way; no `ha-*` element is created by the cards). Layout-dependent

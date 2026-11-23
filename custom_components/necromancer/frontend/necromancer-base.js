@@ -169,29 +169,29 @@ const UI_I18N = {
     "ui.timeline_cards": "Show 24 h timeline",
   },
   de: {
-    "ui.expand": "Details zeigen",
+    "ui.expand": "Details anzeigen",
     "ui.collapse": "Details ausblenden",
-    "ui.quiet_show": "Zeigen",
+    "ui.quiet_show": "Anzeigen",
     "ui.quiet_hide": "Ausblenden",
     "ui.all_quiet": "Alles ruhig",
-    "ui.clear_filter": "Alle zeigen",
+    "ui.clear_filter": "Alle anzeigen",
     "ui.poe_title": "PoE-Ports",
     "ui.poe_admin": "Nur Administratoren sehen die PoE-Ports.",
     "ui.poe_error": "PoE-Ports konnten nicht geladen werden.",
-    "ui.loading": "Lade …",
+    "ui.loading": "Wird geladen …",
     "ui.close": "Schließen",
     "ui.connected": "Angeschlossen",
-    "ui.switch": "Switch",
+    "ui.switch": "Schalter",
     "ui.status": "Status",
     "ui.port": "Port {n}",
     "ui.ports_one": "{n} Port",
     "ui.ports": "{n} Ports",
     "ui.restart_short": "Neustart",
-    "ui.wake_confirm": "Alle wecken?",
+    "ui.wake_confirm": "Alle aufwecken?",
     "ui.done": "Erledigt",
     "ui.counts_label": "Guards je Zustand",
     "ui.settings_saved": "Einstellungen gespeichert",
-    "ui.search_label": "Guards nach Name suchen",
+    "ui.search_label": "Guards nach Namen suchen",
     "ui.ctx.escalated": "Seit {time}",
     "ui.ctx.suspect": "Problem seit {time}",
     "ui.ctx.blind": "Kein Gesundheitssignal seit {time}",
@@ -199,13 +199,13 @@ const UI_I18N = {
     "ui.ctx.verify": "Prüfung läuft seit {time}",
     "ui.ctx.cooldown": "Repariert um {time}",
     "ui.ctx.auto_off": "Auto-Reparatur aus",
-    "ui.ctx.notify_only": "Nur Benachrichtigung",
+    "ui.ctx.notify_only": "Nur benachrichtigen",
     "ui.ctx.repairs_one": "1 Reparatur",
     "ui.ctx.repairs": "{n} Reparaturen",
     "ui.ctx.last": "zuletzt {time}",
     "ui.ctx.fails": "{n} fehlgeschlagen",
     "ui.ctx.no_repairs": "Noch keine Reparatur",
-    "ui.ctx.last_hb": "Letzter Heartbeat um {time}",
+    "ui.ctx.last_hb": "Letztes Lebenszeichen um {time}",
     "ui.ctx.every": "erwartet alle {period}",
     "ui.row_detail": "Zeile zeigt",
     "ui.row_detail.text": "Text",
@@ -366,7 +366,8 @@ export function withPeriodFormatted(text, period) {
   const s = String(text ?? "");
   const p = Number(period);
   if (!(p > 0)) return s;
-  return s.replace(PERIOD_VALUE, (_m, lead) => `${lead}${core.formatDuration(p, /^erwartet/i.test(lead) ? "de" : "en")}`);
+  // "… alle 1 Std. 30 Min." + the sentence's full stop: no double period.
+  return s.replace(PERIOD_VALUE, (_m, lead) => `${lead}${core.formatDuration(p, /^erwartet/i.test(lead) ? "de" : "en")}`).replace(/\.\.(?!\.)/g, ".");
 }
 
 /**

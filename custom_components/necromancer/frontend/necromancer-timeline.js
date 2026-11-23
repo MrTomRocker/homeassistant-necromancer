@@ -78,20 +78,22 @@ const TL_I18N = {
     "tl.setting": "Show 24 h timeline",
     "tl.option": "24 h timeline",
     "tl.more": "Show {n} more changes",
+    "tl.more_one": "Show 1 more change",
   },
   de: {
-    "tl.title": "Letzte 24 h",
+    "tl.title": "Letzte 24 Std.",
     "tl.hint": "Zustand der letzten 24 Stunden, rechts das Neueste",
     "tl.aria": "Zustand der letzten 24 Stunden: {summary}",
     "tl.aria_loading": "Zustand der letzten 24 Stunden: wird geladen",
-    "tl.no_changes": "Keine Änderung in 24 h",
-    "tl.live_only": "Kein Verlauf verfügbar: Änderungen seit dem Öffnen der Seite",
+    "tl.no_changes": "Kein Wechsel in 24 Stunden",
+    "tl.live_only": "Kein Verlauf verfügbar: Wechsel seit dem Öffnen der Seite",
     "tl.now": "jetzt",
-    "tl.start": "−24 h",
-    "tl.mid": "−12 h",
+    "tl.start": "−24 Std.",
+    "tl.mid": "−12 Std.",
     "tl.setting": "Zeitverlauf anzeigen",
-    "tl.option": "Zeitverlauf (24 h)",
-    "tl.more": "{n} weitere Wechsel zeigen",
+    "tl.option": "Zeitverlauf (24 Std.)",
+    "tl.more": "{n} weitere Wechsel anzeigen",
+    "tl.more_one": "1 weiteren Wechsel anzeigen",
   },
 };
 
@@ -629,7 +631,7 @@ export function sectionHtml(id, entry, now, lang, opts = {}) {
       .join("");
     if (few && rows.length > few) {
       const k = rows.length - few;
-      const label = tlText(lang, "tl.more", { n: k });
+      const label = tlText(lang, k === 1 ? "tl.more_one" : "tl.more", { n: k });
       items += `<li class="tl-more"><button type="button" data-action="tl-more" title="${esc(label)}" aria-label="${esc(label)}">+${k}</button></li>`;
     }
     log = items ? `<ol class="tl-log">${items}</ol>` : `<div class="tl-none">${esc(tlText(lang, "tl.no_changes"))}</div>`;

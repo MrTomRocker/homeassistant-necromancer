@@ -233,33 +233,36 @@ export function normalizeConfig(config) {
   });
 }
 
+// Rows in the card picker's preview.
+const PICKER_ROWS = 4;
+
 const FORM_LABELS = {
   title: { en: "Title", de: "Titel" },
   sort: { en: "Sort order", de: "Sortierung" },
   display: { en: "Display", de: "Darstellung" },
-  collapse_ok: { en: "Fold quiet guards into a group", de: "Ruhige Guards zusammenklappen" },
-  show_counters: { en: "Show counters", de: "Zähler zeigen" },
-  show_footer: { en: "Show last event", de: "Letztes Ereignis zeigen" },
+  collapse_ok: { en: "Fold quiet guards into a group", de: "Ruhige Guards einklappen" },
+  show_counters: { en: "Show counters", de: "Zähler anzeigen" },
+  show_footer: { en: "Show last event", de: "Letztes Ereignis anzeigen" },
   timeline: { en: "Show 24 h timeline", de: "Zeitverlauf anzeigen" },
   show_actions: { en: "Show actions", de: "Aktionen anzeigen" },
   bulk: { en: "Bulk actions (only without filter)", de: "Sammelaktionen (nur ohne Filter)" },
 };
 
 const FORM_HELPERS = {
-  title: { en: "Default: All guards.", de: "Standard: Alle Guards." },
+  title: { en: "Default: Necromancer.", de: "Standard: Necromancer." },
   sort: { en: "Default: problems first, then name.", de: "Standard: Probleme zuerst, dann Name." },
   display: { en: "List (default): one row per guard. Cards: a full card per guard.", de: "Liste (Standard): eine Zeile je Guard. Karten: eine volle Karte je Guard." },
   row_detail: {
     en: "Under each name: a thin 24 h strip (default) or the last event. With Cards: only the rows of the folded quiet group.",
-    de: "Unter jedem Namen: ein schmaler 24-h-Streifen (Standard) oder das letzte Ereignis. Bei Karten: nur die Zeilen der zugeklappten ruhigen Gruppe.",
+    de: "Unter jedem Namen: ein schmaler 24-Stunden-Streifen (Standard) oder das letzte Ereignis. Bei Karten: nur die Zeilen der eingeklappten ruhigen Gruppe.",
   },
   timeline: {
     en: "Cards: the last 24 h (strip, time axis, latest changes) on every full card. Default: off.",
-    de: "Karten: die letzten 24 h (Streifen, Zeitachse, letzte Wechsel) auf jeder vollen Karte. Standard: aus.",
+    de: "Karten: die letzten 24 Stunden (Streifen, Zeitachse, letzte Wechsel) auf jeder vollen Karte. Standard: aus.",
   },
   show_actions: {
     en: "Each guard's main button and Snooze, the rest in its ⋮ menu. Off: nothing can be triggered.",
-    de: "Je Guard der Hauptknopf und Snooze, der Rest im ⋮-Menü. Aus: Nichts lässt sich auslösen.",
+    de: "Je Guard der Hauptknopf und Schlummern, der Rest im ⋮-Menü. Aus: Nichts lässt sich auslösen.",
   },
   bulk: { en: "Filter, a fixed list of guards and the value per guard: in the YAML editor, see the docs.", de: "Filter, feste Guard-Liste und Wert je Guard: im YAML-Editor, siehe Doku." },
 };
@@ -442,7 +445,16 @@ export class NecromancerGuardsCard extends HTMLElement {
     return configForm(docLang());
   }
 
+  /** Whether this card is the preview in HA's card picker ("Add card"). */
+  _inPicker() {
+    const root = this.getRootNode && this.getRootNode();
+    return Boolean(root && root.host && root.host.tagName === "HUI-CARD-PICKER");
+  }
+
   connectedCallback() {
+    // Built before it was attached (HA sets hass first): now that it knows it
+    // sits in the card picker, rebuild as the short sample.
+    if (this._inPicker() && this._hass && this._config) this._update(true);
     if (!this._io && typeof IntersectionObserver !== "undefined") {
       this._io = new IntersectionObserver((entries) => {
         const visible = entries.some((e) => e.isIntersecting);
@@ -594,8 +606,14 @@ export class NecromancerGuardsCard extends HTMLElement {
     const order = newestEscalationsFirst(core.sortGuards(shown, hass, cfg.sort, lang), hass, cfg.sort);
     // Fold the quiet ones, except when the user asked for them (search, chip).
     const fold = cfg.collapse_ok && !narrowed;
-    const main = fold ? order.filter((id) => !core.isQuiet(hass.states[id] && hass.states[id].state)) : order;
-    const quiet = fold ? order.filter((id) => core.isQuiet(hass.states[id] && hass.states[id].state)) : [];
+    let main = fold ? order.filter((id) => !core.isQuiet(hass.states[id] && hass.states[id].state)) : order;
+    let quiet = fold ? order.filter((id) => core.isQuiet(hass.states[id] && hass.states[id].state)) : [];
+    // In HA's card picker a short sample is enough (all guards meant endless
+    // scrolling there); the card itself, once added, lists everything.
+    if (this._inPicker()) {
+      main = main.slice(0, PICKER_ROWS);
+      quiet = [];
+    }
     const quietShown = this._quietOpen ? quiet : [];
 
     this._syncCards(main, quietShown);
@@ -641,7 +659,7 @@ export class NecromancerGuardsCard extends HTMLElement {
     const title = cfg.title || core.t(lang, "panel.title");
     if (el.title.textContent !== title) el.title.textContent = title;
     const total = core.t(lang, counts.total === 1 ? "count.total_one" : "count.total", { n: counts.total });
-    const sub = counts.attention ? `${total} · ${core.t(lang, "count.problems", { n: counts.attention })}` : `${total} · ${t(lang, "ui.all_quiet")}`;
+    const sub = counts.attention ? `${total} · ${core.t(lang, counts.attention === 1 ? "count.problems_one" : "count.problems", { n: counts.attention })}` : `${total} · ${t(lang, "ui.all_quiet")}`;
     if (el.sub.textContent !== sub) el.sub.textContent = sub;
     const ph = core.t(lang, "search.placeholder");
     if (el.input.placeholder !== ph) {
@@ -664,7 +682,9 @@ export class NecromancerGuardsCard extends HTMLElement {
     // Bulk actions hit every guard, visible or not: only when the card shows
     // all of them (no filter, no fixed list, no narrowing from the header).
     let bulk = "";
-    if (cfg.bulk !== false && cfg.show_actions !== false && core.isUnfiltered(cfg) && !this._view.state && !this._view.search && counts.total) {
+    const user = this._hass && this._hass.user;
+    const admin = !(user && user.is_admin === false);
+    if (cfg.bulk !== false && cfg.show_actions !== false && admin && core.isUnfiltered(cfg) && !this._view.state && !this._view.search && counts.total) {
       bulk += `<button class="pill snz strong" data-action="snooze-all" data-anchor="bulk-snooze" aria-haspopup="menu"><ha-icon icon="mdi:sleep"></ha-icon><span>${esc(core.t(lang, "action.snooze_all"))}</span><ha-icon icon="mdi:chevron-down"></ha-icon></button>`;
       if (counts.snoozed > 0) {
         const armed = this._confirm.is("unsnooze_all");

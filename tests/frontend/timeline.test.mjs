@@ -158,7 +158,7 @@ describe("texts", () => {
       assert.notEqual(tlText("de", key), key, key);
     }
     assert.equal(tlText("en", "tl.title"), "Last 24 h");
-    assert.equal(tlText("de-DE", "tl.title"), "Letzte 24 h");
+    assert.equal(tlText("de-DE", "tl.title"), "Letzte 24 Std.");
     assert.equal(tlText("de", "tl.setting"), "Zeitverlauf anzeigen");
     assert.equal(tlText("fr", "tl.setting"), "Show 24 h timeline");
     // Anything else falls back to the core texts.
@@ -176,7 +176,7 @@ describe("texts", () => {
       ["ok", "escalated"],
     );
     assert.equal(summaryText(pts, NOW, "en"), "Healthy 21 h, Escalated 3 h");
-    assert.equal(summaryText(pts, NOW, "de"), "Gesund 21 h, Eskaliert 3 h");
+    assert.equal(summaryText(pts, NOW, "de"), "Gesund 21 Std., Eskaliert 3 Std.");
     assert.equal(summaryText([], NOW, "en"), "No change in 24 h");
   });
 });
@@ -519,11 +519,11 @@ describe("markup", () => {
     assert.match(en, /<time>11:00<\/time><span class="tl-st">Healthy</);
     assert.match(en, /<time>08:00<\/time><span class="tl-st">Escalated</);
     const de = sectionHtml("sensor.a_status", entry, NOW, "de", { timeZone: "UTC", timeFormat: "24" });
-    assert.match(de, /Letzte 24 h/);
+    assert.match(de, /Letzte 24 Std./);
     assert.match(de, />jetzt</);
     assert.match(de, /Eskaliert/);
     const quiet = sectionHtml("sensor.a_status", { loaded: true, history: true, points: [{ s: "ok", t: at(48) }] }, NOW, "de");
-    assert.match(quiet, /Keine Änderung in 24 h/);
+    assert.match(quiet, /Kein Wechsel in 24 Stunden/);
     const loading = sectionHtml("sensor.a_status", { loaded: false, points: [] }, NOW, "en");
     assert.match(loading, /aria-busy="true"/);
     assert.match(loading, /skel/);
@@ -629,7 +629,7 @@ describe("sectionHtml: folded transitions", () => {
     const all = sectionHtml("sensor.x", entry, NOW, "en", { n: 4, few: 2, all: true, timeZone: "UTC" });
     assert.ok(!all.includes("tl-x") && !all.includes("tl-more\""));
     const de = sectionHtml("sensor.x", entry, NOW, "de", { n: 4, few: 2, timeZone: "UTC" });
-    assert.match(de, /2 weitere Wechsel zeigen/);
+    assert.match(de, /2 weitere Wechsel anzeigen/);
     const none = sectionHtml("sensor.x", entry, NOW, "en", { n: 4, timeZone: "UTC" });
     assert.ok(!none.includes("tl-more\"") && !none.includes("tl-x"));
   });
