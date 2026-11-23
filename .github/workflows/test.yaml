@@ -24,7 +24,7 @@ jobs:
         run: |
           node --version
           for f in custom_components/necromancer/frontend/*.js; do node --check "$f"; done
-          node --test tests/frontend/
+          node --test tests/frontend/*.test.mjs
 
       # Home Assistant core version the tests run against: the latest stable
       # release (what users actually run; betas are skipped), resolved at run

@@ -80,7 +80,7 @@ short, against a Home Assistant core checkout (CI uses the latest stable release
 - run the **in-process scripts** `tests/test_units.py`, `test_poe.py`, `test_engine.py` and
   `test_integration.py` — each is a plain `python` script with its own `main()`, run with the
   core checkout on `PYTHONPATH`;
-- run the **card tests** `node --test tests/frontend/` (node:test only, no npm install) and
+- run the **card tests** `node --test tests/frontend/*.test.mjs` (node:test only, no npm install) and
   `node --check` on every module in `custom_components/necromancer/frontend/`;
 - pass the pre-commit gates (ruff check/format, `py_compile`, translation symmetry, `hassfest`).
 

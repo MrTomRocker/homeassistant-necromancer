@@ -3,7 +3,7 @@
 // attributes plus the `necromancer/guard/recovery` WS answer; the new
 // guardInfo fields (targetEntity, scriptEntity, driverSteps);
 // footerEvent's opt-in past wording; loadGuardRecovery's WS call.
-// Run with `node --test tests/frontend/`.
+// Run with `node --test tests/frontend/*.test.mjs`.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";

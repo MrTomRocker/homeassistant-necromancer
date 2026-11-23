@@ -1,4 +1,4 @@
-// Logic tests for the card core (design §12): run with `node --test tests/frontend/`.
+// Logic tests for the card core (design §12): run with `node --test tests/frontend/*.test.mjs`.
 // No dependencies: node:test + node:assert only.
 
 import { test, describe } from "node:test";

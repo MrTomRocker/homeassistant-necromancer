@@ -2,7 +2,7 @@
 // (mainValue rich + entityValue) and the PoE id mapping (poePortRows
 // mapping + formatPortId). Without the opt-in the plain results stay
 // unchanged, which the last tests pin.
-// Run with `node --test tests/frontend/`.
+// Run with `node --test tests/frontend/*.test.mjs`.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";

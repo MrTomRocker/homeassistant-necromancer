@@ -79,7 +79,7 @@ on HA's native test harness** (`tests/suite/`, 233 tests) that automates Level 2
 in-process — see §3. In a core checkout it is linked to `tests/necromancer/` (under
 `tests/` but not `tests/components/`, so only core's `tests/conftest.py` applies) and
 run via `pytest tests/necromancer/`, as CI does. The cards' JavaScript has its own
-logic level, **`tests/frontend/*.test.mjs`** (`node --test tests/frontend/`, node:test +
+logic level, **`tests/frontend/*.test.mjs`** (`node --test tests/frontend/*.test.mjs`, node:test +
 node:assert only, no npm install; CI runs it first, together with `node --check` of the card
 module): `core.test.mjs` covers the pure functions of `frontend/necromancer-core.js` (type
 detection, the action matrix per type/state/admin, status line, main value, footer event,
